@@ -151,6 +151,26 @@ was before.
   The spot and the layer ride in the save (`plant_x`, `plant_z`); older saves
   read the default spot, AMONG. The snail is not placeable - it goes where
   the film is.
+- **The festival shelf (2026-09-18, Strato: two tanks gifted at a bass
+  music festival).** Four more items, on the shop's second page (three rows
+  to a shelf; MORE, between HOW TO EARN and CLOSE, turns it and wraps):
+  the LASER RIG (60) - hung under the surface at the keeper's x, three
+  lenses that are dark lenses by day and, with the light out, throw green
+  / magenta / cyan beams to the floor on their own slow pendulums with a
+  lit patch of sand where each lands; the BASS STACK (70) - a cabinet on
+  the sand, the cone kicks at `BASS_BPM` 140 with a ripple running out and
+  every `BASS_DROP_BEATS` (16) the drop moves `BASS_DROP_PUFFS` (3) free
+  bubbles to the cone (`bass_tick`, tank.c; `bass_drop_at` is not saved -
+  a boot drops at once); GLOW STICKS (30) - four kandi-coloured sticks
+  fanned on the sand, pastel by day, lit with a halo and a slow pulse after
+  dark; the TOTEM (45) - a pole with a glowing alien head and two ribbons
+  waving in the current. All four are placeable (`tank_decor_*`, one
+  slot per item now: `decor_x[]` / `decor_z[]`, the rig `tank_decor_hangs`),
+  and the save carries every spot in a fixed 8-slot tail (`decor_x` /
+  `decor_z1`, the plant's slot duplicating its 09-16 fields so an older
+  save still reads it). The lights ignore the night dim (`lit` contexts in
+  render.c): the tank's night is when the rig comes on. Nothing here
+  reaches the fish - no cover, no film, no stress; set dressing only.
 - Dollars earned during play show as a small "+N" toast over the live tank.
 
 ## IMU (motion)

@@ -317,6 +317,145 @@ static void draw_snail(ctx_t *c, const tank_t *t, bool upright_pass) {
                                  t->snail_heading - 1.5708f);   /* the art faces down: turn it to the heading */
 }
 
+/* ---- the festival shelf (2026-09-18): set dressing from the shop ----
+ * Four pieces the keeper places like the plant (tank_decor_x / _z). Solid
+ * bodies take the night dim like everything else; the LIGHTS do not - a
+ * `lit` copy of the context at dim 1 draws the beams, the glow and the
+ * emblem, so the tank's night is when the rig comes on. Each piece is
+ * wrapped in the fish's bounding-box trick by render_tank so its patch gets
+ * the vignette back (DYN_RECT); the beams' box is tall and thin. Costs on
+ * the device: the beams are the only per-row work (3 x ~340 rows, one blend
+ * each with a pre-dimmed colour), the rest is a few small ellipses. */
+#define FLOOR_Y (TANK_H - 16)
+/* a 1 px line by DDA, one pre-dimmed colour, alpha a; `soft` adds a faint
+ * pixel either side across the minor axis (a beam's halo) */
+static void line_blend(ctx_t *c, float x0, float y0, float x1, float y1, const src_t *s, int a, bool soft) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float ad = fabsf(dx) > fabsf(dy) ? fabsf(dx) : fabsf(dy);
+    int n = (int)ad + 1;
+    float sx = dx / n, sy = dy / n, x = x0, y = y0;
+    bool steep = fabsf(dy) > fabsf(dx);
+    for (int i = 0; i <= n; i++, x += sx, y += sy) {
+        int ix = (int)(x + 0.5f), iy = (int)(y + 0.5f);
+        px_blend_s(c, ix, iy, s, a);
+        if (soft) {
+            if (steep) { px_blend_s(c, ix - 1, iy, s, a / 3); px_blend_s(c, ix + 1, iy, s, a / 3); }
+            else       { px_blend_s(c, ix, iy - 1, s, a / 3); px_blend_s(c, ix, iy + 1, s, a / 3); }
+        }
+    }
+}
+/* a ring: `n` dots on an ellipse (the bass stack's ripple) */
+static void ring_blend(ctx_t *c, float cx, float cy, float rx, float ry, const src_t *s, int a) {
+    int n = (int)(rx * 1.6f) + 12;
+    for (int i = 0; i < n; i++) {
+        float u = i * (TAU / n);
+        px_blend_s(c, (int)(cx + fast_sin(u + TAU * 0.25f) * rx), (int)(cy + fast_sin(u) * ry), s, a);
+    }
+}
+/* the laser rig: a bar hung just under the surface, three emitters. By day
+ * they are three dark lenses; with the light out each throws a beam to the
+ * floor that sweeps on its own slow pendulum, breathes, and lights the sand
+ * where it lands. Green, magenta, cyan: the club palette. */
+static void draw_laser(ctx_t *c, const tank_t *t) {
+    static const uint32_t col[3] = { 0x39ff5a, 0xff3ad6, 0x3ae0ff };
+    float lx = tank_decor_x(t, SD_IDX_LASER);
+    const int bar_y = 4, bar_h = 7;
+    src_t body = src_color(0x1c1c26, c->dim), edge = src_color(0x3c3c4e, c->dim);
+    for (int y = bar_y; y < bar_y + bar_h; y++) span(c, (int)lx - LASER_HALF_W, (int)lx + LASER_HALF_W, y, y == bar_y ? &edge : &body, 255);
+    for (int i = 0; i < 3; i++) {                        /* the lenses */
+        float ex = lx + (i - 1) * 14;
+        src_t lens = src_color(t->night ? col[i] : 0x0a0a10, t->night ? 1.0f : c->dim);
+        for (int y = bar_y + bar_h; y < bar_y + bar_h + 3; y++) span(c, (int)ex - 2, (int)ex + 1, y, &lens, 255);
+    }
+    if (!t->night) return;
+    ctx_t lit = *c; lit.dim = 1.0f;
+    for (int i = 0; i < 3; i++) {
+        float ex = lx + (i - 1) * 14, ey = bar_y + bar_h + 3;
+        float swing = fast_sin(t->clock * (0.45f + 0.21f * i) + i * 2.1f) * 0.42f;      /* the pendulum: floor px per px of drop, each its own tempo */
+        float fx = ex + swing * (FLOOR_Y - ey);
+        float breathe = 0.72f + 0.28f * fast_sin(t->clock * 5.0f + i * 1.3f);
+        src_t s = src_color(col[i], 1.0f);
+        line_blend(&lit, ex, ey, fx, FLOOR_Y, &s, (int)(190 * breathe), true);
+        fill_ellipse(&lit, fx, FLOOR_Y + 1, 9, 2.5f, col[i], (int)(90 * breathe));           /* the sand it lands on */
+    }
+}
+/* the bass stack: a cabinet on the sand with one big driver. The cone
+ * kicks on every beat (BASS_BPM) and a ripple runs out from it; the drop
+ * (tank.c shakes the bubbles) throws a double ring. A red LED on the
+ * cabinet blinks the beat; at night the ripples are lit. */
+static void draw_bass(ctx_t *c, const tank_t *t) {
+    float bx = tank_decor_x(t, SD_IDX_BASS);
+    const int x0 = (int)bx - BASS_HALF_W, x1 = (int)bx + BASS_HALF_W, top = FLOOR_Y - 30;
+    src_t body = src_color(0x181820, c->dim), edge = src_color(0x34343f, c->dim), grille = src_color(0x24242e, c->dim);
+    for (int y = top; y <= FLOOR_Y; y++) span(c, x0, x1, y, (y == top || y == FLOOR_Y) ? &edge : &body, 255);
+    px_blend_s(c, x0, top, &body, 255); px_blend_s(c, x1, top, &body, 255);          /* rounded corners */
+    for (int y = top + 2; y < FLOOR_Y - 1; y += 2) span(c, x0 + 2, x1 - 2, y, &grille, 120);   /* the cloth */
+    float beat = fmodf(t->clock, BASS_BEAT_S) / BASS_BEAT_S;                          /* 0 on the kick, 1 before the next */
+    float kick = (1 - beat) * (1 - beat);
+    float cx = bx, cy = FLOOR_Y - 15, r = 9 + 2.2f * kick;
+    fill_ellipse(c, cx, cy, r + 1.5f, r + 1.5f, 0x3a3a48, 255);                        /* the surround */
+    fill_ellipse(c, cx, cy, r, r, 0x0c0c12, 255);                                      /* the cone */
+    fill_ellipse(c, cx, cy, 3 + kick, 3 + kick, 0x585868, 255);                        /* the dust cap */
+    bool drop = t->bass_drop_at - t->clock > BASS_DROP_BEATS * BASS_BEAT_S - 1.2f;    /* just dropped */
+    ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
+    src_t rip = src_color(t->night ? 0xff3ad6 : 0x9fd8e2, lit.dim);
+    { float rx = 12 + 34 * beat, ry = 8 + 22 * beat; int a = (int)((drop ? 220 : 150) * (1 - beat));
+      ring_blend(&lit, cx, cy, rx, ry, &rip, a); ring_blend(&lit, cx, cy, rx + 1, ry + 0.7f, &rip, a / 2);
+      if (drop) { ring_blend(&lit, cx, cy, rx + 9, ry + 6, &rip, a * 2 / 3); ring_blend(&lit, cx, cy, rx + 10, ry + 6.7f, &rip, a / 3); } }
+    src_t led = src_color(beat < 0.25f ? 0xff2a2a : 0x401010, beat < 0.25f ? 1.0f : c->dim);
+    px_blend_s(c, x1 - 3, top + 3, &led, 255); px_blend_s(c, x1 - 4, top + 3, &led, 255);
+}
+/* glow sticks: four cracked sticks fanned on the sand in kandi colours -
+ * pastel plastic by day, lit with a halo after dark, each on its own slow pulse */
+static void draw_glow(ctx_t *c, const tank_t *t) {
+    static const struct { float dx, dy, ang; uint32_t col; } st[4] = {
+        { -8, -2, -0.35f, 0xff3fa8 }, { -2, -5, 0.55f, 0x5cff3a }, { 4, -3, -0.12f, 0xffa028 }, { 9, -6, 0.75f, 0x38b8ff } };
+    float gx = tank_decor_x(t, SD_IDX_GLOW);
+    ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
+    for (int i = 0; i < 4; i++) {
+        float cx = gx + st[i].dx, cy = FLOOR_Y + st[i].dy, hx = cosf(st[i].ang) * 6.5f, hy = sinf(st[i].ang) * 6.5f;
+        float pulse = t->night ? 0.75f + 0.25f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.55f;
+        if (t->night) fill_ellipse(&lit, cx, cy, 10, 6, st[i].col, (int)(46 * pulse));            /* the halo */
+        src_t s = src_color(st[i].col, lit.dim);
+        line_blend(&lit, cx - hx, cy - hy, cx + hx, cy + hy, &s, (int)(255 * pulse), true);
+        line_blend(&lit, cx - hx, cy - hy + 1, cx + hx, cy + hy + 1, &s, (int)(190 * pulse), false);
+    }
+}
+/* the totem: a pole in the sand with a glowing alien head and two ribbons
+ * that wave in the current - the thing you find your friends by */
+static void draw_totem(ctx_t *c, const tank_t *t) {
+    float tx = tank_decor_x(t, SD_IDX_TOTEM);
+    const int top = FLOOR_Y - TOTEM_H;
+    src_t pole = src_color(0x3a2a1e, c->dim), hi = src_color(0x6a4a30, c->dim);
+    for (int y = top + 14; y <= FLOOR_Y; y++) { span(c, (int)tx - 1, (int)tx + 1, y, &pole, 255); px_blend_s(c, (int)tx - 1, y, &hi, 255); }
+    static const uint32_t rc[2] = { 0xff3fa8, 0x3ae0ff };
+    for (int k = 0; k < 2; k++) {                          /* the ribbons: tied under the head, streaming down-right */
+        src_t s = src_color(rc[k], c->dim);
+        float px0 = tx + (k ? 3 : -3), py0 = top + 17;
+        for (int i = 0; i < 24; i++) {
+            float y = py0 + i, x = px0 + i * (k ? 0.42f : -0.42f) + fast_sin(t->clock * 2.6f + i * 0.33f + k * 1.7f) * (1.2f + i * 0.12f);
+            px_blend_s(c, (int)x, (int)y, &s, 230);
+        }
+    }
+    ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
+    float glow = t->night ? 0.8f + 0.2f * fast_sin(t->clock * 1.4f) : 1.0f;
+    if (t->night) fill_ellipse(&lit, tx, top + 9, 15, 15, 0x5cff3a, (int)(40 * glow));   /* the night halo */
+    fill_ellipse(&lit, tx, top + 9, 8, 10, 0x5cff3a, 255);                             /* the head */
+    fill_ellipse(&lit, tx - 2, top + 6, 4, 3, 0x8dff70, 160);                          /* its sheen */
+    fill_ellipse(&lit, tx - 3.5f, top + 9.5f, 2.6f, 4, 0x061006, 255);                 /* the eyes */
+    fill_ellipse(&lit, tx + 3.5f, top + 9.5f, 2.6f, 4, 0x061006, 255);
+}
+/* every festival piece on layer z (DECOR_Z_*), in item order */
+static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
+    for (int i = SD_IDX_LASER; i <= SD_IDX_TOTEM; i++) {
+        if (!(t->sd_unlocks & (1u << i)) || tank_decor_z(t, i) != z) continue;
+        if (i == SD_IDX_LASER) draw_laser(c, t);
+        else if (i == SD_IDX_BASS) draw_bass(c, t);
+        else if (i == SD_IDX_GLOW) draw_glow(c, t);
+        else draw_totem(c, t);
+    }
+}
+
 /* optional per-stage frame profiling (render.h) */
 int64_t (*render_clock_us)(void) = NULL;
 int64_t render_prof_us[7];
@@ -419,7 +558,7 @@ static void veg_tint_fill(float dim) {
 /* a bed's depth (2026-09-16): the grass beds are woven with the fish
  * (alternate fronds behind and in front); the plant is wherever the keeper
  * put it - all behind, woven, or all in front (tank_decor_z) */
-static int bed_z(const tank_t *t, int b) { return b == 3 ? tank_decor_z(t, 0) : DECOR_Z_MIDDLE; }
+static int bed_z(const tank_t *t, int b) { return b == 3 ? tank_decor_z(t, SD_IDX_PLANT) : DECOR_Z_MIDDLE; }
 /* layer: 0 = the even fronds, 1 = the odd ones, -1 = every frond */
 static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final) {
     veg_tint_fill(c->dim);
@@ -559,7 +698,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     int64_t p0 = PROF_MARK();
     bool cached = g_scene && g_dirty && stride == TANK_W;
     if (cached) memset(g_dirty, 0, TANK_H * DIRTY_WORDS_PER_ROW * sizeof(uint32_t));
-    struct { short x0, y0, x1, y1; } rects[5 + MAX_FOOD + MAX_BUBBLE + N_FISH_MAX + VEG_BEDS_MAX];
+    struct { short x0, y0, x1, y1; } rects[5 + SD_ITEM_COUNT + MAX_FOOD + MAX_BUBBLE + N_FISH_MAX + VEG_BEDS_MAX];
     int nr = 0;
 #define DYN_RECT(cx0, cy0, cx1, cy1) do { if (cached && nr < (int)(sizeof rects / sizeof rects[0])) { \
         rects[nr].x0 = (short)(cx0); rects[nr].y0 = (short)(cy0); \
@@ -589,11 +728,18 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
        canopy). Geometry comes from tank_veg_bed so physics and pixels agree.
        The alternating FRONT fronds draw after the fish, below. */
     static const int veg_seed[VEG_BEDS_MAX] = { 0, 7, 3, 5 };
+    /* the festival pieces (draw_rave_layer) sit on the same three layers:
+       each layer's pass is boxed like a fish so its patch is re-vignetted */
+#define RAVE_LAYER(z) do { g_bb_on = true; g_bb_x0 = g_bb_y0 = 1 << 20; g_bb_x1 = g_bb_y1 = -1; \
+        draw_rave_layer(&c, t, (z)); g_bb_on = false; \
+        if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1); } while (0)
+    RAVE_LAYER(DECOR_Z_BACK);
     for (int b = 0; b < tank_veg_beds(t); b++)          /* a BACK-layer piece first: behind the grass too */
         if (bed_z(t, b) == DECOR_Z_BACK) draw_veg(&c, t, b, veg_seed[b], -1, cached);
     for (int b = 0; b < tank_veg_beds(t); b++)
         if (bed_z(t, b) == DECOR_Z_MIDDLE) draw_veg(&c, t, b, veg_seed[b], 0, cached);
         /* no DYN_RECT: with the scene cache each frond span vignettes itself */
+    RAVE_LAYER(DECOR_Z_MIDDLE);                          /* a solid piece AMONG the fish: just behind them */
     PROF_ADD(2, p0);
     /* the airstone the column rises from, on the floor where the keeper put
        it (setup): three stones and a glint - dynamic, since it can move */
@@ -640,6 +786,8 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         if (bed_z(t, b) == DECOR_Z_MIDDLE) draw_veg(&c, t, b, veg_seed[b], 1, cached);
     for (int b = 0; b < tank_veg_beds(t); b++)          /* a FRONT-layer piece last: over the grass and the fish */
         if (bed_z(t, b) == DECOR_Z_FRONT) draw_veg(&c, t, b, veg_seed[b], -1, cached);
+    RAVE_LAYER(DECOR_Z_FRONT);
+#undef RAVE_LAYER
     PROF_ADD(4, p0);
     /* porthole vignette: darken corners toward AMOLED black. With a scene
        cache the full-frame pass is baked into the scene and only the dynamic
@@ -1460,9 +1608,21 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
 #define SHP_MODAL_H   244
 #define SHP_EARN_MODAL_Y 40
 #define SHP_EARN_MODAL_H 224
+/* the shelves (2026-09-18, the festival items): SHP_PAGE_ROWS rows to a page,
+ * a MORE button between HOW TO EARN and CLOSE turns the page (and wraps);
+ * the caption under the rows only fits a page with room to spare */
+#define SHP_PAGE_ROWS 3
+#define SHP_PAGES     ((SD_ITEM_COUNT + SHP_PAGE_ROWS - 1) / SHP_PAGE_ROWS)
+#define SHP_MORE_X    200
+#define SHP_MORE_W    96
 static int  g_shp_modal = -1;        /* the item whose modal is up, or -1 */
 static bool g_shp_earn;              /* the HOW TO EARN modal is up */
-static const icon_t *shop_icon(int item) { return item == 0 ? &icon_shop_plant : &icon_shop_snail; }
+static int  g_shp_page;              /* the shelf on show */
+static const icon_t *shop_icon(int item) {
+    static const icon_t *const ic[SD_ITEM_COUNT] = { &icon_shop_plant, &icon_shop_snail, &icon_shop_laser, &icon_shop_bass, &icon_shop_glow, &icon_shop_totem };
+    return ic[item];
+}
+static int shop_page_rows(int page) { int n = SD_ITEM_COUNT - page * SHP_PAGE_ROWS; return n > SHP_PAGE_ROWS ? SHP_PAGE_ROWS : n; }
 static void price_tag(ctx_t *c, int x, int y, int price, uint32_t rgb) {   /* the small coin + the number */
     blit_icon(c, x, y - 1, &icon_shop_sand_dollar_16, 255);
     char n[16]; snprintf(n, sizeof n, "%d", price);
@@ -1476,9 +1636,11 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     char bal[16]; snprintf(bal, sizeof bal, "%d", (int)t->sd_balance);
     draw_text(&c, 112, SHP_COIN_Y + 28, 4, 0xffffff, bal);
     for (int x = 24; x < TANK_W - 24; x++) px_blend(&c, x, SHP_ROW_Y0 - 10, MSP_DIM, 200);
-    for (int i = 0; i < SD_ITEM_COUNT; i++) {
+    int rows = shop_page_rows(g_shp_page);
+    for (int r = 0; r < rows; r++) {
+        int i = g_shp_page * SHP_PAGE_ROWS + r;
         const sd_item_t *it = &SD_ITEMS[i];
-        int top = SHP_ROW_Y0 + i * SHP_ROW_DY;
+        int top = SHP_ROW_Y0 + r * SHP_ROW_DY;
         bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
         if (owned) blit_icon(&c, SHP_COIN_X, top, shop_icon(i), 255); else blit_icon_locked(&c, SHP_COIN_X, top, shop_icon(i));
         draw_text(&c, 76, top + 2, 2, 0xffffff, it->name);
@@ -1489,9 +1651,15 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
                         draw_text(&c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
         else           button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
     }
-    draw_text(&c, (TANK_W - text_w("EARN THEM BY CARING FOR", 2)) / 2, 224, 2, 0x3f6a72, "EARN THEM BY CARING FOR");
-    draw_text(&c, (TANK_W - text_w("THE TANK AND THE FISH", 2)) / 2, 244, 2, 0x3f6a72, "THE TANK AND THE FISH");
+    if (rows <= 2) {
+        draw_text(&c, (TANK_W - text_w("EARN THEM BY CARING FOR", 2)) / 2, 224, 2, 0x3f6a72, "EARN THEM BY CARING FOR");
+        draw_text(&c, (TANK_W - text_w("THE TANK AND THE FISH", 2)) / 2, 244, 2, 0x3f6a72, "THE TANK AND THE FISH");
+    }
     button(&c, SHP_EARN_X, MSP_CLOSE_Y, SHP_EARN_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "HOW TO EARN", 2);
+    if (SHP_PAGES > 1) {
+        char more[24]; snprintf(more, sizeof more, "MORE %d/%d", g_shp_page + 1, (int)SHP_PAGES);
+        button(&c, SHP_MORE_X, MSP_CLOSE_Y, SHP_MORE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, more, 2);
+    }
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
     if (g_shp_modal < 0 && !g_shp_earn) return;
     for (int y = 0; y < TANK_H; y++)                          /* the page out of reach under a modal */
@@ -1546,13 +1714,14 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     }
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SHOP_TAP_CLOSE;
     if (x < SHP_EARN_X + SHP_EARN_W + 8 && y >= MSP_CLOSE_Y - 4) { g_shp_earn = true; return SHOP_TAP_KEPT; }
-    for (int i = 0; i < SD_ITEM_COUNT; i++) {
-        int top = SHP_ROW_Y0 + i * SHP_ROW_DY;
-        if (x >= 20 && y >= top - 8 && y < top + SHP_ROW_DY - 8) { g_shp_modal = i; return SHOP_TAP_KEPT; }
+    if (SHP_PAGES > 1 && y >= MSP_CLOSE_Y - 4) { g_shp_page = (g_shp_page + 1) % SHP_PAGES; return SHOP_TAP_KEPT; }   /* MORE: the next shelf */
+    for (int r = 0; r < shop_page_rows(g_shp_page); r++) {
+        int top = SHP_ROW_Y0 + r * SHP_ROW_DY;
+        if (x >= 20 && y >= top - 8 && y < top + SHP_ROW_DY - 8) { g_shp_modal = g_shp_page * SHP_PAGE_ROWS + r; return SHOP_TAP_KEPT; }
     }
     return SHOP_TAP_NONE;
 }
-void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; }
+void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; }
 
 /* the toast: "+N" by a coin, top centre, for TOAST_S on the tank clock */
 #define TOAST_S 2.5f

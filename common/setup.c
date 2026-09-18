@@ -380,11 +380,11 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         }
         render_rect_edge(fb, stride, SETUP_DEPTH_X, SETUP_DEPTH_Y, SETUP_DEPTH_W, SETUP_DEPTH_H, C_EDGE);
         text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, hint[z]);
-        float x0 = tank_decor_x(t, s_item) - tank_decor_half_w(s_item) - 10, x1 = tank_decor_x(t, s_item) + tank_decor_half_w(s_item) + 10, top = TANK_H - 16 - 40;
-        if (s_item == 0) tank_veg_bed(t, 3, NULL, NULL, &top, NULL);   /* the leaves' reach */
+        float x0 = tank_decor_x(t, s_item) - tank_decor_half_w(s_item) - 10, x1 = tank_decor_x(t, s_item) + tank_decor_half_w(s_item) + 10;
+        float top = tank_decor_top_y(t, s_item);            /* the piece's reach (the plant: its leaves) */
         int sy = (int)top - 8; if (sy < SETUP_PLACE_Y) sy = SETUP_PLACE_Y;
         render_rect_blend(fb, stride, (int)x0, sy, (int)(x1 - x0), TANK_H - 16 - sy + 4, C_EDGE, 46);
-        chevron(fb, stride, (int)((x0 + x1) * 0.5f), TANK_H - 16 - 34, true, C_EDGE);
+        chevron(fb, stride, (int)((x0 + x1) * 0.5f), tank_decor_hangs(s_item) ? sy + 8 : TANK_H - 16 - 34, true, C_EDGE);   /* hung: it points up at the rig */
         text_c(fb, stride, CX, 296, 2, C_CAPT, "DRAG IT LEFT OR RIGHT");
     } else if (page_is_name()) {
         /* straight on the tank: the fish being named wears a ring in its own

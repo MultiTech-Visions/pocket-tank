@@ -156,8 +156,15 @@ const char *const *progression_fry_tip(int kind);
 #define SD_CHORE_EVERY 100
 #define SD_PRICE_PLANT 40
 #define SD_PRICE_SNAIL 80
+/* the festival shelf (2026-09-18): dressing, priced under the snail - the
+ * glow sticks are the first thing a fresh tank can afford */
+#define SD_PRICE_LASER 60
+#define SD_PRICE_BASS  70
+#define SD_PRICE_GLOW  30
+#define SD_PRICE_TOTEM 45
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
+    const char *key;               /* one lowercase word: the director's `buy` / `place` */
     const char *name;              /* <= 12 chars, the pixel font */
     const char *words, *words2;    /* what it does, two lines of <= 25 chars */
     int         price;
@@ -167,6 +174,8 @@ extern const sd_item_t SD_ITEMS[SD_ITEM_COUNT];
  * true = unlocked, placed in the tank (tank_plant_place / tank_snail_place)
  * and saved at once */
 bool progression_buy(tank_t *t, int item);
+/* the item index for a key (SD_ITEMS[].key: "plant", "snail", "laser" ...), -1 for none */
+int  progression_sd_item_by_key(const char *key);
 /* dollars awarded since the last call (the toast over the live tank) */
 int  progression_sd_take_award(void);
 /* director / tests: dollars from nowhere (negative takes them away) */

@@ -50,6 +50,7 @@
 #define VEG_BEDS_MAX 4                         /* + the shop's sword plant, bed 3 (2026-09-15:
                                                 * live only once bought; tank_veg_beds) */
 typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
+#define SD_ITEM_N 6                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
 #define VEG_START  0.35f                       /* a fresh tank (and a bought plant): comfortable cover */
 #define VEG_NUB    0.03f                       /* trim floor: ~13 px green stubble */
 #define VEG_BARE   0.10f                       /* tallest bed under this = no cover
@@ -265,11 +266,14 @@ typedef struct tank {
     float    snail_x, snail_y, snail_heading;
     int16_t  snail_cell;           /* the algae cell it is heading for, -1 = wandering */
     float    snail_graze;          /* seconds on the current cell */
-    /* where the keeper put the decor (2026-09-16, the placement page): the
-     * sword plant's centre x along the floor (<= 0 = the default spot) and
-     * its depth layer (DECOR_Z_*). Both saved. */
-    float    plant_x;
-    uint8_t  plant_z;
+    /* where the keeper put the decor (2026-09-16, the placement page; one
+     * slot per shop item since 2026-09-18): each placeable piece's centre x
+     * along the floor (<= 0 = its default spot) and its depth layer
+     * (DECOR_Z_*). Both saved. Indexed by SD_IDX_*. */
+    float    decor_x[SD_ITEM_N];
+    uint8_t  decor_z[SD_ITEM_N];
+    /* the bass stack's next drop, on the tank clock (tank.c; not saved) */
+    float    bass_drop_at;
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -463,7 +467,18 @@ void  tank_set_bubble_x(tank_t *t, float x);
  * The items are bits in tank_t.sd_unlocks; progression.c sells them
  * (progression_buy) and tank.c gives them their place. A bought thing is in
  * the tank for good. */
-enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_COUNT = 2 };
+enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1,
+       /* the festival shelf (2026-09-18, Strato: two tanks gifted at a bass
+        * music festival): a LASER RIG hung under the surface that sweeps
+        * beams through the water once the light is out, a BASS STACK on the
+        * sand that thumps and shakes bubbles loose on the drop, GLOW STICKS
+        * cracked and scattered on the floor, a rail TOTEM. Set dressing:
+        * the model sees none of it (schema v4 is frozen) and nothing here
+        * touches the fish - it is the tank's night out, not theirs. */
+       SD_ITEM_LASER = 1u << 2, SD_ITEM_BASS = 1u << 3, SD_ITEM_GLOW = 1u << 4, SD_ITEM_TOTEM = 1u << 5,
+       SD_ITEM_COUNT = SD_ITEM_N };
+/* item INDEXES (the bit's position: SD_ITEMS[], the shop rows, decor_x[]) */
+enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_LASER = 2, SD_IDX_BASS = 3, SD_IDX_GLOW = 4, SD_IDX_TOTEM = 5 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -479,19 +494,36 @@ void  tank_snail_place(tank_t *t);
  * player to place the piece wherever they like", with a depth choice): a
  * placeable item has a centre x along the floor - clamped inside the
  * visible window, DECOR_MARGIN from the glass - and a depth layer: BACK =
- * behind the fish and the grass, MIDDLE = woven with them (alternate fronds
- * in front, the beds' own look), FRONT = over everything. The plant is the
- * one placeable item so far; the snail goes where it likes. setup.c's
- * placement page and the shop's MOVE button drive these; the save keeps them. */
+ * behind the fish and the grass, MIDDLE = woven with them (the plant's
+ * alternate fronds in front, the beds' own look; a solid piece stands just
+ * behind the fish), FRONT = over everything. Every piece but the snail is
+ * placeable (it goes where it likes); the laser rig HANGS - its x runs
+ * along the surface and its beams reach the floor. setup.c's placement
+ * page and the shop's MOVE button drive these; the save keeps them. */
 enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define DECOR_MARGIN    30                 /* the snail's margin: inside the panel's rounded bezel */
 #define PLANT_HALF_W    21                 /* four leaves at a 14 px pitch: centre to the outer leaf */
 #define PLANT_X_DEFAULT (208.0f + PLANT_HALF_W)   /* the open floor between the reef bed and bed 2 */
+#define LASER_HALF_W    18                 /* the bar under the surface: three emitters at a 14 px pitch */
+#define LASER_X_DEFAULT (TANK_W * 0.5f)
+#define BASS_HALF_W     14                 /* the cabinet: 28 x 30 on the sand */
+#define BASS_X_DEFAULT  392.0f             /* the right-hand floor, past bed 2's fronds */
+#define GLOW_HALF_W     13                 /* four sticks fanned on the sand */
+#define GLOW_X_DEFAULT  263.0f             /* the open floor, right of the plant's spot */
+#define TOTEM_HALF_W    9                  /* the pole and its emblem */
+#define TOTEM_X_DEFAULT 318.0f             /* among bed 2's fronds */
+#define TOTEM_H         64                 /* pole foot to the emblem's top */
+#define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
+#define BASS_BEAT_S     (60.0f / BASS_BPM)
+#define BASS_DROP_BEATS 16
+#define BASS_DROP_PUFFS 3                  /* free bubbles the drop shakes out of the cone */
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
+bool  tank_decor_hangs(int item);          /* hung under the surface (the laser rig), not on the sand */
 void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);
 float tank_decor_half_w(int item);         /* half the footprint, for the page's clamp / highlight */
+float tank_decor_top_y(const tank_t *t, int item);   /* the piece's top edge on screen (the page's highlight) */
 /* the snail has two poses (Strato's sprites, 2026-09-15): UPRIGHT, walking
  * the tank floor (nothing to graze: it comes down and ambles along the
  * bottom, turning at the ends), and flat ON THE GLASS (crawling to film and
