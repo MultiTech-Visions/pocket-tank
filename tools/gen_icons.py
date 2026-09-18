@@ -8,9 +8,55 @@ blit_icon() (which can also scale alpha for dimming/unrevealed states).
 
 Run from anywhere; paths are repo-relative to this file:
     ~/.venvs/pocket-tank/bin/python tools/gen_icons.py
+Without Pillow it falls back to its own decoder (8-bit, non-interlaced PNGs,
+which is all assets/icons holds).
 """
-import os, re, sys
-from PIL import Image
+import os, re, sys, struct, zlib
+try:
+    from PIL import Image
+except ImportError:                     # no Pillow (a bare CI box): a small decoder for our own PNGs
+    Image = None
+
+
+def read_png_rgba(path):
+    """8-bit, non-interlaced RGB / RGBA / gray / gray+alpha PNG -> (w, h, [(r,g,b,a)...]).
+    The five scanline filters, as the spec has them. Enough for assets/icons;
+    anything else says so and asks for Pillow."""
+    b = open(path, "rb").read()
+    if b[:8] != b"\x89PNG\r\n\x1a\n":
+        sys.exit(f"{path}: not a PNG")
+    pos, idat, w = 8, b"", None
+    while pos < len(b):
+        n = struct.unpack(">I", b[pos:pos + 4])[0]
+        t, d = b[pos + 4:pos + 8], b[pos + 8:pos + 8 + n]
+        pos += 12 + n
+        if t == b"IHDR":
+            w, h, depth, ctype, _, _, inter = struct.unpack(">IIBBBBB", d)
+            if depth != 8 or inter or ctype not in (0, 2, 4, 6):
+                sys.exit(f"{path}: {depth}-bit colour type {ctype}{' interlaced' if inter else ''} - install Pillow for this one")
+            bpp = {0: 1, 2: 3, 4: 2, 6: 4}[ctype]
+        elif t == b"IDAT":
+            idat += d
+    raw = zlib.decompress(idat)
+    stride, prev, px, q = w * bpp, bytearray(w * bpp), [], 0
+    for _ in range(h):
+        f, line = raw[q], bytearray(raw[q + 1:q + 1 + stride]); q += 1 + stride
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            u = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if f == 1: line[i] = (line[i] + a) & 255
+            elif f == 2: line[i] = (line[i] + u) & 255
+            elif f == 3: line[i] = (line[i] + ((a + u) >> 1)) & 255
+            elif f == 4:
+                p = a + u - c; pa, pb, pc = abs(p - a), abs(p - u), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else u if pb <= pc else c)) & 255
+        for x in range(w):
+            v = line[x * bpp:(x + 1) * bpp]
+            px.append((v[0], v[0], v[0], 255) if bpp == 1 else (v[0], v[0], v[0], v[1]) if bpp == 2
+                      else (v[0], v[1], v[2], 255) if bpp == 3 else tuple(v))
+        prev = line
+    return w, h, px
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "assets", "icons")
@@ -30,11 +76,14 @@ def main():
     decls, defs, table = [], [], []
     total = 0
     for fn in files:
-        img = Image.open(os.path.join(SRC, fn)).convert("RGBA")
-        w, h = img.size
+        if Image:
+            img = Image.open(os.path.join(SRC, fn)).convert("RGBA")
+            w, h = img.size
+            px = list(img.getdata())
+        else:
+            w, h, px = read_png_rgba(os.path.join(SRC, fn))
         if w > 64 or h > 64:
             sys.exit(f"{fn}: {w}x{h} is too big for a UI icon (max 64)")
-        px = list(img.getdata())
         rgb, alp = [], []
         for r, g, b, a in px:
             rgb.append(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))

@@ -99,8 +99,10 @@ void render_milestones_leave(void);
  * words, the price, an UNLOCK button; render_shop_tap returns SHOP_TAP_BUY +
  * item when that button is tapped (the caller calls progression_buy; a short
  * balance was already a dim button), SHOP_TAP_CLOSE for the way out,
- * SHOP_TAP_KEPT when a modal opened or closed. Page state is render-local;
- * render_shop_leave clears it when the page closes. */
+ * SHOP_TAP_KEPT when a modal opened or closed - or MORE (2026-09-18: three
+ * rows to a shelf, the button between HOW TO EARN and CLOSE turns it, and
+ * wraps) turned the page. Page state is render-local; render_shop_leave
+ * clears it (back to the first shelf) when the page closes. */
 enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32 };   /* BUY / MOVE + item index */
 /* SHOP_TAP_MOVE (2026-09-16): an owned, placeable item's modal carries a MOVE
  * button - the platform closes the shop and opens setup.c's placement page

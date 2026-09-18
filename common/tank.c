@@ -264,7 +264,8 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = 0;
     t->sd_colonies_paid = t->sd_inches_paid = 0;
     t->snail_x = -1; t->snail_y = -1; t->snail_heading = 0; t->snail_cell = -1; t->snail_graze = 0;
-    t->plant_x = 0; t->plant_z = DECOR_Z_MIDDLE;
+    for (int i = 0; i < SD_ITEM_COUNT; i++) { t->decor_x[i] = 0; t->decor_z[i] = DECOR_Z_MIDDLE; }
+    t->bass_drop_at = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
     tank_scatter_food(t, 2);
 }
@@ -665,14 +666,34 @@ void tank_snail_place(tank_t *t) {
 void tank_plant_place(tank_t *t) {
     tank_veg_set(t, 3, VEG_START);                          /* a young plant; it grows from here */
 }
-/* the decor's spot and layer (see tank.h): item 0 is the plant */
-bool  tank_decor_placeable(int item) { return item == 0; }
-float tank_decor_half_w(int item) { return item == 0 ? PLANT_HALF_W : 0; }
+/* the decor's spot and layer (see tank.h): one table row per shop item -
+ * half the footprint (0 = not placeable) and the default centre */
+static const struct { float half_w, x_default; bool hangs; } DECOR[SD_ITEM_COUNT] = {
+    { PLANT_HALF_W, PLANT_X_DEFAULT, false },
+    { 0, 0, false },                                          /* the snail goes where the film is */
+    { LASER_HALF_W, LASER_X_DEFAULT, true },
+    { BASS_HALF_W,  BASS_X_DEFAULT,  false },
+    { GLOW_HALF_W,  GLOW_X_DEFAULT,  false },
+    { TOTEM_HALF_W, TOTEM_X_DEFAULT, false },
+};
+bool  tank_decor_placeable(int item) { return item >= 0 && item < SD_ITEM_COUNT && DECOR[item].half_w > 0; }
+bool  tank_decor_hangs(int item) { return tank_decor_placeable(item) && DECOR[item].hangs; }
+float tank_decor_half_w(int item) { return tank_decor_placeable(item) ? DECOR[item].half_w : 0; }
 float tank_decor_x(const tank_t *t, int item) {
-    if (item != 0) return 0;
-    return t->plant_x > 0 ? t->plant_x : PLANT_X_DEFAULT;
+    if (!tank_decor_placeable(item)) return 0;
+    return t->decor_x[item] > 0 ? t->decor_x[item] : DECOR[item].x_default;
 }
-int tank_decor_z(const tank_t *t, int item) { return item == 0 ? t->plant_z : DECOR_Z_MIDDLE; }
+int tank_decor_z(const tank_t *t, int item) { return tank_decor_placeable(item) ? t->decor_z[item] : DECOR_Z_MIDDLE; }
+float tank_decor_top_y(const tank_t *t, int item) {
+    switch (item) {
+    case SD_IDX_PLANT: { float top; tank_veg_bed(t, 3, NULL, NULL, &top, NULL); return top; }   /* the leaves' reach */
+    case SD_IDX_LASER: return 0;                                  /* hung under the surface: the beams reach the floor */
+    case SD_IDX_BASS:  return TANK_H - 16 - 30;
+    case SD_IDX_GLOW:  return TANK_H - 16 - 16;
+    case SD_IDX_TOTEM: return TANK_H - 16 - TOTEM_H;
+    default: return TANK_H - 16;
+    }
+}
 void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (!tank_decor_placeable(item)) return;
     float half = tank_decor_half_w(item), lo = DECOR_MARGIN + half, hi = TANK_W - DECOR_MARGIN - half;
@@ -680,7 +701,23 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (x > hi) x = hi;
     if (z < 0) z = 0;
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
-    t->plant_x = x; t->plant_z = (uint8_t)z;
+    t->decor_x[item] = x; t->decor_z[item] = (uint8_t)z;
+}
+/* the bass stack (SD_ITEM_BASS): the thump is a picture (render.c reads the
+ * clock); the DROP, every BASS_DROP_BEATS beats, shakes BASS_DROP_PUFFS of
+ * the free bubbles out of the cone - the flirt's puff, from the sand */
+static void bass_tick(tank_t *t) {
+    if (!(t->sd_unlocks & SD_ITEM_BASS)) return;
+    if (t->clock < t->bass_drop_at) return;
+    t->bass_drop_at = t->clock + BASS_DROP_BEATS * BASS_BEAT_S;
+    float bx = tank_decor_x(t, SD_IDX_BASS), by = TANK_H - 16 - 12;
+    int puffs = BASS_DROP_PUFFS;
+    for (int i = 0; i < MAX_BUBBLE && puffs > 0; i++) {
+        if (t->bubble[i].column) continue;
+        t->bubble[i].x = bx + tank_randf(t, -8, 8);
+        t->bubble[i].y = by - tank_randf(t, 0, 6);
+        puffs--;
+    }
 }
 
 void tank_touch_hold(tank_t *t, float x, float y) {
@@ -1380,6 +1417,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
         tank_grow_algae(t, 1);
     }
     snail_tick(t, dt);
+    bass_tick(t);
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {

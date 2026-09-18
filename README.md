@@ -188,8 +188,8 @@ again and again. Nothing is ever needed and nothing is lost: a tank with no
 sand dollars is exactly the tank there was before. The coin on the
 milestones page's TANK row shows your balance, and it (or the UPGRADES
 button) opens the shop: a row per item with its price, UNLOCK when you can
-afford it, IN TANK once you own it, and HOW TO EARN for the list. Two
-things to buy so far. The **sword plant** (40) is a fourth bed of broad
+afford it, IN TANK once you own it, and HOW TO EARN for the list. The
+first page holds the care items. The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
 grass. The **snail** (80) grazes the glass clean cell by cell, crawling
 flat across the pane with its head leading, and walks the floor upright
@@ -197,6 +197,21 @@ when there is nothing to eat; it keeps working while the tank sleeps, so
 the glass is thinner in the morning. The model sees neither: they reach
 the fish the way your own chores do, through cover and the film. Dollars
 earned while you watch show as a small "+N" over the water.
+
+**The festival shelf.** A second page of the shop (MORE turns it) is set
+dressing for a tank that goes to shows: the **laser rig** (60) hangs just
+under the surface, three lenses that throw green, magenta and cyan beams
+to the floor and sweep them on their own slow tempos, but only once the
+light is out; the **bass stack** (70) is a speaker cabinet on the sand
+whose cone kicks at 140 BPM with a ripple running out of it and, every
+sixteen beats, a drop that shakes a few bubbles loose; **glow sticks**
+(30) lie cracked and scattered on the floor, pastel plastic by day and
+lit with a halo after dark; and a rail **totem** (45), a pole with a
+glowing alien head and two ribbons in the current. All four are placed
+like the plant (the rig along the surface, the rest along the floor, each
+with its depth), and none of them reaches the fish: it is the tank's
+night out, not theirs. Double-tap the glass to put the light out and the
+rig comes on.
 
 **Placing what you buy.** A plant is yours to put down. Right after you
 unlock it the shop closes and a placement page comes up over the live
@@ -208,7 +223,8 @@ through them, or behind them: BEHIND, AMONG or IN FRONT. The tank redraws
 as you choose, a line under the bar says what to watch for, and DONE keeps
 it. If you change your mind later, the plant's row in the shop has a MOVE
 button that opens the same page again. The snail is not for placing; it
-goes wherever the algae is.
+goes wherever the algae is. The festival pieces place the same way; the
+laser rig's stripe marks the column under it.
 
 ![The shop](docs/media/sim-shop.png)
 ![Unlocking the snail](docs/media/sim-shop-modal.png)
@@ -316,7 +332,7 @@ Headless checks, all of which run in CI-style without a window:
 `--selftest-pop` (arrivals, inherited looks, saves, the setup and birth flows), `--selftest-sleep` (sleep metabolism,
 the deep-sleep wake, and ravenous begging), `--selftest-hunger` (the hunger economy),
 `--selftest-tend` (grass, algae, trust holds), `--selftest-shop` (sand
-dollars, the shop, the plant, the snail), and `--bench` (render cost).
+dollars, the shop, the plant, the snail, the festival shelf), and `--bench` (render cost).
 
 ## Try it: firmware in QEMU
 
@@ -454,6 +470,8 @@ seven-minute prompt check before an overnight run is always worth it.
   and an algae-grazing snail to start; what you buy you place yourself,
   where along the floor and whether it stands behind, among or in front
   of the fish
+- ✅ The festival shelf: a laser rig that sweeps the water once the light
+  is out, a bass stack that thumps and drops, glow sticks, a rail totem
 - ✅ Browser installer: one click from Chrome or Edge, hosted at
   stratobuilds.com
 - 🔋 In progress: battery life. The first night on the board's power-off

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#define SD_DECOR_SAVE_N 8       /* decor slots in the save: room past SD_ITEM_COUNT, fixed once written */
 
 #define SAVE_MAGIC 0x50544b32u   /* "PTK2" (PTK1 saves are 4-fish, pre-population: start fresh) */
 #define RAVENOUS_GIVE_UP_S 150.0f  /* begging window before the fish give up */
@@ -88,6 +89,12 @@ typedef struct {
      * (0 = the default spot) and its layer + 1 (0 = MIDDLE, an older save) */
     float    plant_x;
     uint8_t  plant_z1, pad_place[3];
+    /* festival tail (2026-09-18, the rave shelf): every placeable piece's
+     * centre x (0 = its default spot) and layer + 1 (0 = MIDDLE), by SD_IDX_*
+     * in a fixed SD_DECOR_SAVE_N slots. The plant's own slot duplicates the
+     * two fields above so a 09-16 save (zeros here) still reads its spot. */
+    float    decor_x[SD_DECOR_SAVE_N];
+    uint8_t  decor_z1[SD_DECOR_SAVE_N];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -126,9 +133,13 @@ void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t);
 
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
-const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
-    { SD_ITEM_PLANT, "SWORD PLANT", "BROAD LEAVES ON THE FLOOR.", "MORE COVER TO CALM THE FISH", SD_PRICE_PLANT },
-    { SD_ITEM_SNAIL, "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_SNAIL },
+const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {   /* index order = SD_IDX_* = the bit's position */
+    { SD_ITEM_PLANT, "plant", "SWORD PLANT", "BROAD LEAVES ON THE FLOOR.", "MORE COVER TO CALM THE FISH", SD_PRICE_PLANT },
+    { SD_ITEM_SNAIL, "snail", "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_SNAIL },
+    { SD_ITEM_LASER, "laser", "LASER RIG",   "BEAMS SWEEP THE WATER",     "WHEN THE LIGHT GOES OUT",     SD_PRICE_LASER },
+    { SD_ITEM_BASS,  "bass",  "BASS STACK",  "A SPEAKER ON THE SAND.",    "THE DROP SHAKES BUBBLES",     SD_PRICE_BASS },
+    { SD_ITEM_GLOW,  "glow",  "GLOW STICKS", "CRACKED AND SCATTERED.",    "THEY GLOW AFTER DARK",        SD_PRICE_GLOW },
+    { SD_ITEM_TOTEM, "totem", "TOTEM",       "A RAIL TOTEM IN THE SAND.", "FIND YOUR FRIENDS BY IT",     SD_PRICE_TOTEM },
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
@@ -168,8 +179,14 @@ bool progression_buy(tank_t *t, int item) {
     t->sd_balance -= it->price; t->sd_unlocks |= it->bit;
     if (it->bit == SD_ITEM_PLANT) tank_plant_place(t);
     if (it->bit == SD_ITEM_SNAIL) tank_snail_place(t);
+    /* the festival pieces land at their default spot (tank_decor_x) and
+       the placement page opens over them; nothing else to set up */
     progression_save(t);                                   /* a purchase sticks at once */
     return true;
+}
+int progression_sd_item_by_key(const char *key) {
+    for (int i = 0; i < SD_ITEM_COUNT; i++) if (!strcmp(key, SD_ITEMS[i].key)) return i;
+    return -1;
 }
 const char *const *progression_sd_earn_lines(void) {
     static char lines[SD_EARN_LINES][30]; static const char *ptr[SD_EARN_LINES + 1]; static bool made;
@@ -472,7 +489,12 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         else tank_plant_place(t);
         tank_veg_sync(t);
     }
-    if (sv.plant_x > 0) tank_decor_set(t, 0, sv.plant_x, sv.plant_z1 ? sv.plant_z1 - 1 : DECOR_Z_MIDDLE);
+    if (sv.plant_x > 0) tank_decor_set(t, SD_IDX_PLANT, sv.plant_x, sv.plant_z1 ? sv.plant_z1 - 1 : DECOR_Z_MIDDLE);
+    for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {   /* the festival tail; the plant's slot repeats the above */
+        if (!sv.decor_z1[i] || !tank_decor_placeable(i)) continue;      /* a slot never written (a 09-16 save reads zeros) */
+        int z = sv.decor_z1[i] - 1 < DECOR_Z_N ? sv.decor_z1[i] - 1 : DECOR_Z_MIDDLE;
+        if (sv.decor_x[i] > 0) tank_decor_set(t, i, sv.decor_x[i], z); else t->decor_z[i] = (uint8_t)z;   /* x 0 = the default spot */
+    }
     s_sd_prev_feedings = t->player_feedings;         /* meals before this boot are not back-paid */
     s_sd_pending = 0;
     s_arrival_pending = sv.arrival_pending;
@@ -648,7 +670,10 @@ void progression_save(tank_t *t) {
     sv.algae_colonies = t->algae_colonies; sv.trim_px = t->trim_px;
     sv.snail_x = t->snail_x > 0 ? t->snail_x : 0; sv.snail_y = t->snail_y > 0 ? t->snail_y : 0;
     for (int i = 0; i < VEG_FRONDS_MAX; i++) sv.veg_h3[i] = (t->sd_unlocks & SD_ITEM_PLANT) ? t->veg_h[3][i] : 0;
-    sv.plant_x = t->plant_x > 0 ? t->plant_x : 0; sv.plant_z1 = (uint8_t)(t->plant_z + 1);
+    sv.plant_x = t->decor_x[SD_IDX_PLANT] > 0 ? t->decor_x[SD_IDX_PLANT] : 0; sv.plant_z1 = (uint8_t)(t->decor_z[SD_IDX_PLANT] + 1);
+    for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {
+        sv.decor_x[i] = t->decor_x[i] > 0 ? t->decor_x[i] : 0; sv.decor_z1[i] = (uint8_t)(t->decor_z[i] + 1);
+    }
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);
     sv.bubble_x = t->bubble_x;

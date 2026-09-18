@@ -29,7 +29,7 @@
  *   ./fishsim --selftest-sleep       headless sleep metabolism + ravenous begging
  *   ./fishsim --selftest-tend        headless canopy/algae/hold-attract check
  *   ./fishsim --selftest-hunger      headless hunger economy (untended tank never ravenous)
- *   ./fishsim --selftest-shop        headless sand dollars: awards, the shop, the plant, the snail, the save
+ *   ./fishsim --selftest-shop        headless sand dollars: awards, the shop, the plant, the snail, the festival shelf, the save
  *   ./fishsim --bench                headless render-cost profile (veg, card)
  *   (key Z: jump through 7 h of device-style sleep; key G: grow the canopy +
  *    algae now to try the chores - press again to cycle)
@@ -1244,6 +1244,20 @@ static int snapshot(const char *prefix, int seconds) {
       render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
       snprintf(path, sizeof path, "%s_place.ppm", prefix); write_ppm(path, fb);
       setup_cancel(&tank); tank_decor_set(&tank, 0, PLANT_X_DEFAULT, DECOR_Z_MIDDLE); }
+    { /* the festival shelf (2026-09-18): the second page, and the tank's night out with every piece lit */
+      tank.sd_balance = 95; render_shop_tap(&tank, 248, 320); render_shop(&tank, fb, TANK_W);
+      snprintf(path, sizeof path, "%s_shop_p2.ppm", prefix); write_ppm(path, fb);
+      render_shop_leave();
+      tank.sd_unlocks |= SD_ITEM_LASER | SD_ITEM_BASS | SD_ITEM_GLOW | SD_ITEM_TOTEM;
+      tank.light_override = true; tank.light_on = false;
+      for (int i = 0; i < 90; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+      tank.bass_drop_at = tank.clock; tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+      render_tank(&tank, fb, TANK_W);
+      snprintf(path, sizeof path, "%s_tank_rave.ppm", prefix); write_ppm(path, fb);
+      tank.light_on = true; for (int i = 0; i < 30; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+      render_tank(&tank, fb, TANK_W);
+      snprintf(path, sizeof path, "%s_tank_rave_day.ppm", prefix); write_ppm(path, fb);
+      tank.light_override = false; tank.sd_unlocks = SD_ITEM_PLANT | SD_ITEM_SNAIL; }
     uint8_t film[ALGAE_CELLS]; memcpy(film, tank.algae, sizeof film);
     { memset(tank.algae, 0, sizeof tank.algae);
       tank.snail_cell = -1; tank.snail_x = 300; tank.snail_y = SNAIL_FLOOR_Y; tank.snail_heading = 3.14159f;
@@ -1330,7 +1344,7 @@ static int snapshot(const char *prefix, int seconds) {
         snprintf(path, sizeof path, "%s_fry_tally.ppm", prefix); write_ppm(path, fb);
         render_milestones_leave();
     }
-    printf("snapshot: %d fish, wrote %s_{tank,card,card1,milestones,milestones_fry,confirm,setup_*}.ppm\n", tank.n_fish, prefix);
+    printf("snapshot: %d fish, wrote %s_{tank,card,card1,milestones,milestones_fry,shop*,tank_rave*,place,confirm,setup_*}.ppm\n", tank.n_fish, prefix);
     return 0;
 }
 
@@ -1341,7 +1355,10 @@ static int snapshot(const char *prefix, int seconds) {
  * counters (colonies wiped, inches cut) pay every hundred; the shop refuses
  * a short balance, the plant becomes bed 3 (the slash cuts it, the comfort
  * band counts it), the snail grazes without touching the keeper's counts;
- * the page's taps; the save carries all of it; a pre-shop save back-pays. */
+ * the page's taps; the save carries all of it; a pre-shop save back-pays.
+ * The festival shelf (2026-09-18): MORE turns the page, the four pieces
+ * buy and place (the rig hangs), the drop shakes bubbles out of the stack,
+ * the spots ride the save and a 09-16 save leaves them at their defaults. */
 static int selftest_shop(void) {
     setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest.sav", 1);
     char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f /tmp/pocket-tank-selftest.sav"); (void)system(cmd);
@@ -1569,6 +1586,55 @@ static int selftest_shop(void) {
         if (render_shop_tap(&tank, 324 + 40, 312 + 10) != SHOP_TAP_CLOSE) { printf("FAIL: CLOSE\n"); return 1; }
         render_shop_leave();
         printf("selftest-shop: pages: the sand dollar and UPGRADES open the shop; a row -> modal -> UNLOCK buys; a dim UNLOCK does not; HOW TO EARN; CLOSE\n");
+    }
+    /* the festival shelf (2026-09-18): the second page, the four pieces, the drop, the spots */
+    {
+        static uint16_t fb[TANK_W * TANK_H];
+        tank.sd_unlocks = 0; tank.sd_balance = SD_PRICE_LASER + SD_PRICE_BASS + SD_PRICE_GLOW + SD_PRICE_TOTEM; want = tank.sd_balance;
+        render_shop(&tank, fb, TANK_W);
+        if (render_shop_tap(&tank, 248, 320) != SHOP_TAP_KEPT) { printf("FAIL: MORE did not turn the page\n"); return 1; }
+        render_shop(&tank, fb, TANK_W);
+        if (render_shop_tap(&tank, 100, 98 + 20) != SHOP_TAP_KEPT) { printf("FAIL: the bass stack's row (page 2) did not open its modal\n"); return 1; }
+        int r = render_shop_tap(&tank, 56 + 336 / 2, 48 + 244 - 12 - 16);
+        if (r != SHOP_TAP_BUY + SD_IDX_BASS) { printf("FAIL: UNLOCK on the second page returned %d\n", r); return 1; }
+        render_shop_leave();
+        for (int i = SD_IDX_LASER; i <= SD_IDX_TOTEM; i++) {
+            if (!progression_buy(&tank, i)) { printf("FAIL: could not buy the %s\n", SD_ITEMS[i].name); return 1; }
+            want -= SD_ITEMS[i].price;
+            if (!tank_decor_placeable(i)) { printf("FAIL: the %s is not placeable\n", SD_ITEMS[i].name); return 1; }
+        }
+        SHOP_WANT("after the festival shelf");
+        if (!tank_decor_hangs(SD_IDX_LASER) || tank_decor_hangs(SD_IDX_TOTEM) || tank_decor_hangs(SD_IDX_SNAIL)) { printf("FAIL: only the rig hangs\n"); return 1; }
+        if (progression_sd_item_by_key("totem") != SD_IDX_TOTEM || progression_sd_item_by_key("disco") != -1) { printf("FAIL: the item keys\n"); return 1; }
+        /* the drop: BASS_DROP_PUFFS free bubbles start at the cone */
+        tank.bass_drop_at = tank.clock; SHOP_TICK(1);
+        float bx = tank_decor_x(&tank, SD_IDX_BASS); int near = 0;
+        for (int i = 0; i < MAX_BUBBLE; i++) if (!tank.bubble[i].column && fabsf(tank.bubble[i].x - bx) < 10 && tank.bubble[i].y > TANK_H - 40) near++;
+        if (near < BASS_DROP_PUFFS || tank.bass_drop_at - tank.clock > BASS_DROP_BEATS * BASS_BEAT_S) { printf("FAIL: the drop shook %d bubbles loose, next in %.1f s\n", near, tank.bass_drop_at - tank.clock); return 1; }
+        /* the placement page for a hung piece, and every spot through the save */
+        setup_begin_place(&tank, SD_IDX_LASER);
+        if (!setup_active() || setup_item() != SD_IDX_LASER) { printf("FAIL: the rig's placement page did not open\n"); return 1; }
+        setup_touch(&tank, 120, 250, true); setup_touch(&tank, 190, 250, true); setup_touch(&tank, 190, 250, false);
+        if (fabsf(tank_decor_x(&tank, SD_IDX_LASER) - 190) > 0.01f) { printf("FAIL: the drag did not carry the rig (x %.0f)\n", tank_decor_x(&tank, SD_IDX_LASER)); return 1; }
+        setup_cancel(&tank);
+        tank_decor_set(&tank, SD_IDX_TOTEM, 150, DECOR_Z_FRONT); tank_decor_set(&tank, SD_IDX_GLOW, 380, DECOR_Z_BACK);
+        progression_save(&tank);
+        tank_init(&tank, 4242); progression_boot(&tank); tank.trickle_off = true;
+        if (tank.sd_unlocks != (SD_ITEM_LASER | SD_ITEM_BASS | SD_ITEM_GLOW | SD_ITEM_TOTEM)
+            || fabsf(tank_decor_x(&tank, SD_IDX_LASER) - 190) > 0.01f || fabsf(tank_decor_x(&tank, SD_IDX_TOTEM) - 150) > 0.01f
+            || tank_decor_z(&tank, SD_IDX_TOTEM) != DECOR_Z_FRONT || tank_decor_z(&tank, SD_IDX_GLOW) != DECOR_Z_BACK
+            || fabsf(tank_decor_x(&tank, SD_IDX_BASS) - BASS_X_DEFAULT) > 0.01f) {
+            printf("FAIL: the save lost a festival spot: unlocks %x rig %.0f totem %.0f/%d glow %d bass %.0f\n", tank.sd_unlocks, tank_decor_x(&tank, SD_IDX_LASER),
+                   tank_decor_x(&tank, SD_IDX_TOTEM), tank_decor_z(&tank, SD_IDX_TOTEM), tank_decor_z(&tank, SD_IDX_GLOW), tank_decor_x(&tank, SD_IDX_BASS)); return 1; }
+        /* a save from the placement build (1612 bytes of fields, its festival tail zero): the pieces stand at their defaults */
+        if (truncate(getenv("POCKET_TANK_SAVE"), 1612)) { printf("FAIL: could not truncate the save to 1612\n"); return 1; }
+        tank_init(&tank, 4242); progression_boot(&tank); tank.trickle_off = true;
+        if (fabsf(tank_decor_x(&tank, SD_IDX_TOTEM) - TOTEM_X_DEFAULT) > 0.01f || tank_decor_z(&tank, SD_IDX_GLOW) != DECOR_Z_MIDDLE) { printf("FAIL: a 09-16 save gave a festival piece a spot\n"); return 1; }
+        render_tank(&tank, fb, TANK_W);
+        tank.light_override = true; tank.light_on = false; SHOP_TICK(2);
+        render_tank(&tank, fb, TANK_W);                       /* the night render, every piece lit: no crash, no hang */
+        tank.light_override = false;
+        printf("selftest-shop: the festival shelf: MORE turns the page; rig, stack, sticks and totem bought and placed (the rig hangs); the drop shook %d bubbles; the spots rode the save, a 09-16 save left them at their defaults\n", near);
     }
     /* the save carries it all */
     {
