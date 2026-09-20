@@ -208,9 +208,11 @@ again and again. Nothing is ever needed and nothing is lost: a tank with no
 sand dollars is exactly the tank there was before. The coin on the
 milestones page's TANK row shows your balance, and it (or the UPGRADES
 button) opens the shop: a row per item with its price, UNLOCK when you can
-afford it, IN TANK once you own it, and HOW TO EARN for the list. Three
-rows to a shelf, and MORE turns the page. The first shelf holds the care
-items. The **sword plant** (40) is a fourth bed of broad
+afford it, IN TANK once you own it, IN BOX if you have taken it out, and HOW
+TO EARN for the list. Eight things to buy, three rows to a shelf, and MORE
+turns the page. The first shelf holds the ones that change how the tank
+lives: the sword plant, the snail, and the castle described further down.
+The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
 grass. The **snail** (80) grazes the glass clean cell by cell, crawling
 flat across the pane with its head leading, and walks the floor upright
@@ -225,8 +227,8 @@ night shifts included. The model sees neither: they reach
 the fish the way your own chores do, through cover and the film. Dollars
 earned while you watch show as a small "+N" over the water.
 
-**The festival shelf.** A second page of the shop (MORE turns it) is set
-dressing for a tank that goes to shows: the **laser rig** (60) hangs just
+**The festival shelf.** The other two shelves are set dressing for a tank
+that goes to shows: the **laser rig** (60) hangs just
 under the surface, three lenses that throw green, magenta and cyan beams
 to the floor and sweep them on their own slow tempos, but only once the
 light is out; the **bass stack** (70) is a speaker cabinet on the sand
@@ -415,22 +417,32 @@ between the rule stub and the LLM brain, **U** overlays, **M** milestones,
 **4** the shop, **D** fifty sand dollars to try it,
 **X** the reset prompt, **S** the first-run setup (or drops a birth's pages), **R** force an arrival
 (the birth flow opens), **Z** jump through seven
-hours of sleep, **G** grow the grass and algae now, **V** volume, **B** the
-low-battery notice, **Q** quit.
+hours of sleep, **G** grow the grass and algae now, **V** volume, **B** step
+the staged battery down a quartile (green, yellow, orange, red - the charge
+bolt in the top right follows it, and the low-battery notice fires at the
+bottom of the range), **Q** quit.
+
+Gestures worth knowing: **swipe up from the bottom** opens the overview page
+from anywhere; a click on an open stats card (its MORE button, or anywhere on
+it) opens that fish's own page; and a click on the disco ball lowers it and
+runs the show.
 
 Flags: `--fresh` starts a new random tank, `--fast N` runs tended time N×
 faster so you can watch fish grow up, `--greedy` disables sampling,
 `--narrate` prints every decision as it's made, `--snapshot <prefix>` writes
-PPM frames of the tank, card, milestones page, the shop, the placement
-page, the castle (in front, behind, its page), reset prompt, the setup
-pages, and the three pages of a birth.
+PPM frames of the tank, card, milestones page, the shop's shelves, the
+placement page, the castle (in front, behind, its page), the tank at night
+with the festival shelf lit, reset prompt, the setup pages, and the three
+pages of a birth.
 
 Headless checks, all of which run in CI-style without a window:
 `--selftest` (reflex layer), `--selftest-llm [min]` (the real model),
 `--selftest-pop` (arrivals, inherited looks, saves, the setup and birth flows), `--selftest-sleep` (sleep metabolism,
 the deep-sleep wake, and ravenous begging), `--selftest-hunger` (the hunger economy),
 `--selftest-tend` (grass, algae, trust holds), `--selftest-shop` (sand
-dollars, the shop, the plant, the snail, the festival shelf), and `--bench` (render cost).
+dollars, the shop, the plant, the snail, the castle, the festival shelf, the
+fish playing with the glow sticks, the totem parade, the disco ball, the box
+and the castle-gate milestone), and `--bench` (render cost).
 
 ## Try it: firmware in QEMU
 
@@ -552,8 +564,10 @@ seven-minute prompt check before an overnight run is always worth it.
 ## Layout
 
 - `common/` — everything shared verbatim by sim and firmware: `tank.c`
-  (reflex layer, the snail), `render.c` (RGB565 software renderer, stats
-  card, milestones page, the shop, the reset prompt and its pixel font),
+  (reflex layer, the snail, the glow sticks and the totem parade),
+  `render.c` (RGB565 software renderer, stats card, milestones page, the
+  shop, the reset prompt and its pixel font), `ui_ext.c` (a fish's own page
+  and the charge bolt, drawn with render.h's public primitives only),
   `progression.c` (the long game, the sand dollars and persistence),
   `icons.c` (baked pixel art), `audio.c` (the sound mixer), `notice.c` (the
   milestone and low-battery announcements), `llm/` (4-bit engine, word
@@ -567,7 +581,8 @@ seven-minute prompt check before an overnight run is always worth it.
 - `installer/` — the browser installer page and the vendored ESP Web Tools
   bundle; `tools/make_installer.py` assembles the upload folder
 - `tools/` — the icon baker, the sound bank builder, the installer
-  assembler, and a serial bench client
+  assembler, a serial bench client, and `win_upgrade/` (the Windows
+  double-click upgrader and the guard that proves it cannot reach a save)
 - `assets/icons/` — the pixel-art source for the stats card, the badges,
   the shop and the snail
 - `assets/sounds/` — the cues (16 kHz mono) and their levels
@@ -616,7 +631,28 @@ seven-minute prompt check before an overnight run is always worth it.
   where along the floor and whether it stands behind, among or in front
   of the fish
 - ✅ The festival shelf: a laser rig that sweeps the water once the light
-  is out, a bass stack that thumps and drops, glow sticks, a rail totem
+  is out, a bass stack that thumps and drops, glow sticks, a rail totem and
+  a disco ball
+- ✅ The fish play with it. A fish the model puts on PLAY carries a glow
+  stick up and lets it go, so the pile ends up strewn across the floor (and
+  a stick that meets the castle lands on its wall walk or is shed off a
+  tower's point). A really sociable one lifts the totem, the lights drop,
+  the school gathers, and with a speaker in the tank they march to it for a
+  ninety-second party before marching home. None of it is in the model's
+  schema, which is frozen: it asks to play or to follow, and the reflex
+  layer decides what that looks like
+- ✅ A fish's own page, behind MORE on its card or its popup: its levels as
+  bars you can tap for what they mean, what it is doing, the last thing that
+  happened to it, and the milestones it has earned here - hidden until they
+  happen
+- ✅ The box: an owned piece can be taken out of the tank and put back, and
+  removing really forgets, so putting it back is a fresh placement
+- ✅ Knowing the charge: a lightning bolt in the top right, green through
+  red by quartile, and at 2% the tank saves and powers itself off rather
+  than being cut off mid-sentence by the PMIC
+- ✅ A Windows upgrader: CI builds `PocketTankUpgrade.exe` and attaches it
+  to a fixed release; it rewrites the app and provably cannot reach the save
+  or the model partition
 - ✅ Browser installer: one click from Chrome or Edge, hosted at
   stratobuilds.com; updating is the same click and never erases a tank
 - 🔋 In progress: battery life. The first night on the board's power-off
