@@ -17,8 +17,9 @@ const char *const GOAL_NAMES[GOAL_COUNT] = {
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
 const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
-    "welcome", "wheel_tick", "confirm",
+    "welcome", "wheel_tick", "confirm", "glow_play",
 };
+static float s_glow_cool[N_FISH_MAX];   /* glow sticks: seconds until this fish may take one again (not saved) */
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
 /* the last moment per fish (tank.h): tank_emit has no tank_t, so tank_tick
@@ -282,6 +283,8 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < SD_ITEM_COUNT; i++) { t->decor_x[i] = 0; t->decor_z[i] = DECOR_Z_MIDDLE; }
     t->decor_z[SD_IDX_CASTLE] = DECOR_Z_FRONT;      /* the castle has no AMONG; it starts swim-through */
     t->bass_drop_at = 0;
+    for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; t->glow[i].held_s = 0; t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].ang = 0; }
+    for (int i = 0; i < N_FISH_MAX; i++) s_glow_cool[i] = 0;
     for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
     s_emit_clock = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
@@ -749,6 +752,7 @@ float tank_decor_top_y(const tank_t *t, int item) {
     }
 }
 void tank_decor_set(tank_t *t, int item, float x, int z) {
+    if (item < 0 || item >= SD_ITEM_COUNT) return;      /* explicit, so the writes below are provably in range */
     if (!tank_decor_placeable(item)) return;
     float half = tank_decor_half_w(item), lo = DECOR_MARGIN + half, hi = TANK_W - DECOR_MARGIN - half;
     if (x < lo) x = lo;
@@ -757,7 +761,80 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
     if (tank_decor_z_count(item) == 2 && z == DECOR_Z_MIDDLE) z = DECOR_Z_FRONT;   /* no AMONG */
     t->decor_x[item] = x; t->decor_z[item] = (uint8_t)z;
+    if (item == SD_IDX_GLOW && (t->sd_unlocks & SD_ITEM_GLOW)) tank_glow_place(t);   /* the pile follows the finger */
 }
+/* ---- the glow sticks (SD_ITEM_GLOW): the fish play with them -----------
+ * See the note in tank.h. The model is never told; it asks for DART_PLAY and
+ * this is what that turns into when there is a stick within reach. */
+void tank_glow_place(tank_t *t) {
+    static const float dx[GLOW_N]  = { -8, -2, 4, 9 };
+    static const float ang[GLOW_N] = { -0.35f, 0.55f, -0.12f, 0.75f };
+    float gx = tank_decor_x(t, SD_IDX_GLOW);
+    for (int i = 0; i < GLOW_N; i++) {
+        /* exactly ON the sand line, so a freshly laid pile reads as resting
+           and a fish can take one at once (they used to sit a hair above it,
+           which glow_tick correctly treated as still falling) */
+        t->glow[i].x = gx + dx[i]; t->glow[i].y = GLOW_REST_Y;
+        t->glow[i].ang = ang[i]; t->glow[i].spin = 0; t->glow[i].vx = t->glow[i].vy = 0;
+        t->glow[i].held_s = 0; t->glow[i].carrier = -1;
+    }
+}
+/* is this fish already holding one? (a fish carries at most a single stick) */
+static bool glow_busy(const tank_t *t, int fish) {
+    for (int g = 0; g < GLOW_N; g++) if (t->glow[g].carrier == fish) return true;
+    return false;
+}
+static void glow_tick(tank_t *t, float dt) {
+    if (!(t->sd_unlocks & SD_ITEM_GLOW)) return;
+    for (int i = 0; i < N_FISH_MAX; i++) if (s_glow_cool[i] > 0) s_glow_cool[i] -= dt;
+    for (int g = 0; g < GLOW_N; g++) {
+        glow_t *s = &t->glow[g];
+        if (s->carrier >= 0) {                              /* being carried */
+            if (s->carrier >= t->n_fish) { s->carrier = -1; s->held_s = 0; continue; }
+            const fish_t *f = &t->fish[s->carrier];
+            s->x = f->x + cosf(f->heading) * 9.0f;          /* just under the mouth, turned the way it swims */
+            s->y = f->y + 5.0f;
+            s->ang = f->heading + 0.5f;
+            s->held_s += dt;
+            bool high    = s->y <= GLOW_RELEASE_Y;          /* got it up to the top: the whole point */
+            bool rattled = t->startled || f->stress > 7.5f || t->night;   /* a fright, or lights out: drop it */
+            if ((s->held_s > GLOW_CARRY_MIN_S && high) || s->held_s > GLOW_CARRY_MAX_S || rattled) {
+                int who = s->carrier;
+                s->carrier = -1; s->held_s = 0; s->vy = 0;
+                s->vx = cosf(f->heading) * tank_randf(t, 5.0f, 16.0f);   /* let go by a moving fish: it keeps
+                                                                            that sideways throw, and THAT is
+                                                                            what walks the pile down the tank */
+                s->spin = tank_randf(t, -1.4f, 1.4f);       /* it tumbles on the way down */
+                s_glow_cool[who] = GLOW_PLAY_COOL_S;
+                if (high && !rattled) tank_emit(TEV_GLOW_PLAY, who);
+            }
+            continue;
+        }
+        if (s->y < GLOW_REST_Y) {                           /* falling */
+            s->vy += (GLOW_SINK_PX_S - s->vy) * (dt * 3.0f < 1.0f ? dt * 3.0f : 1.0f);
+            s->y += s->vy * dt;
+            s->x += s->vx * dt;
+            s->vx -= s->vx * (dt * 0.7f);                                /* the water takes the throw out of it */
+            s->x += sinf(t->clock * 1.7f + g * 1.3f) * dt * 7.0f;        /* ... and it wanders as it sinks */
+            s->ang += s->spin * dt;
+            if (s->y >= GLOW_REST_Y) {                      /* landed: it lies where it fell */
+                s->y = GLOW_REST_Y; s->vy = 0; s->vx = 0; s->spin = 0;
+                s->ang = tank_randf(t, -0.6f, 0.6f);        /* flat-ish on the sand */
+                s->x = clampf(s->x, DECOR_MARGIN, TANK_W - DECOR_MARGIN);
+            }
+            continue;
+        }
+        for (int i = 0; i < t->n_fish; i++) {               /* lying there: can a playing fish take it? */
+            const fish_t *f = &t->fish[i];
+            if (s_glow_cool[i] > 0 || f->goal.id != GOAL_DART_PLAY) continue;
+            if (glow_busy(t, i)) continue;
+            if (tank_dist(f->x, f->y, s->x, s->y) > GLOW_REACH) continue;
+            s->carrier = (int8_t)i; s->held_s = 0;
+            break;
+        }
+    }
+}
+
 /* the bass stack (SD_ITEM_BASS): the thump is a picture (render.c reads the
  * clock); the DROP, every BASS_DROP_BEATS beats, shakes BASS_DROP_PUFFS of
  * the free bubbles out of the cone - the flirt's puff, from the sand */
@@ -1474,6 +1551,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     }
     snail_tick(t, dt);
     bass_tick(t);
+    glow_tick(t, dt);
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {

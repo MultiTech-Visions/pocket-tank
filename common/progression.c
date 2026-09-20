@@ -107,6 +107,12 @@ typedef struct {
      * selftest-shop asserts the offset. */
     float    decor_x[SD_DECOR_SAVE_N];
     uint8_t  decor_z1[SD_DECOR_SAVE_N];
+    /* where the glow sticks have got to (2026-09-20). The fish carry them up
+     * and drop them, so the pile wanders: this IS the state worth keeping.
+     * Zeros mean a save from before they could move - the pile is re-laid at
+     * the keeper's spot. Who was holding one is not saved; a boot starts with
+     * every stick on the sand. */
+    float    glow_x[GLOW_N], glow_y[GLOW_N], glow_ang[GLOW_N];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -203,14 +209,16 @@ bool progression_buy(tank_t *t, int item) {
     t->sd_balance -= it->price; t->sd_unlocks |= it->bit;
     if (it->bit == SD_ITEM_PLANT) tank_plant_place(t);
     if (it->bit == SD_ITEM_SNAIL) tank_snail_place(t);
+    if (it->bit == SD_ITEM_GLOW)  tank_glow_place(t);
     if (it->bit == SD_ITEM_CASTLE) tank_castle_place(t);
     /* the festival pieces land at their default spot (tank_decor_x) and
        the placement page opens over them; nothing else to set up */
     progression_save(t);                                   /* a purchase sticks at once */
     return true;
 }
+size_t progression_save_local_tail_offset(void) { return offsetof(save_t, decor_x); }
 bool progression_save_tail_is_last(void) {
-    return offsetof(save_t, decor_z1) + sizeof(((save_t *)0)->decor_z1) == sizeof(save_t);
+    return offsetof(save_t, glow_ang) + sizeof(((save_t *)0)->glow_ang) == sizeof(save_t);
 }
 int progression_sd_item_by_key(const char *key) {
     for (int i = 0; i < SD_ITEM_COUNT; i++) if (!strcmp(key, SD_ITEMS[i].key)) return i;
@@ -564,6 +572,14 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         int z = sv.decor_z1[i] - 1 < DECOR_Z_N ? sv.decor_z1[i] - 1 : DECOR_Z_MIDDLE;
         if (sv.decor_x[i] > 0) tank_decor_set(t, i, sv.decor_x[i], z); else t->decor_z[i] = (uint8_t)z;   /* x 0 = the default spot */
     }
+    if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
+        if (sv.glow_x[0] > 0) {
+            for (int i = 0; i < GLOW_N; i++) {
+                t->glow[i].x = sv.glow_x[i]; t->glow[i].y = sv.glow_y[i]; t->glow[i].ang = sv.glow_ang[i];
+                t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].held_s = 0; t->glow[i].carrier = -1;
+            }
+        } else tank_glow_place(t);                   /* an older save: back in a tidy fan */
+    }
     s_sd_prev_feedings = t->player_feedings;         /* meals before this boot are not back-paid */
     s_sd_pending = 0;
     s_arrival_pending = sv.arrival_pending;
@@ -745,6 +761,9 @@ void progression_save(tank_t *t) {
     sv.castle_x = t->decor_x[SD_IDX_CASTLE] > 0 ? t->decor_x[SD_IDX_CASTLE] : 0; sv.castle_z1 = (uint8_t)(t->decor_z[SD_IDX_CASTLE] + 1);
     for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {
         sv.decor_x[i] = t->decor_x[i] > 0 ? t->decor_x[i] : 0; sv.decor_z1[i] = (uint8_t)(t->decor_z[i] + 1);
+    }
+    for (int i = 0; i < GLOW_N; i++) {               /* a carried stick saves where it is; it lands on the next boot */
+        sv.glow_x[i] = t->glow[i].x; sv.glow_y[i] = t->glow[i].y; sv.glow_ang[i] = t->glow[i].ang;
     }
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);

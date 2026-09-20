@@ -1841,14 +1841,34 @@ static int selftest_shop(void) {
             || fabsf(tank_decor_x(&tank, SD_IDX_BASS) - BASS_X_DEFAULT) > 0.01f) {
             printf("FAIL: the save lost a festival spot: unlocks %x rig %.0f totem %.0f/%d glow %d bass %.0f\n", tank.sd_unlocks, tank_decor_x(&tank, SD_IDX_LASER),
                    tank_decor_x(&tank, SD_IDX_TOTEM), tank_decor_z(&tank, SD_IDX_TOTEM), tank_decor_z(&tank, SD_IDX_GLOW), tank_decor_x(&tank, SD_IDX_BASS)); return 1; }
-        /* a save from the placement build (1612 bytes of fields, its festival tail zero): the pieces stand at their defaults */
-        if (truncate(getenv("POCKET_TANK_SAVE"), 1612)) { printf("FAIL: could not truncate the save to 1612\n"); return 1; }
+        /* exactly what an upstream build writes, with none of this fork's tail:
+           the festival pieces must come back standing at their defaults */
+        if (truncate(getenv("POCKET_TANK_SAVE"), (long)progression_save_local_tail_offset())) { printf("FAIL: could not truncate the save to the local tail\n"); return 1; }
         tank_init(&tank, 4242); progression_boot(&tank); tank.trickle_off = true;
         if (fabsf(tank_decor_x(&tank, SD_IDX_TOTEM) - TOTEM_X_DEFAULT) > 0.01f || tank_decor_z(&tank, SD_IDX_GLOW) != DECOR_Z_MIDDLE) { printf("FAIL: a 09-16 save gave a festival piece a spot\n"); return 1; }
         render_tank(&tank, fb, TANK_W);
         tank.light_override = true; tank.light_on = false; SHOP_TICK(2);
         render_tank(&tank, fb, TANK_W);                       /* the night render, every piece lit: no crash, no hang */
         tank.light_override = false;
+        /* the glow sticks are the fish's toys (2026-09-20): a stick let go up
+           high sinks somewhere new, and the pile walks around the floor. The
+           carry is forced here rather than waited for - the advisor re-decides
+           goals inside tank_tick, and what is under test is the RELEASE. */
+        tank_glow_place(&tank);
+        { float gx0 = tank.glow[0].x;
+          tank.glow[0].carrier = 0; tank.glow[0].held_s = GLOW_CARRY_MIN_S + 0.1f;
+          tank.fish[0].y = GLOW_RELEASE_Y - 4; tank.fish[0].heading = 0; tank.fish[0].stress = 1;
+          SHOP_TICK(2);
+          if (tank.glow[0].carrier >= 0) { printf("FAIL: a stick carried to the top was not let go\n"); return 1; }
+          SHOP_TICK(60 * 60);
+          if (fabsf(tank.glow[0].y - GLOW_REST_Y) > 0.6f) { printf("FAIL: the stick never settled (y %.1f)\n", tank.glow[0].y); return 1; }
+          if (tank.glow[0].x < DECOR_MARGIN - 1 || tank.glow[0].x > TANK_W - DECOR_MARGIN + 1) { printf("FAIL: it landed off the sand (%.0f)\n", tank.glow[0].x); return 1; }
+          /* a fright ends a carry wherever it is */
+          tank.glow[1].carrier = 1; tank.glow[1].held_s = 2.0f; tank.fish[1].y = 300; tank.fish[1].stress = 9.0f;
+          SHOP_TICK(2);
+          if (tank.glow[1].carrier >= 0) { printf("FAIL: a frightened fish kept hold of its stick\n"); return 1; }
+          tank.fish[1].stress = 1;
+          printf("selftest-shop: glow sticks: one carried up and let go sank from x %.0f to %.0f; a fright ends a carry; the pile moves\n", gx0, tank.glow[0].x); }
         printf("selftest-shop: the festival shelf: MORE turns the page; rig, stack, sticks and totem bought and placed (the rig hangs); the drop shook %d bubbles; the spots rode the save, a 09-16 save left them at their defaults\n", near);
     }
     /* the save carries it all */

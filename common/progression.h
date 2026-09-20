@@ -184,6 +184,10 @@ int  progression_sd_item_by_key(const char *key);
 /* false once an upstream sync has appended fields AFTER this fork's decor
  * tail; selftest-shop asserts it (see the LOCAL TAIL note in progression.c) */
 bool progression_save_tail_is_last(void);
+/* byte offset where this fork's own tail begins inside the saved blob. A test
+ * truncating a save to exactly this length gets what an upstream build would
+ * have written, with none of this fork's state. */
+size_t progression_save_local_tail_offset(void);
 /* dollars awarded since the last call (the toast over the live tank) */
 int  progression_sd_take_award(void);
 /* director / tests: dollars from nowhere (negative takes them away) */

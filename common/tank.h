@@ -191,6 +191,35 @@ typedef struct {
 
 typedef struct { float x, y, age; bool alive, from_player; } food_t;
 typedef struct { float x, y, vy, wobble; bool column; } bubble_t;
+/* ---- glow sticks the fish actually play with (2026-09-20) ----------------
+ * The shop drops four in a fan where the keeper put the pile, but they do not
+ * stay there. A fish the MODEL has put on GOAL_DART_PLAY picks up a stick it
+ * swims near, carries it up, and lets go near the surface; the stick tumbles
+ * back down and lies wherever it lands. Over a few days the pile ends up
+ * strewn across the floor, which is the whole point.
+ *
+ * Nothing here reaches the advisor. Schema v4 is frozen and the model is
+ * never told a stick exists: it decides to PLAY, and this layer decides what
+ * playing looks like, exactly as it already turns every other goal into
+ * motion. A startled or frightened fish drops what it is holding, and so does
+ * one caught by lights-out. */
+#define GLOW_N            4
+#define GLOW_REST_Y       (TANK_H - 18.0f)   /* lying on the sand */
+#define GLOW_SINK_PX_S    17.0f              /* terminal speed of a dropped stick */
+#define GLOW_REACH        20.0f              /* a playing fish this close can take one */
+#define GLOW_CARRY_MIN_S  1.2f               /* ... and holds it at least this long */
+#define GLOW_CARRY_MAX_S  16.0f              /* ... and has let go by then, wherever it is */
+#define GLOW_RELEASE_Y    (TANK_H * 0.32f)   /* "up to the top": let go at or above this */
+#define GLOW_PLAY_COOL_S  30.0f              /* a fish that just played leaves them alone a while */
+typedef struct {
+    float  x, y;          /* centre; y == GLOW_REST_Y means it is lying on the sand */
+    float  ang, spin;     /* it tumbles as it falls and keeps the angle it lands at */
+    float  vx, vy;        /* 0 while resting or carried; vx is what the carrier's own
+                           * motion threw it sideways with, and it is what scatters the pile */
+    float  held_s;        /* seconds the carrier has had it */
+    int8_t carrier;       /* the fish holding it, or -1 */
+} glow_t;
+
 
 typedef struct tank {
     fish_t   fish[N_FISH_MAX];
@@ -284,6 +313,10 @@ typedef struct tank {
     uint8_t  decor_z[SD_ITEM_N];
     /* the bass stack's next drop, on the tank clock (tank.c; not saved) */
     float    bass_drop_at;
+    /* the glow sticks, once bought: where each one is and who has it. The
+     * positions and angles are saved (that IS the scattering); who is holding
+     * one is not - a boot starts with every stick on the sand. */
+    glow_t   glow[GLOW_N];
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -519,6 +552,9 @@ veg_kind_t tank_veg_kind(const tank_t *t, int b);
  * snail on the glass, bottom left */
 void  tank_plant_place(tank_t *t);
 void  tank_snail_place(tank_t *t);
+/* (re)pile the sticks in a fan at the keeper's spot - the purchase, and every
+ * MOVE of the pile on the placement page */
+void  tank_glow_place(tank_t *t);
 void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
@@ -548,7 +584,8 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define LASER_X_DEFAULT (TANK_W * 0.5f)
 #define BASS_HALF_W     14                 /* the cabinet: 28 x 30 on the sand */
 #define BASS_X_DEFAULT  404.0f             /* the right-hand floor, clear of the castle's default span */
-#define GLOW_HALF_W     13                 /* four sticks fanned on the sand */
+#define GLOW_HALF_W     13                 /* four sticks fanned on the sand (glow_t and the
+                                            * play rules are up with the other tank types) */
 #define GLOW_X_DEFAULT  150.0f             /* the open floor left of the castle (208..392 by default) */
 #define TOTEM_HALF_W    9                  /* the pole and its emblem */
 #define TOTEM_X_DEFAULT 110.0f             /* left of the glow sticks, clear of the castle */

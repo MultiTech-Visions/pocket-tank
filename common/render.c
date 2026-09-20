@@ -367,17 +367,22 @@ static void draw_bass(ctx_t *c, const tank_t *t) {
 /* glow sticks: four cracked sticks fanned on the sand in kandi colours -
  * pastel plastic by day, lit with a halo after dark, each on its own slow pulse */
 static void draw_glow(ctx_t *c, const tank_t *t) {
-    static const struct { float dx, dy, ang; uint32_t col; } st[4] = {
-        { -8, -2, -0.35f, 0xff3fa8 }, { -2, -5, 0.55f, 0x5cff3a }, { 4, -3, -0.12f, 0xffa028 }, { 9, -6, 0.75f, 0x38b8ff } };
-    float gx = tank_decor_x(t, SD_IDX_GLOW);
+    static const uint32_t COL[GLOW_N] = { 0xff3fa8, 0x5cff3a, 0xffa028, 0x38b8ff };
     ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
-    for (int i = 0; i < 4; i++) {
-        float cx = gx + st[i].dx, cy = FLOOR_Y + st[i].dy, hx = cosf(st[i].ang) * 6.5f, hy = sinf(st[i].ang) * 6.5f;
-        float pulse = t->night ? 0.75f + 0.25f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.55f;
-        if (t->night) fill_ellipse(&lit, cx, cy, 10, 6, st[i].col, (int)(46 * pulse));            /* the halo */
-        src_t s = src_color(st[i].col, lit.dim);
-        line_blend(&lit, cx - hx, cy - hy, cx + hx, cy + hy, &s, (int)(255 * pulse), true);
-        line_blend(&lit, cx - hx, cy - hy + 1, cx + hx, cy + hy + 1, &s, (int)(190 * pulse), false);
+    for (int i = 0; i < GLOW_N; i++) {
+        const glow_t *g = &t->glow[i];
+        if (g->x <= 0 && g->y <= 0) continue;                 /* never placed */
+        float cx = g->x, cy = g->y;
+        float hx = cosf(g->ang) * 6.5f, hy = sinf(g->ang) * 6.5f;
+        /* carried or falling it is lit whatever the hour - a stick in the water
+           is the thing you are meant to be watching */
+        bool live = g->carrier >= 0 || g->vy > 0;
+        float pulse = (t->night || live) ? 0.75f + 0.25f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.55f;
+        ctx_t *dst = (t->night || live) ? &lit : c;
+        if (t->night || live) fill_ellipse(dst, cx, cy, 10, 6, COL[i], (int)(46 * pulse));   /* the halo */
+        src_t s = src_color(COL[i], dst->dim);
+        line_blend(dst, cx - hx, cy - hy, cx + hx, cy + hy, &s, (int)(255 * pulse), true);
+        line_blend(dst, cx - hx, cy - hy + 1, cx + hx, cy + hy + 1, &s, (int)(190 * pulse), false);
     }
 }
 /* the totem: a pole in the sand with a glowing alien head and two ribbons
