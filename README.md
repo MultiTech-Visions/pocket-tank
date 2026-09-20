@@ -244,8 +244,12 @@ pointed towers is shed off the point and carries on down. And a really
 sociable fish will lift the **totem** out of the sand and parade it: the rest
 of the school leaves off what it was idly doing and converges on the carrier,
 and if there is a bass stack in the tank the carrier leads them all to the
-speaker. A hungry or frightened fish is never pulled into any of this, and
-nor is a resting one: those are the model's calls. Nothing here is in the
+speaker. Lights-out is the best time for a glow stick, so a fish
+keeps hold of one when the tank goes dark and comes back to them twice as
+often. The dark itself is a little less deep than it used to be, because
+there is more worth seeing down there now. A hungry or frightened fish is
+never pulled into any of this, and nor is a resting one: those are the
+model's calls. Nothing here is in the
 model's schema at all, which is frozen; it asks to play or to follow, and the
 reflex layer decides what that looks like. All four are placed
 like the plant (the rig along the surface, the rest along the floor, each

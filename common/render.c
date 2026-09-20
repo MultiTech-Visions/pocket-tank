@@ -379,7 +379,10 @@ static void draw_glow(ctx_t *c, const tank_t *t) {
         bool live = g->carrier >= 0 || g->vy > 0;
         float pulse = (t->night || live) ? 0.75f + 0.25f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.55f;
         ctx_t *dst = (t->night || live) ? &lit : c;
-        if (t->night || live) fill_ellipse(dst, cx, cy, 10, 6, COL[i], (int)(46 * pulse));   /* the halo */
+        if (t->night || live) {                               /* the halo: enough to light the sand around it */
+            fill_ellipse(dst, cx, cy, 17, 11, COL[i], (int)(26 * pulse));
+            fill_ellipse(dst, cx, cy, 11, 7, COL[i], (int)(46 * pulse));
+        }
         src_t s = src_color(COL[i], dst->dim);
         line_blend(dst, cx - hx, cy - hy, cx + hx, cy + hy, &s, (int)(255 * pulse), true);
         line_blend(dst, cx - hx, cy - hy + 1, cx + hx, cy + hy + 1, &s, (int)(190 * pulse), false);
@@ -408,7 +411,10 @@ static void draw_totem(ctx_t *c, const tank_t *t) {
     }
     ctx_t lit = *c; if (t->night || carried) lit.dim = 1.0f;   /* on parade it is lit whatever the hour */
     float glow = (t->night || carried) ? 0.8f + 0.2f * fast_sin(t->clock * (carried ? 3.0f : 1.4f)) : 1.0f;
-    if (t->night || carried) fill_ellipse(&lit, tx, top + 9, 15, 15, 0x5cff3a, (int)(40 * glow));
+    if (t->night || carried) {                                /* the head throws a little light of its own */
+        fill_ellipse(&lit, tx, top + 9, 26, 26, 0x5cff3a, (int)(20 * glow));
+        fill_ellipse(&lit, tx, top + 9, 16, 16, 0x5cff3a, (int)(40 * glow));
+    }
     fill_ellipse(&lit, tx, top + 9, 8, 10, 0x5cff3a, 255);                             /* the head */
     fill_ellipse(&lit, tx - 2, top + 6, 4, 3, 0x8dff70, 160);                          /* its sheen */
     fill_ellipse(&lit, tx - 3.5f, top + 9.5f, 2.6f, 4, 0x061006, 255);                 /* the eyes */
@@ -1122,7 +1128,10 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
 }
 
 void render_tank(const tank_t *t, uint16_t *fb, int stride) {
-    float dim = t->night ? 0.45f : 1.0f;
+    /* Night used to drop the palette to 0.45. With the sticks, the totem and
+       the rig all doing their thing after dark there is more to see down
+       there, so the dark is 80% as deep as it was: 1 - 0.8 * (1 - 0.45). */
+    float dim = t->night ? 0.56f : 1.0f;
     ctx_t c = ctx_full(fb, stride, dim);
     int64_t p0 = PROF_MARK();
     bool cached = g_scene && g_dirty && stride == TANK_W;

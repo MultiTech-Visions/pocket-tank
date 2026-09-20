@@ -210,7 +210,10 @@ typedef struct { float x, y, vy, wobble; bool column; } bubble_t;
 #define GLOW_CARRY_MIN_S  1.2f               /* ... and holds it at least this long */
 #define GLOW_CARRY_MAX_S  16.0f              /* ... and has let go by then, wherever it is */
 #define GLOW_RELEASE_Y    (TANK_H * 0.32f)   /* "up to the top": let go at or above this */
-#define GLOW_PLAY_COOL_S  30.0f              /* a fish that just played leaves them alone a while */
+/* the quiet after a fish plays with a stick. Lights-out is the BEST time for
+ * glow sticks, so the dark halves it: they come back to them twice as often. */
+#define GLOW_PLAY_COOL_S  20.0f              /* lights on */
+#define GLOW_PLAY_COOL_NIGHT_S 10.0f         /* lights out: more play, not less */
 typedef struct {
     float  x, y;          /* centre; y == GLOW_REST_Y means it is lying on the sand */
     float  ang, spin;     /* it tumbles as it falls and keeps the angle it lands at */

@@ -820,7 +820,10 @@ static void glow_tick(tank_t *t, float dt) {
             s->ang = f->heading + 0.5f;
             s->held_s += dt;
             bool high    = s->y <= GLOW_RELEASE_Y;          /* got it up to the top: the whole point */
-            bool rattled = t->startled || f->stress > 7.5f || t->night;   /* a fright, or lights out: drop it */
+            /* Lights-out used to end a carry. It is exactly the wrong call:
+               the dark is the best time to have one, so only a real fright
+               makes a fish let go now. */
+            bool rattled = t->startled || f->stress > 7.5f;
             if ((s->held_s > GLOW_CARRY_MIN_S && high) || s->held_s > GLOW_CARRY_MAX_S || rattled) {
                 int who = s->carrier;
                 s->carrier = -1; s->held_s = 0; s->vy = 0;
@@ -828,7 +831,7 @@ static void glow_tick(tank_t *t, float dt) {
                                                                             that sideways throw, and THAT is
                                                                             what walks the pile down the tank */
                 s->spin = tank_randf(t, -1.4f, 1.4f);       /* it tumbles on the way down */
-                s_glow_cool[who] = GLOW_PLAY_COOL_S;
+                s_glow_cool[who] = t->night ? GLOW_PLAY_COOL_NIGHT_S : GLOW_PLAY_COOL_S;
                 if (high && !rattled) tank_emit(TEV_GLOW_PLAY, who);
             }
             continue;
