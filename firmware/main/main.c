@@ -21,6 +21,7 @@
 #include "display_port.h"
 #include "advisor_llm_esp.h"
 #include "touch_port.h"
+#include "ui_ext.h"
 #include "battery_port.h"
 #include "imu_port.h"
 #include "director.h"
@@ -330,7 +331,20 @@ static void on_tank_event(int ev, int fish, void *ud) {
  * the pill then stays on screen until charging is seen or the gauge has
  * read above 10% for 30 s */
 #define LOW_BATTERY_FRAC 0.10f
+/* the last line (2026-09-20). Below the 10% notice there used to be nothing:
+ * the tank ran until the AXP2101's own undervoltage protection dropped the
+ * rails, an abrupt cut with no save, and a cell taken all the way flat also
+ * loses the RTC - so the next boot cannot tell how long the tank was away and
+ * the fish never live the missing days. At CRIT_BATTERY_FRAC the tank saves
+ * and powers off itself, the same path the PWR key's long press takes. It is
+ * confirmed over CRIT_BATTERY_READS consecutive one-second reads, so one bad
+ * sample from the gauge can never switch off a healthy tank. The director's
+ * staged gauge feeds this too: `battery 1` powers a bench unit off in ~3 s,
+ * which is how to check it without draining a real cell. */
+#define CRIT_BATTERY_FRAC  0.02f
+#define CRIT_BATTERY_READS 3
 static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
+static int   s_bat_crit;                    /* consecutive reads at or under CRIT_BATTERY_FRAC */
 static int s_bat_fake = -1;                 /* director `battery N`: a staged gauge, for the camera (-1 = the real one) */
 void device_fake_battery(int pct) { s_bat_fake = pct < 0 ? -1 : pct > 100 ? 100 : pct; if (pct < 0) s_bat_low = false; }
 static void battery_frame(int64_t now) {
@@ -340,6 +354,15 @@ static void battery_frame(int64_t now) {
     s_bat_ok = battery_port_read(&s_bat_frac, &s_bat_chg);
     if (s_bat_fake >= 0) { s_bat_ok = true; s_bat_frac = s_bat_fake / 100.0f; s_bat_chg = false; }   /* staged: on battery at that level, whatever the cable says */
     if (!s_bat_ok) return;
+    if (!s_bat_chg && s_bat_frac <= CRIT_BATTERY_FRAC) {      /* the last line: save while there is still power to do it */
+        if (++s_bat_crit >= CRIT_BATTERY_READS) {
+            ESP_LOGW(TAG, "battery critical: %d%% on %d reads - saving the tank and powering off",
+                     (int)(s_bat_frac * 100 + 0.5f), s_bat_crit);
+            enter_poweroff();                                 /* saves, quiesces, cuts the rails */
+            return;
+        }
+        ESP_LOGW(TAG, "battery critical: %d%% (%d/%d reads)", (int)(s_bat_frac * 100 + 0.5f), s_bat_crit, CRIT_BATTERY_READS);
+    } else s_bat_crit = 0;
     if (!s_bat_low) {
         if (!s_bat_chg && s_bat_frac <= LOW_BATTERY_FRAC) {
             s_bat_low = true; above_since = 0; notice_low_battery();
@@ -407,7 +430,7 @@ static void tank_task(void *arg) {
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
         progression_tick(&tank, dt);
         battery_frame(now);
-        notice_tick(&tank, dt, setup_active() || touch_port_confirm_up() || touch_port_milestones() || touch_port_settings() || touch_port_shop());
+        notice_tick(&tank, dt, setup_active() || touch_port_confirm_up() || touch_port_milestones() || touch_port_settings() || touch_port_shop() || touch_port_fishpage() >= 0);
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
         audio_port_set_night(tank.night);
         { static bool loop_on;                     /* the bubble loop rides the setup's placement page */
@@ -436,7 +459,10 @@ static void tank_task(void *arg) {
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
-            if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
+            if (touch_port_fishpage() >= 0) {    /* a fish's own page: its levels, what it is doing, what last happened */
+                ui_fish_page(&tank, touch_port_fishpage(), fb[cur], TANK_W, tank.clock);
+                sel = -1;
+            } else if (touch_port_milestones()) {  /* milestones page: covers the tank until a tap */
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
@@ -446,11 +472,14 @@ static void tank_task(void *arg) {
                 render_shop(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
-            if (sel >= 0) {                      /* tapped fish: stats card + battery */
+            if (sel >= 0) {                      /* tapped fish: stats card + the exact pill */
                 render_stats_card(&tank, sel, fb[cur], TANK_W);
                 if (s_bat_ok) render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_chg);
-            } else if (s_bat_low && s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop())
-                render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_chg);   /* low: the pill stays up */
+            } else if (s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop() && touch_port_fishpage() < 0)
+                /* the charge bolt (2026-09-20): always on over the live tank, green
+                   through red by quartile, so the tank says it is getting low without
+                   being asked. The precise pill is still a tap away, on the card. */
+                ui_battery_bolt(fb[cur], TANK_W, s_bat_frac, s_bat_chg, tank.clock);
             if (!touch_port_milestones() && !touch_port_settings() && !touch_port_shop()) {   /* an announcement over the live tank */
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);

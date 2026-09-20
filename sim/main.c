@@ -46,6 +46,7 @@
 #include "render.h"
 #include "progression.h"
 #include "setup.h"
+#include "ui_ext.h"
 #include "audio.h"
 #include "notice.h"
 #include "tank_events.h"
@@ -1030,6 +1031,8 @@ static bool llm_active = false;
 static int  selected_fish = -1;      /* click a fish for its stat card */
 static bool ui_visible = true;       /* U toggles all overlays */
 static bool milestones_view = false; /* M toggles the milestones screen */
+static int  fishpage_fish = -1;      /* a fish's own page (ui_fish_page), from either MORE button; -1 = closed */
+static float sim_bat = 0.87f;        /* no cell here: the B key steps it so every bolt colour can be seen */
 static bool confirm_view = false;    /* X: the reset prompt (YES wipes the save) */
 static bool settings_view = false;   /* the settings page (from the milestones page's SETTINGS button) */
 static bool shop_view = false;       /* the shop (the sand dollar on the milestones page's TANK row; $ key) */
@@ -1095,7 +1098,7 @@ static void sound_init(void) {
 }
 /* per frame: the notice queue, the bubble loop, the card cue, night */
 static void sound_frame(uint32_t now, float dt) {
-    notice_tick(&tank, dt, setup_active() || confirm_view || milestones_view || settings_view || shop_view);
+    notice_tick(&tank, dt, setup_active() || confirm_view || milestones_view || settings_view || shop_view || fishpage_fish >= 0);
     int cue = notice_take_cue();
     if (cue >= 0) snd(cue, AUDIO_PITCH_ONE);
     bool loop = setup_active() && !setup_is_birth() && setup_page() == SETUP_PG_BUBBLES;
@@ -1134,7 +1137,8 @@ static void frame_cb(lv_timer_t *timer) {
                        printf("a new fry, %s: the birth flow is up (announce / name / family; S drops it)\n", tank.fish[nb].name); }
     }
     sound_frame(now, dt);
-    if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
+    if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
+    else if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
     else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume());
     else if (shop_view) render_shop(&tank, canvas_buf, TANK_W);
     else {
@@ -1145,6 +1149,7 @@ static void frame_cb(lv_timer_t *timer) {
             if (selected_fish >= 0)
                 render_stats_card(&tank, selected_fish, canvas_buf, TANK_W);
         }
+        ui_battery_bolt(canvas_buf, TANK_W, sim_bat, false, tank.clock);   /* the charge bolt, top right, always */
         const notice_t *nt = notice_current();
         if (nt) render_notice(&tank, canvas_buf, TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
     }
@@ -2106,7 +2111,7 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
         }
-        bool modal = confirm_view || setup_up || settings_view || shop_view;
+        bool modal = confirm_view || setup_up || settings_view || shop_view || fishpage_fish >= 0;
         if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
         if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
         if (!mpress && mdown) {
@@ -2140,9 +2145,20 @@ int main(int argc, char **argv) {
                     else printf("shop: %s refused (balance %d, price %d)\n", SD_ITEMS[item].name, tank.sd_balance, SD_ITEMS[item].price);
                 }
             }
+            else if (fishpage_fish >= 0) {           /* a fish's own page: a bar explains itself, CLOSE leaves */
+                if (ui_fish_page_tap(&tank, fishpage_fish, (float)press_x, (float)press_y) == UI_FP_CLOSE) {
+                    printf("fish page: closed (%s)\n", tank.fish[fishpage_fish].name);
+                    fishpage_fish = -1; ui_fish_page_leave();
+                }
+            }
             else if (milestones_view) {
                 int r = render_milestones_tap(&tank, (float)press_x, (float)press_y);
-                if (r == MS_TAP_CLOSE || r == MS_TAP_SETTINGS || r == MS_TAP_SHOP) {
+                if (r >= MS_TAP_FISH) {              /* the fish popup's MORE: straight into its page */
+                    fishpage_fish = r - MS_TAP_FISH; milestones_view = false;
+                    progression_ack_milestones(&tank); render_milestones_leave();
+                    printf("fish page: %s, from the overview\n", tank.fish[fishpage_fish].name);
+                }
+                else if (r == MS_TAP_CLOSE || r == MS_TAP_SETTINGS || r == MS_TAP_SHOP) {
                     milestones_view = false; settings_view = r == MS_TAP_SETTINGS; shop_view = r == MS_TAP_SHOP;
                     progression_ack_milestones(&tank); render_milestones_leave(); }
                 /* MS_TAP_KEPT: a badge / name opened the detail modal, or the modal closed; anything else: nothing */
@@ -2160,14 +2176,20 @@ int main(int argc, char **argv) {
                 }
                 /* a click ON the open card (its MORE button, or any of it): the
                    milestones page, as the device's touch port does (2026-09-16) */
-                if (selected_fish >= 0 && selected_fish != RENDER_CARD_SNAIL && RENDER_CARD_HIT(press_x, press_y))
-                    milestones_view = true;
+                if (selected_fish >= 0 && selected_fish != RENDER_CARD_SNAIL && RENDER_CARD_HIT(press_x, press_y)) {
+                    fishpage_fish = selected_fish; selected_fish = -1;   /* the card's MORE is now the fish's own page */
+                    printf("fish page: %s, from the card\n", tank.fish[fishpage_fish].name);
+                }
                 else if (best >= 0) selected_fish = (best == selected_fish) ? -1 : best;
                 else if (tank_snail_hit(&tank, (float)press_x, (float)press_y))   /* the snail: its card (2026-09-16) */
                     selected_fish = selected_fish == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL;
                 else if (selected_fish >= 0) selected_fish = -1;   /* card up: empty-glass tap dismisses, nothing else */
                 else tank_touch_tap(&tank, (float)press_x, (float)press_y);
             } else if (press_y < 60 && dy >= 40) tank_feed(&tank, (float)mx, 3);
+            else if (press_y > TANK_H - 70 && dy <= -40) {   /* swipe up from the bottom: the overview */
+                milestones_view = true; selected_fish = -1;
+                printf("swipe up: the overview\n");
+            }
         }
         mdown = mpress;
         if (confirm_view && now_ms - confirm_ms > CONFIRM_MS) { confirm_view = false; printf("reset prompt: timed out, tank kept\n"); }
@@ -2184,7 +2206,12 @@ int main(int argc, char **argv) {
         if (k[SDL_SCANCODE_V] && !vdown) { int v = (audio_volume() + 1) % 3; if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); }
                                            printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
         vdown = k[SDL_SCANCODE_V];
-        if (k[SDL_SCANCODE_B] && !bdown) { notice_low_battery(); printf("low battery notice queued\n"); }
+        if (k[SDL_SCANCODE_B] && !bdown) {          /* step the staged cell down a quartile: green -> yellow -> orange -> red */
+            sim_bat = sim_bat > 0.75f ? 0.62f : sim_bat > 0.50f ? 0.37f : sim_bat > 0.25f ? 0.12f : 0.87f;
+            static const char *const NM[4] = { "RED", "ORANGE", "YELLOW", "GREEN" };
+            printf("battery: %d%% - the bolt is %s\n", (int)(sim_bat * 100 + 0.5f), NM[ui_battery_level(sim_bat)]);
+            if (sim_bat <= 0.25f) { notice_low_battery(); printf("low battery notice queued\n"); }
+        }
         bdown = k[SDL_SCANCODE_B];
         if (k[SDL_SCANCODE_4] && !fourdown && !confirm_view && !setup_up) {   /* $: the shop page */
             shop_view = !shop_view; if (!shop_view) render_shop_leave(); milestones_view = false; settings_view = false; selected_fish = -1;

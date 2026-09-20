@@ -169,7 +169,18 @@ that step through the rest of the group without going back to the page (a
 fish's six badges, the tank's six, the fry's gates, or the fish themselves
 from a fish's name); tap anywhere else to dismiss. At the foot of the
 page: SETTINGS, UPGRADES (the shop) and CLOSE. The shop's and the settings
-page's own CLOSE bring you back here, not out to the tank.
+page's own CLOSE bring you back here, not out to the tank. **Swipe up from
+the bottom of the glass** to open this page from anywhere in the tank.
+
+**A fish's own page.** Tap a fish for its card, then MORE, and you get that
+fish on a screen of its own: its portrait, name, stage and how long it has
+been tended; the eight levels that drive it as labelled bars; what it is
+doing right now and the urgency behind it; and the last thing that happened
+to it, with how long ago. The bars carry the stats card's own icons, used the
+same way the card uses them, so the two screens read as one thing. **Tap any
+bar** and it explains itself in plain words: what that number measures and
+what moves it. The same page sits behind the MORE button on a fish's popup
+on the overview page.
 
 **The next fry.** While the tank can still grow, a NEW FRY row sits under
 the last fish: what the next arrival needs, as badges that light up when
@@ -406,6 +417,22 @@ that won't get that far. The settings page shows the firmware version at
 its foot, small and dim, so you can tell what you run. It is the same mechanism ESPHome and Home
 Assistant use ([ESP Web Tools](https://esphome.github.io/esp-web-tools/)),
 running entirely in the browser over Web Serial.
+
+**Knowing when it is getting low.** A lightning bolt sits in the top right
+corner of the glass whenever the tank is running on its cell. Green above
+three quarters, yellow above half, orange above a quarter, red below it; it
+breathes faster the emptier it gets, and under a red bolt a small bar fills
+as the last quarter drains. Charging turns it teal. Tap a fish and the exact
+pill is on its card, as before. At 10 percent the tank also says so out loud,
+with an announcement and a cue.
+
+**And it puts itself to bed.** At 2 percent, confirmed over three consecutive
+reads so one bad sample can never do it, the tank saves and powers itself off
+the same way a long press on PWR does. That matters for more than the save:
+taken genuinely flat the clock chip loses time too, and a tank that cannot
+tell how long it was away cannot let its fish live the missing days. Stopping
+at 2 percent leaves enough in the cell to keep the clock running. Press PWR
+to bring it back.
 
 **A Windows upgrader, if you'd rather double-click something.** Every push to
 `main` that touches the firmware also builds `PocketTankUpgrade.exe` and

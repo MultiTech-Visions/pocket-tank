@@ -1639,6 +1639,10 @@ static void button(ctx_t *c, int x, int y, int W, int H, uint32_t fill, uint32_t
 }
 /* the same primitives for panels built elsewhere (render.h) */
 int  render_text_w(const char *s, int scale) { return text_w(s, scale); }
+void render_icon(uint16_t *fb, int stride, int x, int y, const icon_t *ic, int alpha) {
+    ctx_t c = ctx_full(fb, stride, 1.0f);
+    blit_icon(&c, x, y, ic, alpha);
+}
 void render_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s) {
     ctx_t c = ctx_full(fb, stride, 1.0f); draw_text(&c, x, y, scale, rgb, s);
 }
@@ -1770,6 +1774,10 @@ static bool g_ms_tip;                /* the gate's tip page is up instead of its
    shows no arrows. */
 static int  g_ms_row = -1, g_ms_k = -1;
 static bool g_ms_tankrow, g_ms_fryrow;
+/* the fish popup's MORE button (2026-09-20): a FISH's modal carries the way
+ * into its own page (ui_fish_page). A gate's modal keeps HOW? instead, and a
+ * tip page has neither. Both the drawing and the hit test read this. */
+static bool ms_fish_more(void) { return g_ms_fish >= 0 && g_ms_kind < 0 && !g_ms_tip; }
 #define MSP_ARROW_W   40             /* the arrow buttons, inset at the modal's top corners */
 #define MSP_ARROW_H   32
 #define MSP_ARROW_IN  10
@@ -1975,12 +1983,15 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     } else if (g_ms_caption[0]) {
         const int X = MSP_MODAL_X, W = MSP_MODAL_W;
         const int Y = g_ms_kind >= 0 ? MSP_FRY_MODAL_Y : MSP_MODAL_Y;
-        const int H = MSP_MODAL_H + (g_ms_caption2[0] ? 20 : 0) + (g_ms_sub[0] ? 24 : 0) + (g_ms_kind >= 0 ? MSP_HOW_H + 14 : 0);
+        const int H = MSP_MODAL_H + (g_ms_caption2[0] ? 20 : 0) + (g_ms_sub[0] ? 24 : 0)
+                    + (g_ms_kind >= 0 || ms_fish_more() ? MSP_HOW_H + 14 : 0);
         rect_fill(&c, X, Y, W, H, 0x04141a);
         rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-        if (g_ms_kind >= 0)                        /* the way further in: HOW?, centred at the foot (Strato: bottom
-                                                      right sat too close to CLOSE for comfort) */
-            button(&c, X + (W - MSP_HOW_W) / 2, Y + H - 10 - MSP_HOW_H, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "HOW?", 2);
+        if (g_ms_kind >= 0 || ms_fish_more())      /* the way further in: HOW? for a gate, MORE for a fish -
+                                                      centred at the foot (Strato: bottom right sat too close
+                                                      to CLOSE for comfort) */
+            button(&c, X + (W - MSP_HOW_W) / 2, Y + H - 10 - MSP_HOW_H, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL,
+                   g_ms_kind >= 0 ? "HOW?" : "MORE", 2);
         if (g_ms_icon) blit_icon_scaled(&c, X + (W - g_ms_icon->w * 2) / 2, Y + 16 + (32 - g_ms_icon->w), g_ms_icon, 2, g_ms_lit);
         else if (g_ms_fish >= 0 && g_ms_fish < t->n_fish) {
             const fish_t *f = &t->fish[g_ms_fish];
@@ -2020,11 +2031,16 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
                 if (x >= MSP_MODAL_X + MSP_MODAL_W - MSP_ARROW_HIT) { ms_step(t, +1); return MS_TAP_KEPT; }
             }
         }
-        if (g_ms_kind >= 0 && !g_ms_tip) {       /* a gate's: the HOW? button opens its tip page */
+        if ((g_ms_kind >= 0 && !g_ms_tip) || ms_fish_more()) {   /* HOW? on a gate, MORE on a fish */
             const int H = MSP_MODAL_H + (g_ms_caption2[0] ? 20 : 0) + (g_ms_sub[0] ? 24 : 0) + MSP_HOW_H + 14;
-            const int bx = MSP_MODAL_X + (MSP_MODAL_W - MSP_HOW_W) / 2, by = MSP_FRY_MODAL_Y + H - 10 - MSP_HOW_H;
+            const int mY = g_ms_kind >= 0 ? MSP_FRY_MODAL_Y : MSP_MODAL_Y;
+            const int bx = MSP_MODAL_X + (MSP_MODAL_W - MSP_HOW_W) / 2, by = mY + H - 10 - MSP_HOW_H;
             if (x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X && y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN) {
-                g_ms_tip = true; return MS_TAP_KEPT; }
+                if (g_ms_kind >= 0) { g_ms_tip = true; return MS_TAP_KEPT; }
+                int who = g_ms_fish;                 /* the page is done with; the platform opens the fish's */
+                render_milestones_leave();
+                return MS_TAP_FISH + who;
+            }
         }
         render_milestones_leave(); return MS_TAP_KEPT;   /* any other tap: back to the page */
     }

@@ -5,6 +5,7 @@
 #define RENDER_H
 
 #include "tank.h"
+#include "icons.h"   /* icon_t, for render_icon below */
 
 /* fb is TANK_W x TANK_H, RGB565, stride in PIXELS (usually TANK_W). */
 void render_tank(const tank_t *t, uint16_t *fb, int stride);
@@ -110,7 +111,9 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride);
  * this tap closed it; MS_TAP_NONE = nothing here (the caller may try the
  * brightness row). */
 enum { MS_TAP_NONE = 0, MS_TAP_KEPT = 1, MS_TAP_CLOSE = 2, MS_TAP_SETTINGS = 3,   /* SETTINGS: the button bottom left (2026-09-15) opens the settings page */
-       MS_TAP_SHOP = 4 };                                                          /* the sand dollar left of the TANK row opens the shop */
+       MS_TAP_SHOP = 4,                                                           /* the sand dollar left of the TANK row opens the shop */
+       MS_TAP_FISH = 16 };          /* + the fish index (2026-09-20): its popup's MORE button was
+                                     * tapped - the platform closes this page and opens ui_fish_page */
 int  render_milestones_tap(const tank_t *t, float x, float y);
 void render_milestones_leave(void);
 
@@ -189,6 +192,10 @@ int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
  * night dim, like the card, and draw AFTER render_tank (nothing re-vignettes
  * them). Text is upper case + digits + a little punctuation; `scale` is the
  * pixel size of one font dot (2 = caption, 3 = button). */
+/* one icon from the bank at (x,y), alpha 0..255 (70 is the card's "not yet
+ * revealed" dim). The page-level UI in ui_ext.c draws the card's own icons
+ * with it, so the two screens share their art. */
+void render_icon(uint16_t *fb, int stride, int x, int y, const icon_t *ic, int alpha);
 int  render_text_w(const char *s, int scale);
 void render_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s);
 void render_rect(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb);
