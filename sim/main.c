@@ -1869,6 +1869,26 @@ static int selftest_shop(void) {
           if (tank.glow[1].carrier >= 0) { printf("FAIL: a frightened fish kept hold of its stick\n"); return 1; }
           tank.fish[1].stress = 1;
           printf("selftest-shop: glow sticks: one carried up and let go sank from x %.0f to %.0f; a fright ends a carry; the pile moves\n", gx0, tank.glow[0].x); }
+        /* the castle catches them (2026-09-20): flat tops hold a stick, the two
+           pointed towers shed it. The fish are parked so nothing is picked up
+           mid-drop. */
+        { int keep = tank.n_fish; tank.n_fish = 0;
+          const float FY = TANK_H - 16.0f, CX = 300.0f;
+          tank.sd_unlocks |= SD_ITEM_CASTLE; tank_decor_set(&tank, SD_IDX_CASTLE, CX, DECOR_Z_FRONT);
+          for (int i = 1; i < GLOW_N; i++) tank.glow[i].x = 40;
+          struct { float x; const char *what; float want; } d[3] = { { CX, "the gate wall's walk", FY - 58 },
+                                                                     { CX + 70, "the right rampart", FY - 70 },
+                                                                     { 120, "open sand", GLOW_REST_Y } };
+          for (int i = 0; i < 3; i++) {
+              tank.glow[0].x = d[i].x; tank.glow[0].y = 30; tank.glow[0].vx = tank.glow[0].vy = 0; tank.glow[0].carrier = -1;
+              SHOP_TICK(60 * 90);
+              if (fabsf(tank.glow[0].y - d[i].want) > 1.5f) { printf("FAIL: a stick over %s settled at %.0f, wanted %.0f\n", d[i].what, tank.glow[0].y, d[i].want); return 1; }
+          }
+          tank.glow[0].x = CX - 48; tank.glow[0].y = 30; tank.glow[0].vx = tank.glow[0].vy = 0; tank.glow[0].carrier = -1;
+          SHOP_TICK(60 * 90);
+          if (tank.glow[0].y <= FY - 100) { printf("FAIL: a stick stayed balanced on a tower point (y %.0f)\n", tank.glow[0].y); return 1; }
+          printf("selftest-shop: the castle catches sticks: the wall walk and the rampart hold them, a tower's point sheds one to x %.0f\n", tank.glow[0].x);
+          tank.n_fish = keep; }
         printf("selftest-shop: the festival shelf: MORE turns the page; rig, stack, sticks and totem bought and placed (the rig hangs); the drop shook %d bubbles; the spots rode the save, a 09-16 save left them at their defaults\n", near);
     }
     /* the save carries it all */

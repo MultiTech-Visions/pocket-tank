@@ -766,6 +766,27 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
 /* ---- the glow sticks (SD_ITEM_GLOW): the fish play with them -----------
  * See the note in tank.h. The model is never told; it asks for DART_PLAY and
  * this is what that turns into when there is a stick within reach. */
+/* the castle's silhouette, in the castle's own local x, matching render.c:
+ * the pointed left tower (cone, apex 108 above the floor), the short far-left
+ * tower (cone, apex 72), the crenellated right tower (flat rampart at 70) and
+ * the gate wall's walk (flat at 58). Checked tallest-first where they overlap. */
+float tank_castle_top_y(const tank_t *t, float x, bool *slide) {
+    if (slide) *slide = false;
+    if (!(t->sd_unlocks & SD_ITEM_CASTLE)) return GLOW_REST_Y;
+    const float FY = TANK_H - 16.0f;
+    float lx = x - tank_decor_x(t, SD_IDX_CASTLE);
+    if (lx >= -66 && lx <= -30) {                      /* the pointed tower: a cone, nothing stays on it */
+        if (slide) *slide = true;
+        return FY - 78 - 30 * (1.0f - fabsf(lx + 48) / 18.0f);
+    }
+    if (lx >= -90 && lx <= -56) {                      /* the short far-left tower: a cone too */
+        if (slide) *slide = true;
+        return FY - 46 - 26 * (1.0f - fabsf(lx + 73) / 17.0f);
+    }
+    if (lx >= 56 && lx <= 86) return FY - 70;          /* the right tower's crenellated rampart */
+    if (lx >= -44 && lx <= 44) return FY - 58;         /* the gate wall's walk, between the merlons */
+    return GLOW_REST_Y;
+}
 void tank_glow_place(tank_t *t) {
     static const float dx[GLOW_N]  = { -8, -2, 4, 9 };
     static const float ang[GLOW_N] = { -0.35f, 0.55f, -0.12f, 0.75f };
@@ -774,7 +795,7 @@ void tank_glow_place(tank_t *t) {
         /* exactly ON the sand line, so a freshly laid pile reads as resting
            and a fish can take one at once (they used to sit a hair above it,
            which glow_tick correctly treated as still falling) */
-        t->glow[i].x = gx + dx[i]; t->glow[i].y = GLOW_REST_Y;
+        t->glow[i].x = gx + dx[i]; t->glow[i].y = tank_castle_top_y(t, gx + dx[i], NULL);   /* the sand, or the castle if the pile sits on it */
         t->glow[i].ang = ang[i]; t->glow[i].spin = 0; t->glow[i].vx = t->glow[i].vy = 0;
         t->glow[i].held_s = 0; t->glow[i].carrier = -1;
     }
@@ -810,17 +831,35 @@ static void glow_tick(tank_t *t, float dt) {
             }
             continue;
         }
-        if (s->y < GLOW_REST_Y) {                           /* falling */
+        bool on_cone; float top = tank_castle_top_y(t, s->x, &on_cone);
+        /* `|| on_cone` matters: a stick that comes to within a whisker of a
+           tower's point would otherwise count as RESTING and sit balanced on
+           it forever. Nothing rests on a cone - while it is over one it is
+           always falling, so it gets shed and carries on down. */
+        if (s->y < top - 0.25f || on_cone) {                /* falling - to the sand, or onto the castle */
             s->vy += (GLOW_SINK_PX_S - s->vy) * (dt * 3.0f < 1.0f ? dt * 3.0f : 1.0f);
             s->y += s->vy * dt;
             s->x += s->vx * dt;
             s->vx -= s->vx * (dt * 0.7f);                                /* the water takes the throw out of it */
             s->x += sinf(t->clock * 1.7f + g * 1.3f) * dt * 7.0f;        /* ... and it wanders as it sinks */
             s->ang += s->spin * dt;
-            if (s->y >= GLOW_REST_Y) {                      /* landed: it lies where it fell */
-                s->y = GLOW_REST_Y; s->vy = 0; s->vx = 0; s->spin = 0;
-                s->ang = tank_randf(t, -0.6f, 0.6f);        /* flat-ish on the sand */
-                s->x = clampf(s->x, DECOR_MARGIN, TANK_W - DECOR_MARGIN);
+            if (s->y >= top) {
+                if (on_cone) {                              /* a tower's point: it is shed, and keeps falling */
+                    /* Pick a way off ONCE and keep it. The two pointed towers
+                       sit side by side, so re-deciding every tick pushed the
+                       stick left off one and right off the other, and it sat
+                       ping-ponging in the valley between them forever. */
+                    if (s->vx > -1.0f && s->vx < 1.0f) {
+                        float apex = tank_decor_x(t, SD_IDX_CASTLE) + (s->x - tank_decor_x(t, SD_IDX_CASTLE) < -56 ? -73.0f : -48.0f);
+                        s->vx = (s->x < apex ? -1.0f : 1.0f) * tank_randf(t, 20.0f, 34.0f);
+                        s->spin = tank_randf(t, -2.2f, 2.2f);   /* it tumbles off */
+                    }
+                    s->y = top - 0.5f;
+                } else {                                    /* a rampart, a wall walk, or the open sand */
+                    s->y = top; s->vy = 0; s->vx = 0; s->spin = 0;
+                    s->ang = tank_randf(t, -0.6f, 0.6f);
+                    s->x = clampf(s->x, DECOR_MARGIN, TANK_W - DECOR_MARGIN);
+                }
             }
             continue;
         }

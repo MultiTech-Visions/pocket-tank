@@ -555,6 +555,14 @@ void  tank_snail_place(tank_t *t);
 /* (re)pile the sticks in a fan at the keeper's spot - the purchase, and every
  * MOVE of the pile on the placement page */
 void  tank_glow_place(tank_t *t);
+/* The castle's top surface at world x (2026-09-20): the y a falling glow stick
+ * comes to rest on, or GLOW_REST_Y out on the open sand. The profile is taken
+ * from what render.c actually draws - the gate wall's walk between its
+ * merlons, and the crenellated right tower's rampart, both flat enough to
+ * hold a stick. `slide` comes back true on one of the two POINTED towers:
+ * nothing stays on a cone, so a stick that hits one is shed sideways and
+ * carries on down, which is the fun bit. There is no drawbridge in the art. */
+float tank_castle_top_y(const tank_t *t, float x, bool *slide);
 void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
