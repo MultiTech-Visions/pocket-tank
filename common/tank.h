@@ -330,8 +330,12 @@ typedef struct tank {
     glow_t   glow[GLOW_N];
     /* the totem parade: who is carrying it, and for how long. Not saved - a
      * boot finds the totem back in the sand where the keeper put it. */
-    int8_t   totem_carrier;
-    float    totem_held_s;
+    int8_t   totem_carrier;      /* the fish leading the whole event, or -1 */
+    float    totem_held_s;       /* seconds in the current phase */
+    uint8_t  totem_phase;        /* TOTEM_* above */
+    bool     totem_planted;      /* standing in the sand at the party, not in a mouth */
+    float    totem_party_x;      /* where it was slammed down, and the lean it kept */
+    float    totem_party_ang;
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -581,6 +585,12 @@ float tank_castle_top_y(const tank_t *t, float x, bool *slide);
 /* true while a fish is parading the totem; *x / *y come back as the point it
  * is being held at (render draws it there instead of in the sand) */
 bool  tank_totem_carry(const tank_t *t, float *x, float *y);
+/* where the totem actually is: *ang is its lean, 0 upright. Returns false when
+ * it is simply standing at the keeper's spot. */
+bool  tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carried);
+/* the party at the speaker is on (the disco ball and anything else that wants
+ * to join in reads this) */
+bool  tank_bass_party(const tank_t *t);
 void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
@@ -626,8 +636,26 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
  * and this is not. The totem goes back to the keeper's spot when it ends. */
 #define TOTEM_SOCIAL_MIN 0.75f
 #define TOTEM_REACH      26.0f
-#define TOTEM_PARADE_S   26.0f              /* how long one parade lasts */
-#define TOTEM_COOL_S     90.0f              /* ... and the quiet after it */
+/* The event, once someone lifts it. With a bass stack in the tank it is a
+ * march to the speaker, a ninety-second party there, and a march home; with
+ * no speaker it is just a parade and then home again.
+ *
+ *   WALK    the carrier leads to the speaker; ends on ARRIVAL, not a clock
+ *   HOLD    45 s: still carrying it, circling the speaker, everyone dancing
+ *   PLANTED 45 s: the totem slammed into the sand at a jaunty angle by the
+ *           speaker, the carrier now dancing with the rest
+ *   HOME    it is picked back up and led to where it started, planted, and
+ *           everyone goes back to their own business
+ *
+ * The walking legs are arrival-driven with a cap, because how long the swim
+ * takes depends on where the keeper put things. */
+enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
+#define TOTEM_PARADE_S     40.0f            /* no speaker: how long the parade itself lasts */
+#define TOTEM_WALK_MAX_S   60.0f            /* a walking leg cannot outstay this */
+#define TOTEM_HOLD_S       45.0f
+#define TOTEM_PLANTED_S    45.0f
+#define TOTEM_ARRIVE_PX    50.0f            /* close enough to the speaker, or to home */
+#define TOTEM_COOL_S       90.0f            /* the quiet after the whole thing */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16

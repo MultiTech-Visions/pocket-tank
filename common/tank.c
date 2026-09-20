@@ -286,7 +286,8 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->bass_drop_at = 0;
     for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; t->glow[i].held_s = 0; t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].ang = 0; }
     for (int i = 0; i < N_FISH_MAX; i++) s_glow_cool[i] = 0;
-    t->totem_carrier = -1; t->totem_held_s = 0; s_totem_cool = 0;
+    t->totem_carrier = -1; t->totem_held_s = 0; t->totem_phase = TOTEM_OFF;
+    t->totem_planted = false; t->totem_party_x = t->totem_party_ang = 0; s_totem_cool = 0;
     for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
     s_emit_clock = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
@@ -882,33 +883,88 @@ static void glow_tick(tank_t *t, float dt) {
     }
 }
 
-/* the totem parade (tank.h): one fish lifts it, the rest come to them */
+/* the totem event (tank.h): lift, march, party at the speaker, march home */
 bool tank_totem_carry(const tank_t *t, float *x, float *y) {
+    if (t->totem_phase == TOTEM_OFF || t->totem_planted) return false;
     if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) return false;
     const fish_t *f = &t->fish[t->totem_carrier];
     if (x) *x = f->x;
     if (y) *y = f->y - TOTEM_H * 0.55f;                 /* held aloft, above the fish */
     return true;
 }
+bool tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carried) {
+    float cx, cy;
+    if (tank_totem_carry(t, &cx, &cy)) {
+        if (x) *x = cx;
+        if (y) *y = cy;
+        if (ang) *ang = 0;
+        if (carried) *carried = true;
+        return true;
+    }
+    if (t->totem_planted) {                             /* slammed into the sand by the speaker */
+        if (x) *x = t->totem_party_x;
+        if (y) *y = (float)(TANK_H - 16 - TOTEM_H);
+        if (ang) *ang = t->totem_party_ang;
+        if (carried) *carried = false;
+        return true;
+    }
+    return false;                                       /* home, upright, where the keeper put it */
+}
+bool tank_bass_party(const tank_t *t) { return t->totem_phase == TOTEM_HOLD || t->totem_phase == TOTEM_PLANTED; }
+
+static void totem_end(tank_t *t) {
+    t->totem_phase = TOTEM_OFF; t->totem_planted = false;
+    t->totem_carrier = -1; t->totem_held_s = 0;
+    s_totem_cool = TOTEM_COOL_S;
+}
 static void totem_tick(tank_t *t, float dt) {
-    if (!tank_bit_live(t, SD_ITEM_TOTEM)) { t->totem_carrier = -1; return; }
+    if (!tank_bit_live(t, SD_ITEM_TOTEM)) { if (t->totem_phase != TOTEM_OFF) totem_end(t); return; }
     if (s_totem_cool > 0) s_totem_cool -= dt;
-    if (t->totem_carrier >= 0) {
-        if (t->totem_carrier >= t->n_fish) { t->totem_carrier = -1; t->totem_held_s = 0; return; }
+    if (t->totem_phase != TOTEM_OFF) {
+        if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) { totem_end(t); return; }
         const fish_t *f = &t->fish[t->totem_carrier];
+        /* Lights-out does NOT end it any more - the dark is when the party is
+           worth having. Only a real fright breaks it up. */
+        if (t->startled || f->stress > 7.5f) { totem_end(t); return; }
         t->totem_held_s += dt;
-        bool over    = t->totem_held_s > TOTEM_PARADE_S;
-        bool rattled = t->startled || f->stress > 7.5f || t->night;
-        if (over || rattled) { t->totem_carrier = -1; t->totem_held_s = 0; s_totem_cool = TOTEM_COOL_S; }
+        bool speaker = tank_bit_live(t, SD_ITEM_BASS);
+        float bx = tank_decor_x(t, SD_IDX_BASS), home = tank_decor_x(t, SD_IDX_TOTEM);
+        switch (t->totem_phase) {
+        case TOTEM_WALK:
+            if (!speaker) {                              /* no speaker: a parade, then home */
+                if (t->totem_held_s > TOTEM_PARADE_S) { t->totem_phase = TOTEM_HOME; t->totem_held_s = 0; }
+            } else if (fabsf(f->x - bx) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) {
+                t->totem_phase = TOTEM_HOLD; t->totem_held_s = 0;   /* they made it: the party starts */
+            }
+            break;
+        case TOTEM_HOLD:
+            if (t->totem_held_s > TOTEM_HOLD_S) {        /* down it goes, with gusto */
+                t->totem_planted = true;
+                t->totem_party_x = clampf(f->x, DECOR_MARGIN + TOTEM_HALF_W, TANK_W - DECOR_MARGIN - TOTEM_HALF_W);
+                t->totem_party_ang = tank_randf(t, 0.12f, 0.26f) * (tank_randf(t, -1, 1) < 0 ? -1.0f : 1.0f);
+                t->totem_phase = TOTEM_PLANTED; t->totem_held_s = 0;
+            }
+            break;
+        case TOTEM_PLANTED:
+            if (t->totem_held_s > TOTEM_PLANTED_S) {     /* picked back up for the march home */
+                t->totem_planted = false;
+                t->totem_phase = TOTEM_HOME; t->totem_held_s = 0;
+            }
+            break;
+        default:                                          /* TOTEM_HOME */
+            if (fabsf(f->x - home) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) totem_end(t);
+            break;
+        }
         return;
     }
-    if (s_totem_cool > 0 || t->night) return;
+    if (s_totem_cool > 0 || t->night) return;            /* it is lifted by day; the party may run into the dark */
     float tx = tank_decor_x(t, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
     for (int i = 0; i < t->n_fish; i++) {
         const fish_t *f = &t->fish[i];
         if (f->sociable < TOTEM_SOCIAL_MIN || f->stress > 5.0f) continue;   /* it takes a confident joiner */
         if (tank_dist(f->x, f->y, tx, ty) > TOTEM_REACH) continue;
         t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
+        t->totem_phase = TOTEM_WALK; t->totem_planted = false;
         tank_emit(TEV_TOTEM_LIFT, i);
         break;
     }
@@ -1169,19 +1225,29 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         f->y + sinf(f->heading + cosf(f->wander * 0.7f) * 0.45f) * 39,
         lerpf(12, 23, f->bold) * (1 - f->lazy * 0.35f), true,
     };
-    /* the totem parade (tank.h). Only goals that are ALREADY sociable or idle
+    /* The totem event (tank.h). Only goals that are ALREADY sociable or idle
        are redirected: a hungry, frightened or resting fish is the model's
-       call and is left exactly alone. */
-    if (t->totem_carrier >= 0 && t->totem_carrier < t->n_fish &&
+       call and is left exactly alone. Where "with the others" IS depends on
+       which part of the event is running. */
+    if (t->totem_phase != TOTEM_OFF && t->totem_carrier >= 0 && t->totem_carrier < t->n_fish &&
         (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES)) {
-        if (idx == t->totem_carrier) {
-            if (tank_bit_live(t, SD_ITEM_BASS)) {          /* lead them to the speaker */
-                tg.x = tank_decor_x(t, SD_IDX_BASS);
-                tg.y = TANK_H - 16 - 44;
-            }
-        } else {                                           /* everyone else: fall in around the carrier */
-            const fish_t *lead = &t->fish[t->totem_carrier];
-            float ang = f->wander + idx * 1.7f;
+        const fish_t *lead = &t->fish[t->totem_carrier];
+        bool leader = idx == t->totem_carrier;
+        float bx = tank_decor_x(t, SD_IDX_BASS), home = tank_decor_x(t, SD_IDX_TOTEM);
+        float ang = f->wander + idx * 1.7f;
+        if (t->totem_phase == TOTEM_HOLD && leader) {          /* circling the speaker, totem up */
+            tg.x = bx + cosf(tm * 0.8f) * 46;
+            tg.y = TANK_H - 16 - 62 + sinf(tm * 0.8f) * 22;
+        } else if (tank_bass_party(t) && !leader) {            /* the dance floor, around the stack */
+            tg.x = bx + cosf(tm * 1.1f + idx * 2.1f) * (34 + idx * 7);
+            tg.y = TANK_H - 16 - 54 + sinf(tm * 1.4f + idx * 1.3f) * (26 + idx * 4);
+        } else if (t->totem_phase == TOTEM_PLANTED && leader) { /* it is in the sand; the leader dances too */
+            tg.x = t->totem_party_x + cosf(tm * 1.2f) * 30;
+            tg.y = TANK_H - 16 - 50 + sinf(tm * 1.5f) * 20;
+        } else if (leader) {                                   /* walking: out to the speaker, or back home */
+            float goal_x = t->totem_phase == TOTEM_HOME ? home : (tank_bit_live(t, SD_ITEM_BASS) ? bx : tg.x);
+            tg.x = goal_x; tg.y = TANK_H - 16 - 44;
+        } else {                                               /* everyone else falls in around the leader */
             tg.x = lead->x + cosf(ang) * 46;
             tg.y = lead->y + sinf(ang) * 30;
         }

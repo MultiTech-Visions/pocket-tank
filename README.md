@@ -242,9 +242,14 @@ up strewn across the floor. If the castle is in the way it lands on the gate
 wall's walk or the right tower's rampart, and a stick that meets one of the
 pointed towers is shed off the point and carries on down. And a really
 sociable fish will lift the **totem** out of the sand and parade it: the rest
-of the school leaves off what it was idly doing and converges on the carrier,
-and if there is a bass stack in the tank the carrier leads them all to the
-speaker. Lights-out is the best time for a glow stick, so a fish
+of the school leaves off what it was idly doing and converges on the carrier.
+With a bass stack in the tank that becomes a proper night out. They march to
+the speaker, and when they arrive the party runs for ninety seconds: for the
+first forty-five the carrier is still holding the totem up, circling the
+stack while the others dance around it; then it slams the totem into the sand
+at a lean and joins them for the other forty-five; then it pulls the totem
+back out, leads everyone home, plants it where it started and they all go back
+to their own business. With no speaker it is simply a parade and a walk home. Lights-out is the best time for a glow stick, so a fish
 keeps hold of one when the tank goes dark and comes back to them twice as
 often. The dark itself is a little less deep than it used to be, because
 there is more worth seeing down there now. A hungry or frightened fish is

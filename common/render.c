@@ -391,34 +391,41 @@ static void draw_glow(ctx_t *c, const tank_t *t) {
 /* the totem: a pole in the sand with a glowing alien head and two ribbons
  * that wave in the current - the thing you find your friends by */
 static void draw_totem(ctx_t *c, const tank_t *t) {
-    float cx, cy;
-    bool carried = tank_totem_carry(t, &cx, &cy);       /* a fish is parading it */
-    float tx = carried ? cx : tank_decor_x(t, SD_IDX_TOTEM);
-    const int top  = carried ? (int)cy : FLOOR_Y - TOTEM_H;
-    const int foot = carried ? top + 48 : FLOOR_Y;      /* held aloft: the pole ends in a fish's mouth */
+    float px, py, lean = 0; bool carried = false;
+    bool away = tank_totem_pose(t, &px, &py, &lean, &carried);
+    /* three poses: in a fish's mouth, slammed into the sand at the party with
+       a lean on it, or standing upright where the keeper put it */
+    float footx, footy, topx, topy;
+    if (carried)     { footx = topx = px; topy = py;  footy = topy + 48; }
+    else if (away)   { footx = px; footy = FLOOR_Y;                       /* planted, leaning */
+                       topx = footx + sinf(lean) * TOTEM_H;
+                       topy = FLOOR_Y - cosf(lean) * TOTEM_H; }
+    else             { footx = topx = tank_decor_x(t, SD_IDX_TOTEM);
+                       topy = FLOOR_Y - TOTEM_H; footy = FLOOR_Y; }
     src_t pole = src_color(0x3a2a1e, c->dim), hi = src_color(0x6a4a30, c->dim);
-    for (int y = top + 14; y <= foot; y++) { span(c, (int)tx - 1, (int)tx + 1, y, &pole, 255); px_blend_s(c, (int)tx - 1, y, &hi, 255); }
+    for (int k = -1; k <= 1; k++)                       /* the pole: three strands, so a lean still reads solid */
+        line_blend(c, footx + k, footy, topx + k, topy + 14, k < 0 ? &hi : &pole, 255, false);
     static const uint32_t rc[2] = { 0xff3fa8, 0x3ae0ff };
-    for (int k = 0; k < 2; k++) {                          /* the ribbons: tied under the head, streaming down */
+    for (int k = 0; k < 2; k++) {                       /* the ribbons, tied under the head */
         src_t s = src_color(rc[k], c->dim);
-        float px0 = tx + (k ? 3 : -3), py0 = top + 17;
-        /* a carried totem's ribbons trail harder: it is moving through water */
+        float px0 = topx + (k ? 3 : -3), py0 = topy + 17;
         float amp = carried ? 2.0f : 1.2f, rate = carried ? 4.2f : 2.6f;
         for (int i = 0; i < 24; i++) {
             float y = py0 + i, x = px0 + i * (k ? 0.42f : -0.42f) + fast_sin(t->clock * rate + i * 0.33f + k * 1.7f) * (amp + i * 0.12f);
             px_blend_s(c, (int)x, (int)y, &s, 230);
         }
     }
-    ctx_t lit = *c; if (t->night || carried) lit.dim = 1.0f;   /* on parade it is lit whatever the hour */
-    float glow = (t->night || carried) ? 0.8f + 0.2f * fast_sin(t->clock * (carried ? 3.0f : 1.4f)) : 1.0f;
-    if (t->night || carried) {                                /* the head throws a little light of its own */
-        fill_ellipse(&lit, tx, top + 9, 26, 26, 0x5cff3a, (int)(20 * glow));
-        fill_ellipse(&lit, tx, top + 9, 16, 16, 0x5cff3a, (int)(40 * glow));
+    bool live = t->night || carried || tank_bass_party(t);
+    ctx_t lit = *c; if (live) lit.dim = 1.0f;           /* on parade, and all through a party, it is lit */
+    float glow = live ? 0.8f + 0.2f * fast_sin(t->clock * (carried ? 3.0f : 1.4f)) : 1.0f;
+    if (live) {                                          /* the head throws a little light of its own */
+        fill_ellipse(&lit, topx, topy + 9, 26, 26, 0x5cff3a, (int)(20 * glow));
+        fill_ellipse(&lit, topx, topy + 9, 16, 16, 0x5cff3a, (int)(40 * glow));
     }
-    fill_ellipse(&lit, tx, top + 9, 8, 10, 0x5cff3a, 255);                             /* the head */
-    fill_ellipse(&lit, tx - 2, top + 6, 4, 3, 0x8dff70, 160);                          /* its sheen */
-    fill_ellipse(&lit, tx - 3.5f, top + 9.5f, 2.6f, 4, 0x061006, 255);                 /* the eyes */
-    fill_ellipse(&lit, tx + 3.5f, top + 9.5f, 2.6f, 4, 0x061006, 255);
+    fill_ellipse(&lit, topx, topy + 9, 8, 10, 0x5cff3a, 255);                       /* the head */
+    fill_ellipse(&lit, topx - 2, topy + 6, 4, 3, 0x8dff70, 160);                    /* its sheen */
+    fill_ellipse(&lit, topx - 3.5f, topy + 9.5f, 2.6f, 4, 0x061006, 255);           /* the eyes */
+    fill_ellipse(&lit, topx + 3.5f, topy + 9.5f, 2.6f, 4, 0x061006, 255);
 }
 /* every festival piece on layer z (DECOR_Z_*), in item order */
 static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
