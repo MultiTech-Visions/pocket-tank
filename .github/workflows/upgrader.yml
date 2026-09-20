@@ -1,0 +1,200 @@
+# The double-click upgraders, built on every push to main that changes the
+# firmware or the shared tank code.
+#
+# Job 1 builds the firmware with the same ESP-IDF the project uses and runs
+# tools/upgrade/collect.py, which copies the three images an upgrade writes
+# and REFUSES to continue if any of them could reach the nvs (saved tank) or
+# model partitions. Job 2 is a matrix: the same payload, the same
+# tools/upgrade/pocket_tank_upgrade.py and esptool bundled by PyInstaller into
+# one file per platform -
+#
+#   Windows         PocketTankUpgrade.exe
+#   Mac, Apple silicon (M1 and later)  PocketTankUpgrade-macOS-AppleSilicon.zip
+#   Mac, Intel                         PocketTankUpgrade-macOS-Intel.zip
+#
+# The Mac builds go out zipped because a GitHub release asset does not carry
+# the executable bit and Finder will not run a file that has lost it; macOS
+# unzips the download by itself, leaving a .command you double-click.
+#
+# Job 3 attaches all of them to one fixed release, so the download links never
+# change.
+#
+# Nothing here is signed. Windows SmartScreen shows a blue warning on first
+# run ("More info" then "Run anyway"); macOS refuses the first double-click
+# and wants Privacy & Security -> Open Anyway. Signing needs a paid
+# certificate from each vendor.
+name: upgrader
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "common/**"
+      - "tools/upgrade/**"
+      - ".github/workflows/upgrader.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upgrader
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # git describe wants the tags
+      - name: Build the firmware (ESP-IDF v5.4.1, esp32s3)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.1
+          target: esp32s3
+          path: firmware
+      - name: Collect the images, and prove they cannot reach the save
+        run: python3 tools/upgrade/collect.py --build-dir firmware/build --out payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upgrader-payload
+          path: payload
+          retention-days: 7
+
+  bundle:
+    needs: firmware
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            label: Windows
+            sep: ";"
+            asset: PocketTankUpgrade.exe
+          - runner: macos-14             # Apple silicon
+            label: macOS-AppleSilicon
+            sep: ":"
+            asset: PocketTankUpgrade-macOS-AppleSilicon.zip
+          - runner: macos-13             # Intel
+            label: macOS-Intel
+            sep: ":"
+            asset: PocketTankUpgrade-macOS-Intel.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: upgrader-payload
+          path: payload
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the flasher and the bundler
+        run: pip install "esptool==4.8.1" "pyinstaller==6.11.1"
+      - name: Bundle it
+        shell: bash
+        run: |
+          S='${{ matrix.sep }}'
+          pyinstaller --onefile --console --clean \
+            --name PocketTankUpgrade \
+            --add-data "payload/bootloader.bin${S}." \
+            --add-data "payload/partition-table.bin${S}." \
+            --add-data "payload/pocket_tank.bin${S}." \
+            --add-data "payload/flash.json${S}." \
+            tools/upgrade/pocket_tank_upgrade.py
+          ls -la dist
+      - name: Check it actually starts and can read its payload
+        shell: bash
+        run: |
+          # no board attached here, so it must fail at the PORT, not earlier:
+          # anything about a missing bundled file means the packing is wrong
+          set +e
+          BIN=dist/PocketTankUpgrade
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          out=$("./$BIN" NOT_A_PORT 2>&1)
+          set -e
+          echo "$out"
+          echo "$out" | grep -q "POCKET TANK" || { echo "it did not start"; exit 1; }
+          echo "$out" | grep -qi "missing from the bundle" && { echo "a bundled file is missing"; exit 1; }
+          echo "it starts and found its payload"
+      - name: Make the double-clickable file
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ '${{ matrix.label }}' = 'Windows' ]; then
+            cp dist/PocketTankUpgrade.exe out/PocketTankUpgrade.exe
+          else
+            # Finder runs a .command by opening Terminal on it; an ad-hoc
+            # signature is what lets an arm64 binary execute at all, and ditto
+            # is what keeps the executable bit inside the zip
+            cp dist/PocketTankUpgrade PocketTankUpgrade.command
+            chmod +x PocketTankUpgrade.command
+            codesign --force --sign - --timestamp=none PocketTankUpgrade.command
+            ditto -c -k --sequesterRsrc PocketTankUpgrade.command "out/${{ matrix.asset }}"
+          fi
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upgrader-${{ matrix.label }}
+          path: out/${{ matrix.asset }}
+
+  release:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: upgrader-*
+          path: assets
+          merge-multiple: true
+      - name: Attach them to the release people download from
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la assets
+          TAG=upgrader
+          NOTES=$(cat <<'EOF'
+          **Plug the tank in, download your file below, double-click it.**
+
+          | You have | Download |
+          | --- | --- |
+          | Windows | `PocketTankUpgrade.exe` |
+          | Mac with Apple silicon (M1, M2, M3, M4) | `PocketTankUpgrade-macOS-AppleSilicon.zip` |
+          | Mac with an Intel chip | `PocketTankUpgrade-macOS-Intel.zip` |
+
+          Not sure which Mac? Apple menu -> About This Mac. "Chip" means Apple
+          silicon, "Processor" means Intel.
+
+          It replaces the app only. Your fish, their names, your sand dollars and
+          everything the shop sold are kept, and the model partition is left alone.
+
+          **The first run is blocked, on both, because this is not signed:**
+
+          - Windows shows a blue SmartScreen box: click **More info**, then **Run anyway**.
+          - macOS says it cannot be opened. Go to **System Settings -> Privacy &
+            Security**, scroll down, and click **Open Anyway** next to
+            PocketTankUpgrade, then double-click it again.
+
+          The Mac download unzips itself; double-click the `PocketTankUpgrade.command`
+          it leaves behind.
+
+          If several ports confuse it, pass the right one:
+          `PocketTankUpgrade.exe COM7`
+
+          First install on a brand-new board needs the model partition too, which
+          this does not carry.
+          EOF
+          )
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "Pocket Tank - upgraders" --notes "$NOTES"
+          else
+            gh release edit "$TAG" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" assets/* --clobber
+          for f in assets/*; do
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$f")"
+          done

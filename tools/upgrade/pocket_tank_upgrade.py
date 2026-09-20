@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""pocket_tank_upgrade.py - the Windows double-click upgrader.
+"""pocket_tank_upgrade.py - the double-click upgrader, Windows and macOS.
 
-.github/workflows/win-upgrader.yml bundles this with esptool and the firmware
-images into ONE file, PocketTankUpgrade.exe, using PyInstaller. Somebody with
-no toolchain and no terminal downloads that file, plugs the tank in and
-double-clicks it.
+.github/workflows/upgrader.yml bundles this with esptool and the firmware
+images into ONE file per platform, using PyInstaller:
+
+    PocketTankUpgrade.exe                      Windows
+    PocketTankUpgrade.command                  macOS, inside a .zip so the
+                                               executable bit survives the
+                                               download
+
+Somebody with no toolchain and no terminal downloads their file, plugs the
+tank in and double-clicks it. There is ONE script for both: everything that
+differs between the two is a lookup in PLATFORM below, so a change to the
+upgrade itself is made once.
 
 What it writes, and what it deliberately leaves alone:
 
@@ -19,30 +27,54 @@ What it writes, and what it deliberately leaves alone:
 
 esptool erases only the sectors it writes, so the fish, their names, the sand
 dollars and everything the shop sold all survive. collect.py proves the three
-images cannot reach the protected partitions before this exe is ever built.
+images cannot reach the protected partitions before either file is ever built.
 
 A board that has never been flashed also needs the model partition, which is
-8 MB and not carried here: use the browser installer for a first install.
+8 MB and not carried here.
 """
 import json, os, sys
 
+# the only differences between the two builds: what to call the machine, what
+# a port looks like there, and how to say "run me with this port instead"
+PLATFORM = {
+    "win32": {
+        "machine": "PC",
+        "port_word": "COM port",
+        "port_hint": 'If Windows shows several COM ports, pass the right one:\n'
+                     '     PocketTankUpgrade.exe COM7',
+    },
+    "darwin": {
+        "machine": "Mac",
+        "port_word": "serial port",
+        "port_hint": 'If your Mac shows several serial ports, pass the right one by\n'
+                     '   dragging it in - the tank is usually /dev/cu.usbmodem...',
+    },
+}
+
+
+def platform():
+    """the wording for the machine this was built for"""
+    key = "darwin" if sys.platform == "darwin" else "win32"
+    return PLATFORM[key]
+
 
 def bundled(name):
-    """a file PyInstaller packed inside the exe (or beside the script in a dev run)"""
+    """a file PyInstaller packed inside the bundle (or beside the script in a dev run)"""
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(base, name)
     if not os.path.isfile(path):
-        raise SystemExit(f"this build is incomplete: {name} is missing from the exe")
+        raise SystemExit(f"this build is incomplete: {name} is missing from the bundle")
     return path
 
 
 def pause():
-    """double-clicked from Explorer, the window closes the instant we return"""
+    """double-clicked from Explorer or Finder, the window closes the instant we return"""
     if sys.stdin and sys.stdin.isatty():
         input("\n  Press Enter to close this window. ")
 
 
 def main():
+    p = platform()
     spec = json.load(open(bundled("flash.json")))
     rule = "=" * 62
     print(rule)
@@ -53,13 +85,13 @@ def main():
     print("   Your fish, their names, your sand dollars and everything")
     print("   you have unlocked are KEPT. Only the app is replaced.")
     print()
-    print("   1. Plug the tank into this PC with a USB-C cable.")
+    print(f"   1. Plug the tank into this {p['machine']} with a USB-C cable.")
     print("   2. Leave it awake - press the side button if the screen is dark.")
     print("   3. Wait. Do not unplug it until this says DONE.")
     print()
 
     argv = ["--chip", spec["chip"], "--baud", "460800"]
-    if len(sys.argv) > 1:                      # an explicit COM port, e.g. PocketTankUpgrade.exe COM7
+    if len(sys.argv) > 1:                      # an explicit port, e.g. PocketTankUpgrade.exe COM7
         argv += ["--port", sys.argv[1]]
     argv += ["write_flash"]
     for part in spec["parts"]:
@@ -80,9 +112,8 @@ def main():
         print("   Most often this is one of:")
         print("     - the cable is a charge-only cable; use a data cable")
         print("     - the tank is asleep; press the side button and retry")
-        print("     - another window already has the COM port open")
-        print("   If Windows shows several COM ports, pass the right one:")
-        print("     PocketTankUpgrade.exe COM7")
+        print(f"     - another window already has the {p['port_word']} open")
+        print(f"   {p['port_hint']}")
         pause()
         return 1
 
