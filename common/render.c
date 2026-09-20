@@ -388,22 +388,27 @@ static void draw_glow(ctx_t *c, const tank_t *t) {
 /* the totem: a pole in the sand with a glowing alien head and two ribbons
  * that wave in the current - the thing you find your friends by */
 static void draw_totem(ctx_t *c, const tank_t *t) {
-    float tx = tank_decor_x(t, SD_IDX_TOTEM);
-    const int top = FLOOR_Y - TOTEM_H;
+    float cx, cy;
+    bool carried = tank_totem_carry(t, &cx, &cy);       /* a fish is parading it */
+    float tx = carried ? cx : tank_decor_x(t, SD_IDX_TOTEM);
+    const int top  = carried ? (int)cy : FLOOR_Y - TOTEM_H;
+    const int foot = carried ? top + 48 : FLOOR_Y;      /* held aloft: the pole ends in a fish's mouth */
     src_t pole = src_color(0x3a2a1e, c->dim), hi = src_color(0x6a4a30, c->dim);
-    for (int y = top + 14; y <= FLOOR_Y; y++) { span(c, (int)tx - 1, (int)tx + 1, y, &pole, 255); px_blend_s(c, (int)tx - 1, y, &hi, 255); }
+    for (int y = top + 14; y <= foot; y++) { span(c, (int)tx - 1, (int)tx + 1, y, &pole, 255); px_blend_s(c, (int)tx - 1, y, &hi, 255); }
     static const uint32_t rc[2] = { 0xff3fa8, 0x3ae0ff };
-    for (int k = 0; k < 2; k++) {                          /* the ribbons: tied under the head, streaming down-right */
+    for (int k = 0; k < 2; k++) {                          /* the ribbons: tied under the head, streaming down */
         src_t s = src_color(rc[k], c->dim);
         float px0 = tx + (k ? 3 : -3), py0 = top + 17;
+        /* a carried totem's ribbons trail harder: it is moving through water */
+        float amp = carried ? 2.0f : 1.2f, rate = carried ? 4.2f : 2.6f;
         for (int i = 0; i < 24; i++) {
-            float y = py0 + i, x = px0 + i * (k ? 0.42f : -0.42f) + fast_sin(t->clock * 2.6f + i * 0.33f + k * 1.7f) * (1.2f + i * 0.12f);
+            float y = py0 + i, x = px0 + i * (k ? 0.42f : -0.42f) + fast_sin(t->clock * rate + i * 0.33f + k * 1.7f) * (amp + i * 0.12f);
             px_blend_s(c, (int)x, (int)y, &s, 230);
         }
     }
-    ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
-    float glow = t->night ? 0.8f + 0.2f * fast_sin(t->clock * 1.4f) : 1.0f;
-    if (t->night) fill_ellipse(&lit, tx, top + 9, 15, 15, 0x5cff3a, (int)(40 * glow));   /* the night halo */
+    ctx_t lit = *c; if (t->night || carried) lit.dim = 1.0f;   /* on parade it is lit whatever the hour */
+    float glow = (t->night || carried) ? 0.8f + 0.2f * fast_sin(t->clock * (carried ? 3.0f : 1.4f)) : 1.0f;
+    if (t->night || carried) fill_ellipse(&lit, tx, top + 9, 15, 15, 0x5cff3a, (int)(40 * glow));
     fill_ellipse(&lit, tx, top + 9, 8, 10, 0x5cff3a, 255);                             /* the head */
     fill_ellipse(&lit, tx - 2, top + 6, 4, 3, 0x8dff70, 160);                          /* its sheen */
     fill_ellipse(&lit, tx - 3.5f, top + 9.5f, 2.6f, 4, 0x061006, 255);                 /* the eyes */

@@ -1889,6 +1889,20 @@ static int selftest_shop(void) {
           if (tank.glow[0].y <= FY - 100) { printf("FAIL: a stick stayed balanced on a tower point (y %.0f)\n", tank.glow[0].y); return 1; }
           printf("selftest-shop: the castle catches sticks: the wall walk and the rampart hold them, a tower's point sheds one to x %.0f\n", tank.glow[0].x);
           tank.n_fish = keep; }
+        /* the totem parade (2026-09-20): a really sociable fish lifts it and
+           the school comes to them; with a speaker in the tank it leads there */
+        { tank.sd_unlocks |= SD_ITEM_TOTEM; tank_decor_set(&tank, SD_IDX_TOTEM, 110, DECOR_Z_MIDDLE);
+          float tx = tank_decor_x(&tank, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
+          tank.fish[0].sociable = 0.2f;
+          for (int i = 0; i < 300; i++) { tank.fish[0].x = tx; tank.fish[0].y = ty; tank.fish[0].stress = 1; SHOP_TICK(1); }
+          if (tank.totem_carrier >= 0) { printf("FAIL: a fish under the social bar lifted the totem\n"); return 1; }
+          tank.fish[1].sociable = 0.95f;
+          for (int i = 0; i < 300 && tank.totem_carrier < 0; i++) { tank.fish[1].x = tx; tank.fish[1].y = ty; tank.fish[1].stress = 1; SHOP_TICK(1); }
+          if (tank.totem_carrier != 1) { printf("FAIL: a very sociable fish did not lift the totem\n"); return 1; }
+          tank.fish[1].stress = 9.0f; SHOP_TICK(4);
+          if (tank.totem_carrier >= 0) { printf("FAIL: a frightened fish kept parading\n"); return 1; }
+          tank.fish[1].stress = 1;
+          printf("selftest-shop: the totem: a shy fish leaves it, a sociable one lifts it, a fright puts it back\n"); }
         printf("selftest-shop: the festival shelf: MORE turns the page; rig, stack, sticks and totem bought and placed (the rig hangs); the drop shook %d bubbles; the spots rode the save, a 09-16 save left them at their defaults\n", near);
     }
     /* the save carries it all */

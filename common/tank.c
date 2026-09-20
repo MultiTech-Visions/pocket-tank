@@ -17,9 +17,10 @@ const char *const GOAL_NAMES[GOAL_COUNT] = {
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
 const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
-    "welcome", "wheel_tick", "confirm", "glow_play",
+    "welcome", "wheel_tick", "confirm", "glow_play", "totem_lift",
 };
 static float s_glow_cool[N_FISH_MAX];   /* glow sticks: seconds until this fish may take one again (not saved) */
+static float s_totem_cool;              /* the quiet after a totem parade (not saved) */
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
 /* the last moment per fish (tank.h): tank_emit has no tank_t, so tank_tick
@@ -285,6 +286,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->bass_drop_at = 0;
     for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; t->glow[i].held_s = 0; t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].ang = 0; }
     for (int i = 0; i < N_FISH_MAX; i++) s_glow_cool[i] = 0;
+    t->totem_carrier = -1; t->totem_held_s = 0; s_totem_cool = 0;
     for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
     s_emit_clock = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
@@ -874,6 +876,38 @@ static void glow_tick(tank_t *t, float dt) {
     }
 }
 
+/* the totem parade (tank.h): one fish lifts it, the rest come to them */
+bool tank_totem_carry(const tank_t *t, float *x, float *y) {
+    if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) return false;
+    const fish_t *f = &t->fish[t->totem_carrier];
+    if (x) *x = f->x;
+    if (y) *y = f->y - TOTEM_H * 0.55f;                 /* held aloft, above the fish */
+    return true;
+}
+static void totem_tick(tank_t *t, float dt) {
+    if (!(t->sd_unlocks & SD_ITEM_TOTEM)) { t->totem_carrier = -1; return; }
+    if (s_totem_cool > 0) s_totem_cool -= dt;
+    if (t->totem_carrier >= 0) {
+        if (t->totem_carrier >= t->n_fish) { t->totem_carrier = -1; t->totem_held_s = 0; return; }
+        const fish_t *f = &t->fish[t->totem_carrier];
+        t->totem_held_s += dt;
+        bool over    = t->totem_held_s > TOTEM_PARADE_S;
+        bool rattled = t->startled || f->stress > 7.5f || t->night;
+        if (over || rattled) { t->totem_carrier = -1; t->totem_held_s = 0; s_totem_cool = TOTEM_COOL_S; }
+        return;
+    }
+    if (s_totem_cool > 0 || t->night) return;
+    float tx = tank_decor_x(t, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
+    for (int i = 0; i < t->n_fish; i++) {
+        const fish_t *f = &t->fish[i];
+        if (f->sociable < TOTEM_SOCIAL_MIN || f->stress > 5.0f) continue;   /* it takes a confident joiner */
+        if (tank_dist(f->x, f->y, tx, ty) > TOTEM_REACH) continue;
+        t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
+        tank_emit(TEV_TOTEM_LIFT, i);
+        break;
+    }
+}
+
 /* the bass stack (SD_ITEM_BASS): the thump is a picture (render.c reads the
  * clock); the DROP, every BASS_DROP_BEATS beats, shakes BASS_DROP_PUFFS of
  * the free bubbles out of the cone - the flirt's puff, from the sand */
@@ -1129,6 +1163,26 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         f->y + sinf(f->heading + cosf(f->wander * 0.7f) * 0.45f) * 39,
         lerpf(12, 23, f->bold) * (1 - f->lazy * 0.35f), true,
     };
+    /* the totem parade (tank.h). Only goals that are ALREADY sociable or idle
+       are redirected: a hungry, frightened or resting fish is the model's
+       call and is left exactly alone. */
+    if (t->totem_carrier >= 0 && t->totem_carrier < t->n_fish &&
+        (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES)) {
+        if (idx == t->totem_carrier) {
+            if (t->sd_unlocks & SD_ITEM_BASS) {            /* lead them to the speaker */
+                tg.x = tank_decor_x(t, SD_IDX_BASS);
+                tg.y = TANK_H - 16 - 44;
+            }
+        } else {                                           /* everyone else: fall in around the carrier */
+            const fish_t *lead = &t->fish[t->totem_carrier];
+            float ang = f->wander + idx * 1.7f;
+            tg.x = lead->x + cosf(ang) * 46;
+            tg.y = lead->y + sinf(ang) * 30;
+        }
+        tg.x = clampf(tg.x, 23, TANK_W - 23);
+        tg.y = clampf(tg.y, 32, TANK_H - 23);
+        return tg;
+    }
     switch (goal) {
     case GOAL_SEEK_FOOD: {
         float d; int i = tank_nearest_food(t, f, &d);
@@ -1591,6 +1645,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     snail_tick(t, dt);
     bass_tick(t);
     glow_tick(t, dt);
+    totem_tick(t, dt);
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {

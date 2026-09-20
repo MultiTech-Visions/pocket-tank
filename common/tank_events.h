@@ -24,6 +24,7 @@ enum {
     TEV_WHEEL_TICK,   /* the letter wheel moved one detent */
     TEV_CONFIRM,      /* BEGIN / DONE: a setup or birth flow was completed */
     TEV_GLOW_PLAY,    /* a fish let go of a glow stick up near the surface (fish = who) */
+    TEV_TOTEM_LIFT,   /* a very sociable fish lifted the totem and started a parade (fish = who) */
     TEV_COUNT
 };
 extern const char *const TANK_EVENT_NAMES[TEV_COUNT];

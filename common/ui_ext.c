@@ -176,6 +176,7 @@ static const char *fp_event_words(int ev) {
     case TEV_WELCOME:     return "ARRIVED IN THE TANK";
     case TEV_CONFIRM:     return "SETTLED IN";
     case TEV_GLOW_PLAY:   return "DROPPED A GLOW STICK";
+    case TEV_TOTEM_LIFT:  return "LIFTED THE TOTEM";
     default:              return "NOTHING YET";
     }
 }

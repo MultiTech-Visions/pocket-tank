@@ -234,7 +234,20 @@ whose cone kicks at 140 BPM with a ripple running out of it and, every
 sixteen beats, a drop that shakes a few bubbles loose; **glow sticks**
 (30) lie cracked and scattered on the floor, pastel plastic by day and
 lit with a halo after dark; and a rail **totem** (45), a pole with a
-glowing alien head and two ribbons in the current. All four are placed
+glowing alien head and two ribbons in the current. The fish play with both.
+A fish the model has put on **play** will pick up a glow stick it swims past,
+carry it up near the surface and let go, and the stick tumbles back down and
+lies wherever it lands, so over a few days the tidy pile the shop drops ends
+up strewn across the floor. If the castle is in the way it lands on the gate
+wall's walk or the right tower's rampart, and a stick that meets one of the
+pointed towers is shed off the point and carries on down. And a really
+sociable fish will lift the **totem** out of the sand and parade it: the rest
+of the school leaves off what it was idly doing and converges on the carrier,
+and if there is a bass stack in the tank the carrier leads them all to the
+speaker. A hungry or frightened fish is never pulled into any of this, and
+nor is a resting one: those are the model's calls. Nothing here is in the
+model's schema at all, which is frozen; it asks to play or to follow, and the
+reflex layer decides what that looks like. All four are placed
 like the plant (the rig along the surface, the rest along the floor, each
 with its depth), and none of them reaches the fish: it is the tank's
 night out, not theirs. Double-tap the glass to put the light out and the

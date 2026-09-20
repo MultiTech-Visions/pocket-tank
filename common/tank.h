@@ -317,6 +317,10 @@ typedef struct tank {
      * positions and angles are saved (that IS the scattering); who is holding
      * one is not - a boot starts with every stick on the sand. */
     glow_t   glow[GLOW_N];
+    /* the totem parade: who is carrying it, and for how long. Not saved - a
+     * boot finds the totem back in the sand where the keeper put it. */
+    int8_t   totem_carrier;
+    float    totem_held_s;
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -563,6 +567,9 @@ void  tank_glow_place(tank_t *t);
  * nothing stays on a cone, so a stick that hits one is shed sideways and
  * carries on down, which is the fun bit. There is no drawbridge in the art. */
 float tank_castle_top_y(const tank_t *t, float x, bool *slide);
+/* true while a fish is parading the totem; *x / *y come back as the point it
+ * is being held at (render draws it there instead of in the sand) */
+bool  tank_totem_carry(const tank_t *t, float *x, float *y);
 void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
@@ -598,6 +605,18 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define TOTEM_HALF_W    9                  /* the pole and its emblem */
 #define TOTEM_X_DEFAULT 110.0f             /* left of the glow sticks, clear of the castle */
 #define TOTEM_H         64                 /* pole foot to the emblem's top */
+/* ---- the totem parade (2026-09-20) ---------------------------------------
+ * A really sociable fish - TOTEM_SOCIAL_MIN or above - lifts the rail totem
+ * out of the sand and carries it. While it does, every other fish whose goal
+ * is already a sociable or idle one converges on the carrier, and the carrier
+ * heads for the bass stack if the tank has one, so the school ends up at the
+ * speaker together. Hunger and fright still win: a fish on SEEK_FOOD,
+ * FLEE_SHADOW or REST is never redirected, because those are the model's call
+ * and this is not. The totem goes back to the keeper's spot when it ends. */
+#define TOTEM_SOCIAL_MIN 0.75f
+#define TOTEM_REACH      26.0f
+#define TOTEM_PARADE_S   26.0f              /* how long one parade lasts */
+#define TOTEM_COOL_S     90.0f              /* ... and the quiet after it */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16
