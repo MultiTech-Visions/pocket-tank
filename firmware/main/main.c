@@ -35,6 +35,7 @@
 #include "setup.h"
 #include "setup.h"
 #include "nvs_flash.h"
+#include "esp_app_desc.h"
 #include "rtc_port.h"
 #include "driver/i2c_master.h"
 #include "esp_async_memcpy.h"
@@ -101,11 +102,17 @@ static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no p
 
 /* Sleep (2026-09-14, revised the same day after Strato found a quick
  * sleep/wake "feels like a soft boot"): two stages.
- *  1. GRACE, 90 s: save, panel and touch off, IMU quiesced, then RAM-alive
+ *  1. GRACE, 20 min (was 90 s until 2026-09-16 evening): save, panel and touch off, IMU quiesced, then RAM-alive
  *     LIGHT sleep with BOOT (GPIO, level low) and a timer armed. A press in
  *     this window resumes IN PLACE - the fish exactly where they were,
  *     mid-goal - after crediting the nap to tank_tick_sleep. Costs what the
- *     old drowse did, for 90 s at most.
+ *     old drowse did (~4.7 mA), for 20 min at most - ~1.6 mAh per sleep.
+ *     Why 20 min and not 90 s: from the PMIC power-off only a PWRON hold
+ *     longer than ONLEVEL (128 ms, the shortest the AXP2101 offers) boots
+ *     the board; a lighter tap does nothing at all (Strato's presses time
+ *     at ~150 ms on the PMIC's own clock - director `keytime`). Inside the
+ *     grace the chip is awake and any tap wakes it, so the short absences
+ *     stay a tap and only a real absence ends in the power-off.
  *  2. DEEP sleep once the grace passes: BOOT armed as ext0, chip down to
  *     microamps, RAM and PSRAM gone. Waking is a boot: app_main sees the
  *     ext0 (or the director's timer) wake cause and calls progression_wake -
@@ -123,7 +130,7 @@ static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no p
  *  I2S + amp lines driven low, gpio_deep_sleep_hold_en), which is also what
  *  makes esp-idf isolate every other digital pad: un-isolated, deep sleep
  *  drew ~15 mA by the batlog, three times the light-sleep drowse it replaced. */
-#define SLEEP_GRACE_US    (90LL * 1000000)
+#define SLEEP_GRACE_US    (20LL * 60 * 1000000)  /* 2026-09-16: was 90 s; see the note above */
 #define DIRECTOR_GRACE_US (5LL * 1000000)     /* `deepsleep N`: straight to stage 2 */
 #define KEY_POLL_US       (1000000LL)         /* the grace wakes once a second to ask the PMIC about the PWR key */
 static int battery_pct(void) { float f; bool c; return battery_port_read(&f, &c) ? (int)(f * 100 + 0.5f) : -1; }
@@ -324,11 +331,14 @@ static void on_tank_event(int ev, int fish, void *ud) {
  * read above 10% for 30 s */
 #define LOW_BATTERY_FRAC 0.10f
 static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
+static int s_bat_fake = -1;                 /* director `battery N`: a staged gauge, for the camera (-1 = the real one) */
+void device_fake_battery(int pct) { s_bat_fake = pct < 0 ? -1 : pct > 100 ? 100 : pct; if (pct < 0) s_bat_low = false; }
 static void battery_frame(int64_t now) {
     static int64_t bat_us, above_since;
     if (now - bat_us < 1000000) return;
     bat_us = now;
     s_bat_ok = battery_port_read(&s_bat_frac, &s_bat_chg);
+    if (s_bat_fake >= 0) { s_bat_ok = true; s_bat_frac = s_bat_fake / 100.0f; s_bat_chg = false; }   /* staged: on battery at that level, whatever the cable says */
     if (!s_bat_ok) return;
     if (!s_bat_low) {
         if (!s_bat_chg && s_bat_frac <= LOW_BATTERY_FRAC) {
@@ -500,6 +510,12 @@ static void tank_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(rest < 1 ? 1 : rest));
     }
 }
+
+/* the settings page's dim version line: ESP-IDF stamps the app descriptor
+   with `git describe --always --tags --dirty` of the checkout at build (the
+   installer's Actions job checks out with the full history), the same words
+   the installer page shows for what it would write */
+const char *version_port_string(void) { return esp_app_get_description()->version; }
 
 void app_main(void) {
     ESP_LOGI(TAG, "pocket-tank boot%s",

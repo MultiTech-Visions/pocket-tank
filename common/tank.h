@@ -50,7 +50,7 @@
 #define VEG_BEDS_MAX 4                         /* + the shop's sword plant, bed 3 (2026-09-15:
                                                 * live only once bought; tank_veg_beds) */
 typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
-#define SD_ITEM_N 6                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
+#define SD_ITEM_N 7                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
 #define VEG_START  0.35f                       /* a fresh tank (and a bought plant): comfortable cover */
 #define VEG_NUB    0.03f                       /* trim floor: ~13 px green stubble */
 #define VEG_BARE   0.10f                       /* tallest bed under this = no cover
@@ -73,6 +73,13 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
 #define ALGAE_COLS (TANK_W / ALGAE_CELL)       /* 28 */
 #define ALGAE_ROWS (TANK_H / ALGAE_CELL)       /* 23 */
 #define ALGAE_CELLS (ALGAE_COLS * ALGAE_ROWS)
+#define ALGAE_DIRTY 0.15f                      /* film on more of the glass than this =
+                                                * a DIRTY tank: no fry is conceived in
+                                                * it until it is wiped back under (a
+                                                * fry gate, 2026-09-16). Some film is
+                                                * fine; growth stops claiming cells at
+                                                * ALGAE_COVER_CAP (tank.c, 0.30), and one
+                                                * night's sleep films ~25% (selftest-tend) */
 
 typedef enum {
     GOAL_SEEK_FOOD, GOAL_FLEE_SHADOW, GOAL_VISIT_BUBBLES, GOAL_FOLLOW_FRIEND,
@@ -266,10 +273,13 @@ typedef struct tank {
     float    snail_x, snail_y, snail_heading;
     int16_t  snail_cell;           /* the algae cell it is heading for, -1 = wandering */
     float    snail_graze;          /* seconds on the current cell */
+    int32_t  snail_grazed;         /* algae cells it has grazed clean, lifetime (its card,
+                                    * 2026-09-16; saved) */
     /* where the keeper put the decor (2026-09-16, the placement page; one
-     * slot per shop item since 2026-09-18): each placeable piece's centre x
-     * along the floor (<= 0 = its default spot) and its depth layer
-     * (DECOR_Z_*). Both saved. Indexed by SD_IDX_*. */
+     * slot per shop item since 2026-09-18, replacing the per-piece plant_x /
+     * castle_x pairs): each placeable piece's centre x along the floor
+     * (<= 0 = its default spot) and its depth layer (DECOR_Z_*). Both saved.
+     * Indexed by SD_IDX_*. */
     float    decor_x[SD_ITEM_N];
     uint8_t  decor_z[SD_ITEM_N];
     /* the bass stack's next drop, on the tank clock (tank.c; not saved) */
@@ -433,6 +443,10 @@ void  tank_veg_set(tank_t *t, int b, float g);
 /* the tallest bed at VEG_NURSERY or better, -1 if none (progression gates
  * courtship and arrivals on it; tank.c stages the courtship there) */
 int   tank_nursery_bed(const tank_t *t);
+/* the share of the glass wearing film, 0..1 (cells with any algae over all
+ * cells - what the keeper sees covered, not how thick). > ALGAE_DIRTY = a
+ * dirty tank: the fry checklist's GLASS gate (progression.c) */
+float tank_algae_cover(const tank_t *t);
 void  tank_veg_sync(tank_t *t);                 /* veg_growth[] from veg_h[][] (after a load) */
 void  tank_grow_algae(tank_t *t, int steps);
 
@@ -467,7 +481,12 @@ void  tank_set_bubble_x(tank_t *t, float x);
  * The items are bits in tank_t.sd_unlocks; progression.c sells them
  * (progression_buy) and tank.c gives them their place. A bought thing is in
  * the tank for good. */
-enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1,
+/* Upstream owns the low bits and keeps taking the next one (the castle took
+ * bit 2). Anything added in THIS fork starts at SD_LOCAL_BIT0, so a sync can
+ * never renumber an unlock that is already sitting in somebody's save. The
+ * bit is therefore NOT the index any more: read SD_ITEMS[i].bit, never 1u<<i. */
+#define SD_LOCAL_BIT0 16
+enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2,
        /* the festival shelf (2026-09-18, Strato: two tanks gifted at a bass
         * music festival): a LASER RIG hung under the surface that sweeps
         * beams through the water once the light is out, a BASS STACK on the
@@ -475,10 +494,12 @@ enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1,
         * cracked and scattered on the floor, a rail TOTEM. Set dressing:
         * the model sees none of it (schema v4 is frozen) and nothing here
         * touches the fish - it is the tank's night out, not theirs. */
-       SD_ITEM_LASER = 1u << 2, SD_ITEM_BASS = 1u << 3, SD_ITEM_GLOW = 1u << 4, SD_ITEM_TOTEM = 1u << 5,
+       SD_ITEM_LASER = 1u << (SD_LOCAL_BIT0 + 0), SD_ITEM_BASS  = 1u << (SD_LOCAL_BIT0 + 1),
+       SD_ITEM_GLOW  = 1u << (SD_LOCAL_BIT0 + 2), SD_ITEM_TOTEM = 1u << (SD_LOCAL_BIT0 + 3),
        SD_ITEM_COUNT = SD_ITEM_N };
-/* item INDEXES (the bit's position: SD_ITEMS[], the shop rows, decor_x[]) */
-enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_LASER = 2, SD_IDX_BASS = 3, SD_IDX_GLOW = 4, SD_IDX_TOTEM = 5 };
+/* item INDEXES (the row in SD_ITEMS[], the shop rows, decor_x[]) */
+enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_CASTLE = 2,
+       SD_IDX_LASER = 3, SD_IDX_BASS = 4, SD_IDX_GLOW = 5, SD_IDX_TOTEM = 6 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -490,6 +511,7 @@ veg_kind_t tank_veg_kind(const tank_t *t, int b);
  * snail on the glass, bottom left */
 void  tank_plant_place(tank_t *t);
 void  tank_snail_place(tank_t *t);
+void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
  * placeable item has a centre x along the floor - clamped inside the
@@ -504,14 +526,24 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define DECOR_MARGIN    30                 /* the snail's margin: inside the panel's rounded bezel */
 #define PLANT_HALF_W    21                 /* four leaves at a 14 px pitch: centre to the outer leaf */
 #define PLANT_X_DEFAULT (208.0f + PLANT_HALF_W)   /* the open floor between the reef bed and bed 2 */
+/* the castle (2026-09-16, Strato's castle-v2 mockup, drawn procedurally in
+ * render.c): ~184 px wide on the floor, a swim-through arch. Its depths are
+ * BEHIND and IN FRONT only (Strato: "no among"), and they mean the PLANT
+ * LAYER: BACK = behind the grass and the fish, a backdrop the fish pass in
+ * front of; FRONT = in front of the grass, and the fish swim THROUGH the arch
+ * (the keep behind them, the gate wall and the front towers over them). */
+#define CASTLE_HALF_W   92
+#define CASTLE_H        164                /* rows above the floor line (render.c CASTLE_ROWS) */
+#define CASTLE_SPIRE_H  146                /* the tallest spire: what the placement page highlights */
+#define CASTLE_X_DEFAULT 300.0f
 #define LASER_HALF_W    18                 /* the bar under the surface: three emitters at a 14 px pitch */
 #define LASER_X_DEFAULT (TANK_W * 0.5f)
 #define BASS_HALF_W     14                 /* the cabinet: 28 x 30 on the sand */
-#define BASS_X_DEFAULT  392.0f             /* the right-hand floor, past bed 2's fronds */
+#define BASS_X_DEFAULT  404.0f             /* the right-hand floor, clear of the castle's default span */
 #define GLOW_HALF_W     13                 /* four sticks fanned on the sand */
-#define GLOW_X_DEFAULT  263.0f             /* the open floor, right of the plant's spot */
+#define GLOW_X_DEFAULT  150.0f             /* the open floor left of the castle (208..392 by default) */
 #define TOTEM_HALF_W    9                  /* the pole and its emblem */
-#define TOTEM_X_DEFAULT 318.0f             /* among bed 2's fronds */
+#define TOTEM_X_DEFAULT 110.0f             /* left of the glow sticks, clear of the castle */
 #define TOTEM_H         64                 /* pole foot to the emblem's top */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
@@ -519,6 +551,9 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define BASS_DROP_PUFFS 3                  /* free bubbles the drop shakes out of the cone */
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
 bool  tank_decor_hangs(int item);          /* hung under the surface (the laser rig), not on the sand */
+int   tank_decor_z_count(int item);        /* depths the item offers: 3 (BACK/MIDDLE/FRONT) or 2 (BACK/FRONT) */
+int   tank_decor_z_at(int item, int i);    /* the i-th offered depth (the placement bar's segment i) */
+int   tank_decor_z_index(int item, int z); /* the inverse: which segment shows depth z */
 void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);
@@ -531,5 +566,8 @@ float tank_decor_top_y(const tank_t *t, int item);   /* the piece's top edge on 
  * on the floor it is SNAIL_FLOOR_Y, the foot on the sand line. */
 #define SNAIL_FLOOR_Y (TANK_H - 24.0f)
 bool  tank_snail_upright(const tank_t *t);
+/* a tap on the snail (its card, 2026-09-16): placed, and within a fingertip
+ * of the sprite's centre. Platforms test the fish first. */
+bool  tank_snail_hit(const tank_t *t, float x, float y);
 
 #endif

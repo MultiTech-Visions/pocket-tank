@@ -32,6 +32,8 @@ bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob
 bool    persist_port_save(const void *buf, size_t len);
 bool    persist_port_erase(void);                          /* EVERY saved tank, parked copies included */
 int64_t clock_port_now_unix(void);                         /* 0 if unknown */
+const char *version_port_string(void);                     /* the build's git describe (device: the app
+                                                            * descriptor; sim: PT_VERSION) - the settings page */
 
 /* call after tank_init: restores the saved tank (or creates a new population)
  * and lives through the time since the save was written - since 2026-09-16
@@ -110,15 +112,17 @@ void progression_ack_milestones(tank_t *t);
  * the first thing a keeper asks is "how do I get a new fry?" - and the
  * milestones page said nothing). progression_next_fry fills one line per
  * gate of the NEXT arrival: the care gates arrival_conditions counts (the
- * same code, so the list can never disagree with the rule) plus the nursery
- * bed every arrival needs. Each line: a kind (the renderer picks the art),
- * a title, the words (what to do - a plain sentence over two lines; Strato:
+ * same code, so the list can never disagree with the rule - the population's
+ * gates, then the GLASS gate every arrival needs: no fry is conceived in a
+ * dirty tank, film on more than ALGAE_DIRTY of the glass, 2026-09-16) plus
+ * the nursery bed every arrival needs. Each line: a kind (the renderer
+ * picks the art), a title, the words (what to do - a plain sentence over two lines; Strato:
  * "all fish must have a minimum six out of 10 trust score", not a hint), a
  * progress phrase (where it stands), a 0..1 fraction and whether it is met. Returns the count, 0 at the
  * population cap. *staged = every gate is met and the fry waits for the
  * next light-on. Strings fit the pixel font: <= 25 chars at scale 2. */
-enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, FRY_REQ_GRASS };
-#define FRY_REQ_MAX 4
+enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, FRY_REQ_GRASS, FRY_REQ_GLASS };
+#define FRY_REQ_MAX 5
 typedef struct {
     int   kind;
     char  title[12];
@@ -133,7 +137,7 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
  * keeper moves it, in up to FRY_TIP_LINES lines of <= 26 chars, NULL-
  * terminated. Written from the rules in tank.c / progression.c (trust
  * only rises under a resting finger; quick taps cost it; fish age only
- * while lit; grass regrows by itself). */
+ * while lit; grass regrows by itself; the glass is wiped by a drag). */
 #define FRY_TIP_LINES 5
 const char *const *progression_fry_tip(int kind);
 
@@ -156,6 +160,7 @@ const char *const *progression_fry_tip(int kind);
 #define SD_CHORE_EVERY 100
 #define SD_PRICE_PLANT 40
 #define SD_PRICE_SNAIL 80
+#define SD_PRICE_CASTLE 150
 /* the festival shelf (2026-09-18): dressing, priced under the snail - the
  * glow sticks are the first thing a fresh tank can afford */
 #define SD_PRICE_LASER 60
@@ -176,6 +181,9 @@ extern const sd_item_t SD_ITEMS[SD_ITEM_COUNT];
 bool progression_buy(tank_t *t, int item);
 /* the item index for a key (SD_ITEMS[].key: "plant", "snail", "laser" ...), -1 for none */
 int  progression_sd_item_by_key(const char *key);
+/* false once an upstream sync has appended fields AFTER this fork's decor
+ * tail; selftest-shop asserts it (see the LOCAL TAIL note in progression.c) */
+bool progression_save_tail_is_last(void);
 /* dollars awarded since the last call (the toast over the live tank) */
 int  progression_sd_take_award(void);
 /* director / tests: dollars from nowhere (negative takes them away) */

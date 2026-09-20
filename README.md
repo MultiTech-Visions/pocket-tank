@@ -113,7 +113,9 @@ moment before committing.
 ![The stats card](docs/media/sim-stats-card.png)
 
 Tap a fish for its stats card. Needs, traits, and trust are revealed as the
-fish shows that side of itself, so a new fish's card is mostly blank.
+fish shows that side of itself, so a new fish's card is mostly blank. The
+MORE button at its foot (or a tap anywhere on the card) opens the milestones
+page, where the SETTINGS and UPGRADES buttons live.
 
 ## The living tank
 
@@ -154,7 +156,7 @@ a bed down to nubs. Algae films the glass over hours and a drag across it
 squeegees it clean. Fish like cover: grass calms them, and only a tank truly
 smothered by two beds at the ceiling stresses them.
 
-**Milestones.** Tap the open stats card for the milestones page: a row per
+**Milestones.** Tap MORE on the open stats card for the milestones page: a row per
 fish with its sprite at its real size, its name and a growth strip, then a
 badge for each first it has chosen to do: first meal from you, first
 hold-approach, first reef, first bubbles, first follow, first dart. The
@@ -162,20 +164,27 @@ tank's row below tracks the population and the firsts you share: first
 feeding, first trimming, first glass cleaning, first full night's sleep,
 first play session, the tank changed someone. A locked badge is the same
 picture as a gray silhouette; one earned since you last looked wears a
-ring. Tap a badge to read it (a small panel; tap again to dismiss). At the
-foot of the page: SETTINGS, UPGRADES (the shop) and CLOSE.
+ring. Tap a badge to read it: a small panel with arrows at its top corners
+that step through the rest of the group without going back to the page (a
+fish's six badges, the tank's six, the fry's gates, or the fish themselves
+from a fish's name); tap anywhere else to dismiss. At the foot of the
+page: SETTINGS, UPGRADES (the shop) and CLOSE. The shop's and the settings
+page's own CLOSE bring you back here, not out to the tank.
 
 **The next fry.** While the tank can still grow, a NEW FRY row sits under
 the last fish: what the next arrival needs, as badges that light up when
 met, with a filling bar under each one still owed. The list is read from
 the same rule that decides a birth, so it is never wrong: at two fish it
 is trust, meals and a calm hold; later the youngest must grow up, and the
-counts rise. Tap a badge for the plain words and where it stands ("ALL FISH
+counts rise; and always clean glass and some grass, because no fry is
+conceived in a dirty tank (film on more than 15% of the pane closes the
+gate, and its bar fills as you wipe). Tap a badge for the plain words and where it stands ("ALL FISH
 MUST HAVE TRUST OF AT LEAST 6 OUT OF 10 / LOWEST NOW 4.1"), and HOW? for a
 tip on how to get there. Tap the name for the tally. When every step is
 done, the fry is born at the next light-on.
 
 ![The milestones page](docs/media/sim-milestones.png)
+![A badge's panel, with its arrows](docs/media/sim-milestone-modal.png)
 ![The NEW FRY row, and a gate's tip](docs/media/sim-milestones-fry.png)
 ![A gate's HOW? tip](docs/media/sim-fry-how.png)
 
@@ -188,13 +197,20 @@ again and again. Nothing is ever needed and nothing is lost: a tank with no
 sand dollars is exactly the tank there was before. The coin on the
 milestones page's TANK row shows your balance, and it (or the UPGRADES
 button) opens the shop: a row per item with its price, UNLOCK when you can
-afford it, IN TANK once you own it, and HOW TO EARN for the list. The
-first page holds the care items. The **sword plant** (40) is a fourth bed of broad
+afford it, IN TANK once you own it, and HOW TO EARN for the list. Three
+rows to a shelf, and MORE turns the page. The first shelf holds the care
+items. The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
 grass. The **snail** (80) grazes the glass clean cell by cell, crawling
 flat across the pane with its head leading, and walks the floor upright
 when there is nothing to eat; it keeps working while the tank sleeps, so
-the glass is thinner in the morning. The model sees neither: they reach
+the glass is thinner in the morning. It is drawn the way the fish, the
+grass and the castle are, from a little geometry rather than a sprite, lit
+from the upper left and tinted by the water of its row, and it moves like
+a snail: waves run along its foot, its eye stalks sway, its shell rocks
+with the crawl. Tap the snail for its card: a ring
+around it and a tally of the spots of algae it has grazed clean so far,
+night shifts included. The model sees neither: they reach
 the fish the way your own chores do, through cover and the film. Dollars
 earned while you watch show as a small "+N" over the water.
 
@@ -226,11 +242,29 @@ button that opens the same page again. The snail is not for placing; it
 goes wherever the algae is. The festival pieces place the same way; the
 laser rig's stripe marks the column under it.
 
+**The castle.** The third thing in the shop (150) is a stone castle with
+a swim-through arch: two pointed towers, a crenellated wall, a taller
+rear tower, a brick arch and moss creeping up from a rubble base. It is
+not a sprite. Like the fish and the grass it is drawn from a little
+geometry every time the scene is built, its stone a brick pattern from a
+position hash, lit from the upper left and tinted with the water of each
+row, so it sits in the tank instead of on it. Its placement page has the
+same drag and a DEPTH bar of two choices that mean the plant layer:
+BEHIND puts it behind the grass and the fish, a ruin in the weeds; IN
+FRONT stands it in front of the grass, which stops at its walls, and the
+fish swim through the arch, tucked behind the jambs as they pass. The
+fish do not know it is there. They find the arch by chance, which is most
+of the charm.
+
 ![The shop](docs/media/sim-shop.png)
 ![Unlocking the snail](docs/media/sim-shop-modal.png)
 ![The sword plant and the snail on the glass, a +5 just earned](docs/media/sim-tank-shop.png)
 ![The snail walking the floor](docs/media/sim-tank-snail.png)
+![The snail's card](docs/media/sim-snail-card.png)
 ![Placing the sword plant: dragged to the right, IN FRONT of the fish](docs/media/sim-place.png)
+![The castle IN FRONT of the grass, a fish in the arch](docs/media/sim-castle.png)
+![The castle BEHIND the grass](docs/media/sim-castle-behind.png)
+![Placing the castle: BEHIND or IN FRONT](docs/media/sim-place-castle.png)
 
 **The light.** Two quick taps on the glass turn the tank light off and on;
 in the dark the fish rest and the palette dims. The settings page has a
@@ -244,14 +278,18 @@ stretch earns the tank its first full night's sleep.
 the light coming on. A real-time clock tells it how long it was off, so a
 tank left dark for a day wakes hungry. One key does all of it: a short
 press on PWR puts the tank to sleep - it saves and the screen goes dark -
-and a press wakes it. Press again within a minute and a half and the tank
-simply resumes where it was; after that it powers itself down to the
-board's deepest state (tens of microamps, months on the shelf), and the
-next press wakes it with a three-second boot, the fish having lived
-through the time away: hunger up, energy back, the grass and the algae
-grown, a long night ending in begging at the surface. The tank decides how
-deep it sleeps; you never do. Holding PWR powers it off at once. Hold BOOT
-and tap the glass to reset the tank. Flip the device and the screen follows.
+and a press wakes it. Press again within twenty minutes and the tank
+simply resumes where it was, on a tap; after that it powers itself down to
+the board's deepest state (tens of microamps, months on the shelf), and the
+next press wakes it with a one-second boot, the fish having lived through
+the time away: hunger up, energy back, the grass and the algae grown, a
+long night ending in begging at the surface. One thing to know about that
+deepest sleep: the only chip still awake is the power-management chip, and
+its rule is that the key must be held for about an eighth of a second
+before it turns the board on - a quick tap does nothing. Press it like you
+mean it. The tank decides how deep it sleeps; you never do. Holding PWR
+powers it off at once. Hold BOOT and tap the glass to reset the tank. Flip
+the device and the screen follows.
 
 **First run.** A new tank, whether a fresh install or a reset, opens with a
 short setup over the live water. A welcome page; then you place the bubble
@@ -309,7 +347,7 @@ brain works out of the box.
 
 In the window, the mouse is your finger: tap the water surface or drag down
 from the top edge to feed, click a fish for its stats card, click the card
-for milestones, hold the button to rest a finger on the glass, three quick
+(or its MORE button) for milestones, hold the button to rest a finger on the glass, three quick
 clicks to startle, two to toggle the light, drag across the glass to wipe
 algae, and stroke sideways through a bed to trim it. Keys: **F** feed at the
 mouse, **N** light, **A** auto light, **H** handle the tank (moving the
@@ -325,7 +363,8 @@ Flags: `--fresh` starts a new random tank, `--fast N` runs tended time N×
 faster so you can watch fish grow up, `--greedy` disables sampling,
 `--narrate` prints every decision as it's made, `--snapshot <prefix>` writes
 PPM frames of the tank, card, milestones page, the shop, the placement
-page, reset prompt, the setup pages, and the three pages of a birth.
+page, the castle (in front, behind, its page), reset prompt, the setup
+pages, and the three pages of a birth.
 
 Headless checks, all of which run in CI-style without a window:
 `--selftest` (reflex layer), `--selftest-llm [min]` (the real model),
@@ -353,9 +392,18 @@ The easy way onto a board: **https://stratobuilds.com/pocket-tank-installer/**.
 Plug the Waveshare board into your computer, open the page in Chrome or Edge,
 click *Install Pocket Tank*, pick the port, and watch the bar fill. About
 8 MB goes over in a minute or two, the board reboots on its own, and two fry
-are waiting. The dialog offers to erase first: say yes for a brand-new tank,
-or leave it off to update a tank you already keep and your fish, their trust
-and their history survive. It is the same mechanism ESPHome and Home
+are waiting.
+
+**Updating is the same click.** The installer never erases the board: it
+rewrites the app and the model, and the tank's save lives in a part of the
+flash (NVS at `0x9000`) that none of the four parts cover, so your fish,
+their names, trust, history, badges, sand dollars and decorations carry on.
+Every version loads the saves of every earlier one (the save only ever grows
+at the tail, and the one field that went in mid-struct is slid into place on
+load). To start over, hold BOOT and tap the glass for the *Reset tank?*
+prompt; the page also has an "erase and install fresh" button for a board
+that won't get that far. The settings page shows the firmware version at
+its foot, small and dim, so you can tell what you run. It is the same mechanism ESPHome and Home
 Assistant use ([ESP Web Tools](https://esphome.github.io/esp-web-tools/)),
 running entirely in the browser over Web Serial.
 
@@ -387,6 +435,14 @@ signals for each stage, and [docs/memory_budget.md](docs/memory_budget.md)
 explains where every kilobyte goes. The boot log prints a per-stage frame
 profile and per-decision inference timings, so performance work is
 measurable without instruments.
+
+**Other boards.** [knoopx](https://github.com/knoopx) ported the tank to the
+Waveshare **ESP32-P4-WIFI6-Touch-LCD-4B** (4-inch 720×720 MIPI-DSI panel,
+GT911 touch, ES8311 audio) in
+[their fork](https://github.com/knoopx/pocket-tank). It is a community port:
+it needs ESP-IDF 5.5, it is not built or tested here, and it may lag behind
+this repo. [Pull request #5](https://github.com/mediacutlet/pocket-tank/pull/5)
+has the details.
 
 ## Train your own
 
@@ -449,8 +505,8 @@ seven-minute prompt check before an overnight run is always worth it.
 - ✅ Simulator: the full tank with progression, self-tests, snapshots
 - ✅ Firmware: running on the real board at 25 to 30 fps and 3.7 s per
   decision, with touch, auto-rotation, a battery gauge and log, and one
-  key for sleep and wake (a 90 s nap window, then the board powers itself
-  off to tens of microamps)
+  key for sleep and wake (a 20 min nap window, then the board powers itself
+  off to tens of microamps; from there a held press wakes it)
 - ✅ The living tank: growth, arrivals with courtship, trust, the hunger
   economy, upkeep chores, milestones, the reset prompt, the first-run setup
   (place the bubbles, a letter wheel to name each fry, a body color to pick),
@@ -466,14 +522,14 @@ seven-minute prompt check before an overnight run is always worth it.
 - ✅ The light follows the hand: an optional idle rule (the motion sensor
   and touch) puts a tank left on the desk to sleep; the double-tap by
   default
-- ✅ Sand dollars: care earns points, the shop spends them; a sword plant
-  and an algae-grazing snail to start; what you buy you place yourself,
+- ✅ Sand dollars: care earns points, the shop spends them; a sword plant,
+  an algae-grazing snail and a swim-through castle to start; what you buy you place yourself,
   where along the floor and whether it stands behind, among or in front
   of the fish
 - ✅ The festival shelf: a laser rig that sweeps the water once the light
   is out, a bass stack that thumps and drops, glow sticks, a rail totem
 - ✅ Browser installer: one click from Chrome or Edge, hosted at
-  stratobuilds.com
+  stratobuilds.com; updating is the same click and never erases a tank
 - 🔋 In progress: battery life. The first night on the board's power-off
   and the awake draw with a full tank are being measured with the tank's
   own log; what is in flight and how to pick it up is in

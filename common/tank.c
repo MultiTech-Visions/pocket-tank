@@ -264,7 +264,9 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = 0;
     t->sd_colonies_paid = t->sd_inches_paid = 0;
     t->snail_x = -1; t->snail_y = -1; t->snail_heading = 0; t->snail_cell = -1; t->snail_graze = 0;
+    t->snail_grazed = 0;
     for (int i = 0; i < SD_ITEM_COUNT; i++) { t->decor_x[i] = 0; t->decor_z[i] = DECOR_Z_MIDDLE; }
+    t->decor_z[SD_IDX_CASTLE] = DECOR_Z_FRONT;      /* the castle has no AMONG; it starts swim-through */
     t->bass_drop_at = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
     tank_scatter_food(t, 2);
@@ -319,6 +321,8 @@ void tank_init(tank_t *t, uint32_t seed) {
  * dark tank is where the garden gets away from you). */
 #define VEG_GROW_AWAKE_S    108000.0f /* nubs -> full canopy in ~30 h awake */
 #define VEG_GROW_SLEEP_S    36000.0f  /* ~10 h of drowse */
+#define VEG_SWORD_GROW      1.25f     /* the sword plant grows a bit faster than the
+                                       * grass (nubs -> full in ~24 h awake / ~8 h asleep) */
 #define VEG_SEG_PX          3.2f      /* render.c VEG_SEG_DY: px of height per segment */
 #define VEG_SLOW            0.60f     /* cruise speed factor inside a canopy */
 #define ALGAE_STEP_AWAKE_S  240.0f    /* one film growth step per 4 min awake */
@@ -425,9 +429,11 @@ static void veg_sync(tank_t *t) {
     }
 }
 static void veg_grow(tank_t *t, float dg) {
-    for (int b = 0; b < tank_veg_beds(t); b++)
+    for (int b = 0; b < tank_veg_beds(t); b++) {
+        float dgb = tank_veg_kind(t, b) == VEG_KIND_SWORD ? dg * VEG_SWORD_GROW : dg;
         for (int i = 0; i < VEG_FRONDS_MAX; i++)
-            t->veg_h[b][i] = fminf(1, t->veg_h[b][i] + dg);
+            t->veg_h[b][i] = fminf(1, t->veg_h[b][i] + dgb);
+    }
     veg_sync(t);
 }
 void tank_veg_sync(tank_t *t) { veg_sync(t); }
@@ -495,6 +501,12 @@ static int veg_cut(tank_t *t, float x0, float y0, float x1, float y1, bool landi
     }
     if (cuts) veg_sync(t);
     return cuts;
+}
+
+float tank_algae_cover(const tank_t *t) {
+    int covered = 0;
+    for (int i = 0; i < ALGAE_CELLS; i++) covered += t->algae[i] > 0;
+    return (float)covered / ALGAE_CELLS;
 }
 
 /* one film step: thicken a covered cell, or claim a fresh one (preferring
@@ -608,6 +620,14 @@ static int snail_nearest_cell(const tank_t *t) {
     return best;
 }
 bool tank_snail_upright(const tank_t *t) { return t->snail_cell < 0 && t->snail_y >= SNAIL_FLOOR_Y - 1; }
+#define SNAIL_TAP_RADIUS 48.0f     /* generous round the 32 px sprite: a fingertip on this 322 ppi
+                                    * panel covers ~60 px, and the snail is small and low on the glass
+                                    * (Strato, 2026-09-16: "challenging to tap the little guy" at 30;
+                                    * the fish take 38 and are tested first) */
+bool tank_snail_hit(const tank_t *t, float x, float y) {
+    if (!(t->sd_unlocks & SD_ITEM_SNAIL) || t->snail_x < 0) return false;
+    return tank_dist(t->snail_x, t->snail_y, x, y) <= SNAIL_TAP_RADIUS;
+}
 static void snail_tick(tank_t *t, float dt) {
     if (!(t->sd_unlocks & SD_ITEM_SNAIL)) return;
     if (t->snail_x < 0) tank_snail_place(t);
@@ -625,6 +645,7 @@ static void snail_tick(tank_t *t, float dt) {
             t->snail_graze += dt;
             int v = t->algae[t->snail_cell] - (int)(SNAIL_GRAZE_PER_S * dt + 0.5f);
             t->algae[t->snail_cell] = (uint8_t)(v < 0 ? 0 : v);
+            if (v <= 0) t->snail_grazed++;                  /* a cell eaten clean: its card's tally */
         }
     } else if (t->snail_y < SNAIL_FLOOR_Y - 1) {            /* clean glass: down to the floor, flat on the glass, head down.
                                                                A hair off straight down keeps the sideways facing it had
@@ -653,7 +674,7 @@ static void snail_sleep(tank_t *t, float seconds) {
     for (int k = 0; k < cells; k++) {
         int c = snail_nearest_cell(t);
         if (c < 0) break;
-        t->algae[c] = 0;
+        t->algae[c] = 0; t->snail_grazed++;
         t->snail_x = clampf((c % ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, SNAIL_MARGIN, TANK_W - SNAIL_MARGIN);
         t->snail_y = clampf((c / ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, SNAIL_MARGIN, TANK_H - SNAIL_MARGIN);
     }
@@ -666,19 +687,35 @@ void tank_snail_place(tank_t *t) {
 void tank_plant_place(tank_t *t) {
     tank_veg_set(t, 3, VEG_START);                          /* a young plant; it grows from here */
 }
+void tank_castle_place(tank_t *t) {
+    t->decor_x[SD_IDX_CASTLE] = 0;                  /* the default spot ... */
+    t->decor_z[SD_IDX_CASTLE] = DECOR_Z_FRONT;      /* ... and the fish swim through */
+}
 /* the decor's spot and layer (see tank.h): one table row per shop item -
- * half the footprint (0 = not placeable) and the default centre */
-static const struct { float half_w, x_default; bool hangs; } DECOR[SD_ITEM_COUNT] = {
-    { PLANT_HALF_W, PLANT_X_DEFAULT, false },
-    { 0, 0, false },                                          /* the snail goes where the film is */
-    { LASER_HALF_W, LASER_X_DEFAULT, true },
-    { BASS_HALF_W,  BASS_X_DEFAULT,  false },
-    { GLOW_HALF_W,  GLOW_X_DEFAULT,  false },
-    { TOTEM_HALF_W, TOTEM_X_DEFAULT, false },
+ * half the footprint (0 = not placeable), the default centre, whether the
+ * piece HANGS from the surface instead of standing on the sand, and how many
+ * depths it offers (the castle has no AMONG, so the bar shows two tiles). */
+static const struct { float half_w, x_default; bool hangs; uint8_t z_count; } DECOR[SD_ITEM_COUNT] = {
+    [SD_IDX_PLANT]  = { PLANT_HALF_W,  PLANT_X_DEFAULT,  false, DECOR_Z_N },
+    [SD_IDX_SNAIL]  = { 0, 0, false, 0 },                      /* the snail goes where the film is */
+    [SD_IDX_CASTLE] = { CASTLE_HALF_W, CASTLE_X_DEFAULT, false, 2 },
+    [SD_IDX_LASER]  = { LASER_HALF_W,  LASER_X_DEFAULT,  true,  DECOR_Z_N },
+    [SD_IDX_BASS]   = { BASS_HALF_W,   BASS_X_DEFAULT,   false, DECOR_Z_N },
+    [SD_IDX_GLOW]   = { GLOW_HALF_W,   GLOW_X_DEFAULT,   false, DECOR_Z_N },
+    [SD_IDX_TOTEM]  = { TOTEM_HALF_W,  TOTEM_X_DEFAULT,  false, DECOR_Z_N },
 };
 bool  tank_decor_placeable(int item) { return item >= 0 && item < SD_ITEM_COUNT && DECOR[item].half_w > 0; }
 bool  tank_decor_hangs(int item) { return tank_decor_placeable(item) && DECOR[item].hangs; }
 float tank_decor_half_w(int item) { return tank_decor_placeable(item) ? DECOR[item].half_w : 0; }
+int   tank_decor_z_count(int item) { return tank_decor_placeable(item) ? DECOR[item].z_count : DECOR_Z_N; }
+int   tank_decor_z_at(int item, int i) {            /* a two-depth piece: BEHIND, then IN FRONT */
+    if (tank_decor_z_count(item) == 2) return i <= 0 ? DECOR_Z_BACK : DECOR_Z_FRONT;
+    return i < 0 ? 0 : i >= DECOR_Z_N ? DECOR_Z_N - 1 : i;
+}
+int   tank_decor_z_index(int item, int z) {
+    if (tank_decor_z_count(item) == 2) return z == DECOR_Z_BACK ? 0 : 1;
+    return z;
+}
 float tank_decor_x(const tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return 0;
     return t->decor_x[item] > 0 ? t->decor_x[item] : DECOR[item].x_default;
@@ -687,10 +724,11 @@ int tank_decor_z(const tank_t *t, int item) { return tank_decor_placeable(item) 
 float tank_decor_top_y(const tank_t *t, int item) {
     switch (item) {
     case SD_IDX_PLANT: { float top; tank_veg_bed(t, 3, NULL, NULL, &top, NULL); return top; }   /* the leaves' reach */
-    case SD_IDX_LASER: return 0;                                  /* hung under the surface: the beams reach the floor */
-    case SD_IDX_BASS:  return TANK_H - 16 - 30;
-    case SD_IDX_GLOW:  return TANK_H - 16 - 16;
-    case SD_IDX_TOTEM: return TANK_H - 16 - TOTEM_H;
+    case SD_IDX_LASER:  return 0;                                 /* hung under the surface: the beams reach the floor */
+    case SD_IDX_CASTLE: return TANK_H - 16 - CASTLE_SPIRE_H;
+    case SD_IDX_BASS:   return TANK_H - 16 - 30;
+    case SD_IDX_GLOW:   return TANK_H - 16 - 16;
+    case SD_IDX_TOTEM:  return TANK_H - 16 - TOTEM_H;
     default: return TANK_H - 16;
     }
 }
@@ -701,6 +739,7 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (x > hi) x = hi;
     if (z < 0) z = 0;
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
+    if (tank_decor_z_count(item) == 2 && z == DECOR_Z_MIDDLE) z = DECOR_Z_FRONT;   /* no AMONG */
     t->decor_x[item] = x; t->decor_z[item] = (uint8_t)z;
 }
 /* the bass stack (SD_ITEM_BASS): the thump is a picture (render.c reads the
