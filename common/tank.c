@@ -21,7 +21,21 @@ const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
 };
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
-void tank_emit(int ev, int fish) { if (s_ev_fn) s_ev_fn(ev, fish, s_ev_ud); }
+/* the last moment per fish (tank.h): tank_emit has no tank_t, so tank_tick
+ * leaves the clock here for it. One tank at a time, like the rest of tank.c's
+ * module state. */
+static float s_emit_clock;
+static struct { int8_t ev; float clock; } s_fish_ev[N_FISH_MAX];
+void tank_emit(int ev, int fish) {
+    if (fish >= 0 && fish < N_FISH_MAX) { s_fish_ev[fish].ev = (int8_t)ev; s_fish_ev[fish].clock = s_emit_clock; }
+    if (s_ev_fn) s_ev_fn(ev, fish, s_ev_ud);
+}
+bool tank_last_event(int fish, int *ev, float *seconds_ago) {
+    if (fish < 0 || fish >= N_FISH_MAX || s_fish_ev[fish].ev < 0) return false;
+    if (ev) *ev = s_fish_ev[fish].ev;
+    if (seconds_ago) *seconds_ago = s_emit_clock - s_fish_ev[fish].clock;
+    return true;
+}
 
 const char *const STAGE_NAMES[4] = { "fry", "juv", "adult", "elder" };
 const char *const TRAINED_NAMES[N_TRAINED_NAMES] = { "mira", "bolt", "kelp", "nori" };
@@ -268,6 +282,8 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < SD_ITEM_COUNT; i++) { t->decor_x[i] = 0; t->decor_z[i] = DECOR_Z_MIDDLE; }
     t->decor_z[SD_IDX_CASTLE] = DECOR_Z_FRONT;      /* the castle has no AMONG; it starts swim-through */
     t->bass_drop_at = 0;
+    for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
+    s_emit_clock = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
     tank_scatter_food(t, 2);
 }
@@ -1403,6 +1419,7 @@ static uint32_t state_signature(const tank_t *t, int idx) {
 
 void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     t->clock += dt;
+    s_emit_clock = t->clock;            /* tank_emit stamps the fish's last moment with it */
     /* the light: on while the device is handled, off LIGHT_IDLE_S after the
      * last touch or movement (tank_handled) - a tank left on the desk goes
      * dark and the fish sleep. A setup page or a prompt holds it on; the

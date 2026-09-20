@@ -477,6 +477,14 @@ void  tank_set_look(tank_t *t, int slot, uint32_t body, uint32_t accent);
 #define BUBBLE_X_DEFAULT (TANK_W * 0.8f)
 void  tank_set_bubble_x(tank_t *t, float x);
 
+/* ---- the last thing that happened to a fish (2026-09-20, the detail page) ----
+ * tank_emit already names the moment and who it belongs to, but nothing kept
+ * it: the listener is the platform's and fires and forgets. tank.c now
+ * remembers the most recent TEV_* per fish and when, so the fish's page can
+ * say "ATE A PELLET, 12S AGO". Not saved - a boot starts the tank quiet.
+ * Returns false when that fish has had nothing happen yet. */
+bool  tank_last_event(int fish, int *ev, float *seconds_ago);
+
 /* ---- the shop (2026-09-15): sand dollars buy things for the tank ----
  * The items are bits in tank_t.sd_unlocks; progression.c sells them
  * (progression_buy) and tank.c gives them their place. A bought thing is in
