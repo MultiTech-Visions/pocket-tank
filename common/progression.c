@@ -89,12 +89,32 @@ typedef struct {
      * (0 = the default spot) and its layer + 1 (0 = MIDDLE, an older save) */
     float    plant_x;
     uint8_t  plant_z1, pad_place[3];
-    /* festival tail (2026-09-18, the rave shelf): every placeable piece's
-     * centre x (0 = its default spot) and layer + 1 (0 = MIDDLE), by SD_IDX_*
-     * in a fixed SD_DECOR_SAVE_N slots. The plant's own slot duplicates the
-     * two fields above so a 09-16 save (zeros here) still reads its spot. */
+    /* the snail's tally (2026-09-16, its card): cells grazed clean, lifetime.
+     * Older saves read 0 - it starts counting from this build on. */
+    int32_t  snail_grazed;
+    /* the castle's spot (2026-09-16): its centre x (0 = the default) and its
+     * layer + 1 (0 = FRONT, an older save or one that never placed it) */
+    float    castle_x;
+    uint8_t  castle_z1, pad_castle[3];
+    /* ---- LOCAL TAIL (this fork only) - KEEP THESE LAST -------------------
+     * Every placeable piece's centre x (0 = its default spot) and layer + 1
+     * (0 = a slot never written), by SD_IDX_* in a fixed SD_DECOR_SAVE_N
+     * slots. The plant's and castle's slots repeat the upstream fields above,
+     * so a save written here still reads correctly on an upstream build and
+     * an upstream save still reads correctly here.
+     * After EVERY upstream sync these two must be moved back to the end of
+     * save_t: the persist port refuses a blob longer than sizeof(save_t), and
+     * selftest-shop asserts the offset. */
     float    decor_x[SD_DECOR_SAVE_N];
     uint8_t  decor_z1[SD_DECOR_SAVE_N];
+    /* where the glow sticks have got to (2026-09-20). The fish carry them up
+     * and drop them, so the pile wanders: this IS the state worth keeping.
+     * Zeros mean a save from before they could move - the pile is re-laid at
+     * the keeper's spot. Who was holding one is not saved; a boot starts with
+     * every stick on the sand. */
+    float    glow_x[GLOW_N], glow_y[GLOW_N], glow_ang[GLOW_N];
+    uint32_t sd_stowed;      /* owned but out of the tank (2026-09-20) */
+    int16_t  fish_parties[N_FISH_MAX];   /* bass parties attended, per fish (2026-09-20) */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -104,6 +124,17 @@ typedef struct {
  * 1436 padded to the int64's alignment, no offset matched, and the birth-flow
  * flash replaced a live tank with two fry.) */
 #define SAVE_CORE_SIZE   offsetof(save_t, veg_growth)
+/* the one field ever added MID-struct: bubble_x (2026-09-14) went in ahead of
+ * the seen masks, and the browser installer's first builds (public 09-13 ..
+ * 09-14) had already written saves without it - 1432 bytes, the masks
+ * starting where bubble_x now sits. load_save slides them into place, so a
+ * tank kept since the first install updates clean (its badges stay seen and
+ * the bubble column stays put). Never add a field mid-struct again. */
+#define SAVE_PRE_BUBBLE_SIZE 1432
+_Static_assert(offsetof(save_t, ms_seen) == offsetof(save_t, bubble_x) + sizeof(float),
+               "the pre-bubble migration expects the seen masks right after bubble_x");
+_Static_assert(offsetof(save_t, bubble_x) + sizeof(((save_t *)0)->ms_seen) + sizeof(uint32_t) == SAVE_PRE_BUBBLE_SIZE,
+               "the pre-bubble migration expects the 1432-byte layout's masks to end at 1432");
 
 float progression_time_scale = 1.0f;
 
@@ -133,13 +164,15 @@ void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t);
 
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
-const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {   /* index order = SD_IDX_* = the bit's position */
-    { SD_ITEM_PLANT, "plant", "SWORD PLANT", "BROAD LEAVES ON THE FLOOR.", "MORE COVER TO CALM THE FISH", SD_PRICE_PLANT },
-    { SD_ITEM_SNAIL, "snail", "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_SNAIL },
-    { SD_ITEM_LASER, "laser", "LASER RIG",   "BEAMS SWEEP THE WATER",     "WHEN THE LIGHT GOES OUT",     SD_PRICE_LASER },
-    { SD_ITEM_BASS,  "bass",  "BASS STACK",  "A SPEAKER ON THE SAND.",    "THE DROP SHAKES BUBBLES",     SD_PRICE_BASS },
-    { SD_ITEM_GLOW,  "glow",  "GLOW STICKS", "CRACKED AND SCATTERED.",    "THEY GLOW AFTER DARK",        SD_PRICE_GLOW },
-    { SD_ITEM_TOTEM, "totem", "TOTEM",       "A RAIL TOTEM IN THE SAND.", "FIND YOUR FRIENDS BY IT",     SD_PRICE_TOTEM },
+const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {   /* rows in SD_IDX_* order; the BIT is a field, never the index */
+    { SD_ITEM_PLANT,  "plant",  "SWORD PLANT", "BROAD, VERTICAL LEAVES",    "MORE COVER FOR YOUR CRITTERS", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
+    { SD_ITEM_SNAIL,  "snail",  "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",   SD_PRICE_SNAIL },
+    { SD_ITEM_CASTLE, "castle", "CASTLE",      "STONE TOWERS AND AN ARCH",  "THE FISH SWIM THROUGH IT",     SD_PRICE_CASTLE },  /* 2026-09-16 */
+    { SD_ITEM_LASER,  "laser",  "LASER RIG",   "BEAMS SWEEP THE WATER",     "WHEN THE LIGHT GOES OUT",      SD_PRICE_LASER },
+    { SD_ITEM_BASS,   "bass",   "BASS STACK",  "A SPEAKER ON THE SAND.",    "THE DROP SHAKES BUBBLES",      SD_PRICE_BASS },
+    { SD_ITEM_GLOW,   "glow",   "GLOW STICKS", "CRACKED AND SCATTERED.",    "THEY GLOW AFTER DARK",         SD_PRICE_GLOW },
+    { SD_ITEM_TOTEM,  "totem",  "TOTEM",       "A RAIL TOTEM IN THE SAND.", "FIND YOUR FRIENDS BY IT",      SD_PRICE_TOTEM },
+    { SD_ITEM_DISCO,  "disco",  "DISCO BALL",  "IT DROPS AND SPINS WHEN",   "THE PARTY STARTS. OR TAP IT",  SD_PRICE_DISCO },
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
@@ -179,9 +212,51 @@ bool progression_buy(tank_t *t, int item) {
     t->sd_balance -= it->price; t->sd_unlocks |= it->bit;
     if (it->bit == SD_ITEM_PLANT) tank_plant_place(t);
     if (it->bit == SD_ITEM_SNAIL) tank_snail_place(t);
+    if (it->bit == SD_ITEM_GLOW)  tank_glow_place(t);
+    if (it->bit == SD_ITEM_CASTLE) tank_castle_place(t);
     /* the festival pieces land at their default spot (tank_decor_x) and
        the placement page opens over them; nothing else to set up */
     progression_save(t);                                   /* a purchase sticks at once */
+    return true;
+}
+size_t progression_save_local_tail_offset(void) { return offsetof(save_t, decor_x); }
+bool progression_save_tail_is_last(void) {
+    /* Only the struct's own trailing ALIGNMENT padding may follow: save_t is
+       8-byte aligned (it carries an int64), so an exact == would fail purely
+       on padding. What this really asserts is that no upstream sync has
+       appended a named field after this fork's tail. */
+    size_t end = offsetof(save_t, fish_parties) + sizeof(((save_t *)0)->fish_parties);
+    return end <= sizeof(save_t) && sizeof(save_t) - end < _Alignof(save_t);
+}
+bool progression_stow(tank_t *t, int item, bool stow) {
+    if (item < 0 || item >= SD_ITEM_COUNT) return false;
+    uint32_t bit = SD_ITEMS[item].bit;
+    if (!(t->sd_unlocks & bit)) return false;                 /* not bought: nothing to put away */
+    if (((t->sd_stowed & bit) != 0) == stow) return false;    /* already where it is being asked to be */
+    if (stow) {
+        /* REMOVE means gone, not parked. Taking a thing out of a real tank
+           loses where it stood and how it lay, and putting it back is a fresh
+           placement - so the sticks come back as a pile, the plant comes back
+           young, the snail picks a new spot, and the placement page runs. */
+        t->sd_stowed |= bit;
+        t->decor_x[item] = 0;
+        t->decor_z[item] = (uint8_t)(item == SD_IDX_CASTLE ? DECOR_Z_FRONT : DECOR_Z_MIDDLE);
+        switch (item) {
+        case SD_IDX_SNAIL: t->snail_x = t->snail_y = -1; t->snail_cell = -1; t->snail_graze = 0; break;
+        case SD_IDX_PLANT: for (int i = 0; i < VEG_FRONDS_MAX; i++) t->veg_h[3][i] = 0; tank_veg_sync(t); break;
+        case SD_IDX_GLOW:  for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; } break;
+        case SD_IDX_TOTEM: t->totem_phase = TOTEM_OFF; t->totem_carrier = -1; t->totem_planted = false; break;
+        case SD_IDX_DISCO: t->disco_drop = t->disco_spin = t->disco_show_s = 0; break;
+        default: break;
+        }
+    } else {
+        t->sd_stowed &= ~bit;                         /* back in, and laid out fresh */
+        if (item == SD_IDX_PLANT)  tank_plant_place(t);
+        if (item == SD_IDX_SNAIL)  tank_snail_place(t);
+        if (item == SD_IDX_CASTLE) tank_castle_place(t);
+        if (item == SD_IDX_GLOW)   tank_glow_place(t);
+    }
+    progression_save(t);
     return true;
 }
 int progression_sd_item_by_key(const char *key) {
@@ -255,7 +330,8 @@ static void do_arrival(tank_t *t) {
  * milestones page can LIST them (progression_next_fry, 2026-09-14). One
  * table serves both: `have` / `need` are the numbers behind the words. */
 typedef struct { int kind; float have, need, frac; bool met; } gate_t;
-static int care_gates(const tank_t *t, gate_t g[3]) {
+#define CARE_GATES_MAX 4                 /* the population's three + the glass */
+static int care_gates(const tank_t *t, gate_t g[CARE_GATES_MAX]) {
     float min_trust = 10;
     for (int i = 0; i < t->n_fish; i++)
         if (t->fish[i].trust < min_trust) min_trust = t->fish[i].trust;
@@ -292,11 +368,30 @@ static int care_gates(const tank_t *t, gate_t g[3]) {
         GATE(FRY_REQ_TRUST, min_trust, 8.0f, min_trust >= 8.0f);
         break;
     }
+    /* and a clean tank (Strato, 2026-09-16: "fish should not be able to
+     * breed in a dirty tank. Some algae is OK but if a certain percentage of
+     * glass crosses a threshold it will prevent new fries from spawning
+     * unless cleaned"): film on no more than ALGAE_DIRTY of the glass. A
+     * care gate like the others, so the parents court while only the glass
+     * holds them back, and the checklist lists it. The bar reads the other
+     * way from the rest - empty at the growth cap, full at the threshold -
+     * so it fills as the keeper wipes. Note the staged fry is NOT held by
+     * the glass at the light-on that brings it: a night's sleep films ~25%
+     * of the glass, so a fry conceived clean would otherwise never land on
+     * a morning (do_arrival waits for the nursery only). */
+    {
+        float cover = tank_algae_cover(t);
+        GATE(FRY_REQ_GLASS, cover, ALGAE_DIRTY, cover <= ALGAE_DIRTY);
+        if (!g[n - 1].met) {
+            float frac = 1.0f - (cover - ALGAE_DIRTY) / ALGAE_DIRTY;
+            g[n - 1].frac = frac < 0 ? 0 : frac > 1 ? 1 : frac;
+        }
+    }
 #undef GATE
     return n;
 }
 static void arrival_conditions(const tank_t *t, int *met, int *total) {
-    gate_t g[3];
+    gate_t g[CARE_GATES_MAX];
     *total = care_gates(t, g); *met = 0;
     for (int i = 0; i < *total; i++) *met += g[i].met;
 }
@@ -308,6 +403,7 @@ static const char *const TIP_HOLD[]   = { "REST A FINGER ON THE GLASS", "FOR A F
 static const char *const TIP_GROW[]   = { "FISH GROW WITH TIME,", "SLOWER WHEN THE TANK IS", "IN SLEEP MODE.", NULL };
 static const char *const TIP_CHANGE[] = { "FISH PERSONALITIES WILL", "NATURALLY DRIFT AS THEY", "INTERACT WITH THE WORLD.", NULL };   /* Strato: intentionally vague */
 static const char *const TIP_GRASS[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST WHILE THE TANK", "SLEEPS.", NULL };
+static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
     switch (kind) {
     case FRY_REQ_TRUST:  return TIP_TRUST;
@@ -315,6 +411,7 @@ const char *const *progression_fry_tip(int kind) {
     case FRY_REQ_HOLD:   return TIP_HOLD;
     case FRY_REQ_GROW:   return TIP_GROW;
     case FRY_REQ_CHANGE: return TIP_CHANGE;
+    case FRY_REQ_GLASS:  return TIP_GLASS;
     default:             return TIP_GRASS;
     }
 }
@@ -324,7 +421,7 @@ static const char *const STAGE_WORDS[4] = { "A FRY", "A JUVENILE", "AN ADULT", "
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2) return 0;
-    gate_t g[3];
+    gate_t g[CARE_GATES_MAX];
     int n = care_gates(t, g);
     for (int i = 0; i < n; i++) {
         fry_req_t *r = &out[i];
@@ -367,6 +464,14 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
             snprintf(r->words2, sizeof r->words2, "MUST START TO SHIFT");
             if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
             else snprintf(r->progress, sizeof r->progress, "%d%% THERE", (int)(r->frac * 100 + 0.5f));
+            break; }
+        case FRY_REQ_GLASS: {
+            int pct = (int)(g[i].have * 100 + 0.5f), limit = (int)(ALGAE_DIRTY * 100 + 0.5f);
+            snprintf(r->title, sizeof r->title, "GLASS");
+            snprintf(r->words, sizeof r->words, "NO MORE THAN %d%%", limit);          /* Strato's words, 2026-09-16 */
+            snprintf(r->words2, sizeof r->words2, "ALGAE COVERAGE");
+            if (r->met) snprintf(r->progress, sizeof r->progress, "CURRENTLY CLEAN ENOUGH");
+            else snprintf(r->progress, sizeof r->progress, "%d%% COVERED NOW", pct);
             break; }
         }
     }
@@ -438,6 +543,10 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
     if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
+    if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
+        memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
+        sv.bubble_x = 0;                       /* = the default column */
+    }
     *saved_unix = sv.saved_unix;
     t->n_fish = 0;
     for (int i = 0; i < sv.n_fish; i++) {
@@ -479,21 +588,38 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     memcpy(t->algae, sv.algae, ALGAE_CELLS);
     t->trims = sv.trims; t->cells_cleaned = sv.cells_cleaned;
     /* the sand dollar tail (zeros for an older save: the ledger back-pays) */
-    t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & ((1u << SD_ITEM_COUNT) - 1);
+    t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned;
+    { uint32_t known = 0;                          /* the bits are sparse now (SD_LOCAL_BIT0), so
+                                                      the old (1u << SD_ITEM_COUNT) - 1 mask would
+                                                      have quietly dropped every local item */
+      for (int i = 0; i < SD_ITEM_COUNT; i++) known |= SD_ITEMS[i].bit;
+      t->sd_unlocks = sv.sd_unlocks & known; }
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = i < t->n_fish ? sv.sd_paid_fish[i] : 0;
     t->sd_colonies_paid = sv.sd_colonies_paid; t->sd_inches_paid = sv.sd_inches_paid;
     t->algae_colonies = sv.algae_colonies; t->trim_px = sv.trim_px;
     if (sv.snail_x > 0) { t->snail_x = sv.snail_x; t->snail_y = sv.snail_y; }
+    t->snail_grazed = sv.snail_grazed;
     if (t->sd_unlocks & SD_ITEM_PLANT) {
         if (sv.veg_h3[0] > 0) for (int i = 0; i < VEG_FRONDS_MAX; i++) t->veg_h[3][i] = sv.veg_h3[i];
         else tank_plant_place(t);
         tank_veg_sync(t);
     }
     if (sv.plant_x > 0) tank_decor_set(t, SD_IDX_PLANT, sv.plant_x, sv.plant_z1 ? sv.plant_z1 - 1 : DECOR_Z_MIDDLE);
-    for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {   /* the festival tail; the plant's slot repeats the above */
-        if (!sv.decor_z1[i] || !tank_decor_placeable(i)) continue;      /* a slot never written (a 09-16 save reads zeros) */
+    if (sv.castle_x > 0) tank_decor_set(t, SD_IDX_CASTLE, sv.castle_x, sv.castle_z1 ? sv.castle_z1 - 1 : DECOR_Z_FRONT);
+    for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {   /* the local tail wins where it was written */
+        if (!sv.decor_z1[i] || !tank_decor_placeable(i)) continue;      /* a slot never written (an upstream save reads zeros) */
         int z = sv.decor_z1[i] - 1 < DECOR_Z_N ? sv.decor_z1[i] - 1 : DECOR_Z_MIDDLE;
         if (sv.decor_x[i] > 0) tank_decor_set(t, i, sv.decor_x[i], z); else t->decor_z[i] = (uint8_t)z;   /* x 0 = the default spot */
+    }
+    t->sd_stowed = sv.sd_stowed & t->sd_unlocks;     /* an older save reads 0: everything owned is in the tank */
+    for (int i = 0; i < t->n_fish; i++) t->fish[i].parties = sv.fish_parties[i];
+    if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
+        if (sv.glow_x[0] > 0) {
+            for (int i = 0; i < GLOW_N; i++) {
+                t->glow[i].x = sv.glow_x[i]; t->glow[i].y = sv.glow_y[i]; t->glow[i].ang = sv.glow_ang[i];
+                t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].held_s = 0; t->glow[i].carrier = -1;
+            }
+        } else tank_glow_place(t);                   /* an older save: back in a tidy fan */
     }
     s_sd_prev_feedings = t->player_feedings;         /* meals before this boot are not back-paid */
     s_sd_pending = 0;
@@ -669,11 +795,19 @@ void progression_save(tank_t *t) {
     sv.sd_colonies_paid = t->sd_colonies_paid; sv.sd_inches_paid = t->sd_inches_paid;
     sv.algae_colonies = t->algae_colonies; sv.trim_px = t->trim_px;
     sv.snail_x = t->snail_x > 0 ? t->snail_x : 0; sv.snail_y = t->snail_y > 0 ? t->snail_y : 0;
+    sv.snail_grazed = t->snail_grazed;
     for (int i = 0; i < VEG_FRONDS_MAX; i++) sv.veg_h3[i] = (t->sd_unlocks & SD_ITEM_PLANT) ? t->veg_h[3][i] : 0;
+    /* the upstream fields too, so a save written here reads on their build */
     sv.plant_x = t->decor_x[SD_IDX_PLANT] > 0 ? t->decor_x[SD_IDX_PLANT] : 0; sv.plant_z1 = (uint8_t)(t->decor_z[SD_IDX_PLANT] + 1);
+    sv.castle_x = t->decor_x[SD_IDX_CASTLE] > 0 ? t->decor_x[SD_IDX_CASTLE] : 0; sv.castle_z1 = (uint8_t)(t->decor_z[SD_IDX_CASTLE] + 1);
     for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {
         sv.decor_x[i] = t->decor_x[i] > 0 ? t->decor_x[i] : 0; sv.decor_z1[i] = (uint8_t)(t->decor_z[i] + 1);
     }
+    for (int i = 0; i < GLOW_N; i++) {               /* a carried stick saves where it is; it lands on the next boot */
+        sv.glow_x[i] = t->glow[i].x; sv.glow_y[i] = t->glow[i].y; sv.glow_ang[i] = t->glow[i].ang;
+    }
+    sv.sd_stowed = t->sd_stowed;
+    for (int i = 0; i < N_FISH_MAX; i++) sv.fish_parties[i] = i < t->n_fish ? t->fish[i].parties : 0;
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);
     sv.bubble_x = t->bubble_x;

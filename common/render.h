@@ -5,6 +5,7 @@
 #define RENDER_H
 
 #include "tank.h"
+#include "icons.h"   /* icon_t, for render_icon below */
 
 /* fb is TANK_W x TANK_H, RGB565, stride in PIXELS (usually TANK_W). */
 void render_tank(const tank_t *t, uint16_t *fb, int stride);
@@ -44,7 +45,16 @@ void render_fb_primed(const uint16_t *fb, unsigned epoch);
  * visual bars (drives + personality) and stage pips. No text, no digits —
  * the progression design's "simple and visual" stats view. Personality bars
  * are revealed only after the fish has shown that side of itself (milestone
- * bits): you learn your fish by watching. */
+ * bits): you learn your fish by watching. A MORE button sits at the foot
+ * of the card (2026-09-16, Strato: "how do I get to the milestones and
+ * settings screen? it's not very obvious") - the label is the only text on
+ * it; a tap anywhere on the card, button or not, opens the milestones page.
+ * fish_idx == RENDER_CARD_SNAIL (2026-09-16): the SNAIL's card instead - a
+ * ring on the snail and a small centred card: the upright sprite at 2x and
+ * how much algae it has grazed so far (tank_t.snail_grazed). The platforms
+ * keep it in the same selection slot as a fish (a tap on the snail opens it,
+ * a tap anywhere else dismisses it, no card cache). */
+#define RENDER_CARD_SNAIL 99
 void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 /* Optional card cache (RENDER_CARD_W x RENDER_CARD_H uint16): with the scene
  * cache live, the card is redrawn at most 4x/s and blitted otherwise (~7 ms
@@ -52,7 +62,15 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #define RENDER_CARD_X 14
 #define RENDER_CARD_Y 8
 #define RENDER_CARD_W 124
-#define RENDER_CARD_H 228
+#define RENDER_CARD_H 258       /* 228 + the MORE button strip (2026-09-16) */
+/* the card's tap hit box (touch ports): the card itself plus slop, most of
+ * it BELOW the MORE button - fingers aiming at a button by the foot land
+ * low and wide (Strato, 2026-09-16: "I'm not tapping it reliably"), and the
+ * water under the card is nothing a tap needs. RENDER_CARD_HIT(x, y) is the test. */
+#define RENDER_CARD_HIT_BELOW 56
+#define RENDER_CARD_HIT_SIDE  12
+#define RENDER_CARD_HIT(x, y) ((x) >= RENDER_CARD_X - RENDER_CARD_HIT_SIDE && (x) < RENDER_CARD_X + RENDER_CARD_W + RENDER_CARD_HIT_SIDE && \
+                               (y) >= RENDER_CARD_Y && (y) < RENDER_CARD_Y + RENDER_CARD_H + RENDER_CARD_HIT_BELOW)
 void render_set_card_cache(uint16_t *buf);
 
 /* Device battery pill (top-right), drawn with the stats card on hardware:
@@ -76,9 +94,14 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
  * button that flips to a tip page (progression_fry_tip: how the keeper
  * moves that gate); a tap on the name gives the tally. render_milestones_tap maps a tap: a badge, a name
  * or a strip opens a small detail modal (the art at 2x, a title, the
- * words); while the modal is up ANY tap closes it. A CLOSE button at the
+ * words). Arrow buttons at the modal's top corners (2026-09-16) step to the
+ * previous / next of its group without leaving it - a fish's six badges,
+ * the tank's six, the fry checklist's gates, or, from a fish's name, the
+ * fish themselves (wrapping; a group of one shows none). Any other tap
+ * closes the modal. A CLOSE button at the
  * bottom right leaves the page; a SETTINGS button at the bottom left
- * leaves it for the settings page. */
+ * leaves it for the settings page; both the settings page's and the shop's
+ * CLOSE bring the milestones page BACK (the platforms do that). */
 void render_milestones(const tank_t *t, uint16_t *fb, int stride);
 /* a tap on the page (2026-09-13, Strato: with this much to tap, a stray tap
  * must not drop the whole page): MS_TAP_CLOSE = the CLOSE button, bottom
@@ -88,7 +111,9 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride);
  * this tap closed it; MS_TAP_NONE = nothing here (the caller may try the
  * brightness row). */
 enum { MS_TAP_NONE = 0, MS_TAP_KEPT = 1, MS_TAP_CLOSE = 2, MS_TAP_SETTINGS = 3,   /* SETTINGS: the button bottom left (2026-09-15) opens the settings page */
-       MS_TAP_SHOP = 4 };                                                          /* the sand dollar left of the TANK row opens the shop */
+       MS_TAP_SHOP = 4,                                                           /* the sand dollar left of the TANK row opens the shop */
+       MS_TAP_FISH = 16 };          /* + the fish index (2026-09-20): its popup's MORE button was
+                                     * tapped - the platform closes this page and opens ui_fish_page */
 int  render_milestones_tap(const tank_t *t, float x, float y);
 void render_milestones_leave(void);
 
@@ -98,15 +123,24 @@ void render_milestones_leave(void);
  * bottom right. A tap on a row opens the item's modal - the art at 2x, the
  * words, the price, an UNLOCK button; render_shop_tap returns SHOP_TAP_BUY +
  * item when that button is tapped (the caller calls progression_buy; a short
- * balance was already a dim button), SHOP_TAP_CLOSE for the way out,
- * SHOP_TAP_KEPT when a modal opened or closed - or MORE (2026-09-18: three
- * rows to a shelf, the button between HOW TO EARN and CLOSE turns it, and
- * wraps) turned the page. Page state is render-local; render_shop_leave
- * clears it (back to the first shelf) when the page closes. */
-enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32 };   /* BUY / MOVE + item index */
+ * balance was already a dim button), SHOP_TAP_CLOSE for the way out (back
+ * to the milestones page, 2026-09-16), SHOP_TAP_KEPT when a modal opened or
+ * closed - or MORE (2026-09-18: three rows to a shelf, the button between
+ * HOW TO EARN and CLOSE turns it, and wraps) turned the page. Page state is
+ * render-local; render_shop_leave clears it (back to the first shelf) when
+ * the page closes. */
+enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2,
+       SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_STOW = 64 };   /* BUY / MOVE / STOW + item index */
+/* SHOP_TAP_STOW (2026-09-20): the owned item's REMOVE or PUT IN TANK button.
+ * The platform calls progression_stow to flip it, and when a piece comes back
+ * out of the box and can be placed, opens the placement page for it. */
 /* SHOP_TAP_MOVE (2026-09-16): an owned, placeable item's modal carries a MOVE
  * button - the platform closes the shop and opens setup.c's placement page
  * (setup_begin_place), the same page a purchase opens. */
+/* the shop modal's box, so a test can aim at its UNLOCK button without
+ * hard-coding the milestones page's narrower one */
+#define SHP_MODAL_X_T 48
+#define SHP_MODAL_W_T 352
 void render_shop(const tank_t *t, uint16_t *fb, int stride);
 int  render_shop_tap(const tank_t *t, float x, float y);
 void render_shop_leave(void);
@@ -142,7 +176,7 @@ int  render_confirm_hit(float x, float y);
  * with the idle time
  * under it as one number (swipe it up or down to step the seconds, or tap
  * its chevrons; LIGHT_IDLE_S shows by default), and a CLOSE button bottom
- * right.
+ * right (back to the milestones page, 2026-09-16 - the platform's job).
  * The platform feeds render_settings_touch EVERY FRAME while the page is up
  * (x, y, finger down), as it feeds setup_touch: it classifies taps and the
  * wheel's drags, applies the light settings to the tank itself (and marks
@@ -162,6 +196,10 @@ int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
  * night dim, like the card, and draw AFTER render_tank (nothing re-vignettes
  * them). Text is upper case + digits + a little punctuation; `scale` is the
  * pixel size of one font dot (2 = caption, 3 = button). */
+/* one icon from the bank at (x,y), alpha 0..255 (70 is the card's "not yet
+ * revealed" dim). The page-level UI in ui_ext.c draws the card's own icons
+ * with it, so the two screens share their art. */
+void render_icon(uint16_t *fb, int stride, int x, int y, const icon_t *ic, int alpha);
 int  render_text_w(const char *s, int scale);
 void render_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s);
 void render_rect(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb);

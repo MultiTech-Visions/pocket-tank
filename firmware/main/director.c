@@ -131,9 +131,9 @@ static void show_state(const tank_t *t) {
                (int)t->sd_balance, (int)t->sd_earned, len ? owned : " -", (int)t->algae_colonies, t->trim_px / PX_PER_INCH); }
     if (t->sd_unlocks & SD_ITEM_SNAIL) {                /* where it is, what it is after */
         int c = t->snail_cell, cells = 0; for (int i = 0; i < ALGAE_CELLS; i++) cells += t->algae[i] > 0;
-        ESP_LOGI(TAG, "snail at %.0f,%.0f heading %.0f deg | %s cell %d at %d,%d (film %d) | %d cells on the glass", t->snail_x, t->snail_y,
+        ESP_LOGI(TAG, "snail at %.0f,%.0f heading %.0f deg | %s cell %d at %d,%d (film %d) | %d cells on the glass | %d grazed so far", t->snail_x, t->snail_y,
                  t->snail_heading * 57.3f, c >= 0 ? "after" : "no target,", c, c >= 0 ? (c % ALGAE_COLS) * ALGAE_CELL + 8 : -1,
-                 c >= 0 ? (c / ALGAE_COLS) * ALGAE_CELL + 8 : -1, c >= 0 ? t->algae[c] : 0, cells);
+                 c >= 0 ? (c / ALGAE_COLS) * ALGAE_CELL + 8 : -1, c >= 0 ? t->algae[c] : 0, cells, (int)t->snail_grazed);
     }
     for (int b = 0; b < tank_veg_beds(t); b++) {   /* per-frond heights: which blades a sweep left standing */
         char row[VEG_FRONDS_MAX * 5 + 1]; int len = 0, n; float x0, f0, f1;
@@ -143,10 +143,15 @@ static void show_state(const tank_t *t) {
         ESP_LOGI(TAG, "bed %d %s (x from %.0f, pitch %.0f):%s", b, b == 3 ? "leaves" : "fronds", x0 + 6, f1 - f0, row);
     }
     for (int i = 0; i < SD_ITEM_COUNT; i++)          /* every placed piece: its spot and its depth */
-        if ((t->sd_unlocks & SD_ITEMS[i].bit) && tank_decor_placeable(i))
-            ESP_LOGI(TAG, "%s placed: centre x %.0f (%s), depth %s%s", SD_ITEMS[i].key, tank_decor_x(t, i), t->decor_x[i] > 0 ? "the keeper's" : "the default",
-                     t->decor_z[i] == DECOR_Z_BACK ? "BEHIND the fish" : t->decor_z[i] == DECOR_Z_FRONT ? "IN FRONT of the fish" : "AMONG the fish",
+        if ((t->sd_unlocks & SD_ITEMS[i].bit) && tank_decor_placeable(i)) {
+            int z = tank_decor_z(t, i);
+            ESP_LOGI(TAG, "%s placed: centre x %.0f (%s), depth %s%s", SD_ITEMS[i].key, tank_decor_x(t, i),
+                     t->decor_x[i] > 0 ? "the keeper's" : "the default",
+                     tank_decor_z_count(i) == 2
+                         ? (z == DECOR_Z_BACK ? "BEHIND the grass" : "IN FRONT of the grass (the fish swim through)")
+                         : z == DECOR_Z_BACK ? "BEHIND the fish" : z == DECOR_Z_FRONT ? "IN FRONT of the fish" : "AMONG the fish",
                      tank_decor_hangs(i) ? " (hung under the surface)" : "");
+        }
     if (t->sd_unlocks & SD_ITEM_BASS) ESP_LOGI(TAG, "bass stack: next drop in %.1f s", t->bass_drop_at - t->clock);
     ESP_LOGI(TAG, "nursery bed %d (a bed >= %.2f) | parked real tank: %s", tank_nursery_bed(t), (double)VEG_NURSERY,
              nvs_has("bk") ? "YES (restore)" : "no (this IS the real tank)");
@@ -164,13 +169,15 @@ static void help(void) {
     ESP_LOGI(TAG, "STAGED TANKS (the real one is parked first): fresh (new tank, two fry) | stages (fry juv adult elder) | stage <fish|all> <fry|juv|adult|elder>");
     ESP_LOGI(TAG, "stash (park the real tank now) | restore (bring it back) | age <fish> <hours>");
     ESP_LOGI(TAG, "milestones [off] (the page, on cue; on the device: tap the open stats card)");
-    ESP_LOGI(TAG, "shop [off] (the sand dollar page) | dollars [n] (grant n; the balance and the chore counts) | buy plant|snail|laser|bass|glow|totem (at the price) | place [key] [x [behind|among|front]] (a piece's spot, the plant without a key; no x = the page)");
+    ESP_LOGI(TAG, "shop [off] (the sand dollar page) | dollars [n] (grant n; the balance and the chore counts) | buy plant|snail|castle|laser|bass|glow|totem (at the price) | place [key] [x [behind|among|front]] (a piece's spot; no x = the page) | box <key> [out|in] (take it out of the tank, or put it back)");
     ESP_LOGI(TAG, "reset (the keeper's confirm prompt, as BOOT + tap opens it) | reset yes|no (answer it here) - YES WIPES EVERY SAVE, a parked tank too");
     ESP_LOGI(TAG, "setup [off] (the first-run flow: welcome, names, colours; off drops the panel - the birth flow too) | name <fish|idx> <newname> (up to %d letters, saved)", FISH_NAME_MAX);
+    ESP_LOGI(TAG, "battery <pct>|real (a STAGED gauge, as if on battery at pct: the card's pill, and at 10 or less the low-battery notice + cue + the pill that stays; not saved) | snd battery (just the notice + cue)");
+    ESP_LOGI(TAG, "kbd [wheel|grid|pages] (the name page's design: the wheel, or one of the two rejected keyboards of 09-13 - not saved, a boot is the wheel)");
     ESP_LOGI(TAG, "touch [bias <px>] (finger-landing correction: reported touches move up by px; not saved)");
     ESP_LOGI(TAG, "pmic (AXP2101 dump) | pmic on|off <aldo1|aldo2..4|bldo1|bldo2|cpusldo|dcdc2..5|dldo1|dldo2> (experiments; boot trims the unused ones) | pmic trim");
     ESP_LOGI(TAG, "bright <0-255> (panel now; not saved) | level 100|60|30 (the keeper's setting, saved)");
-    ESP_LOGI(TAG, "batlog [clear] (the tank's own battery log: SoC/VBAT every 5 min awake, 30 min asleep, mA derived - read it after a night on battery) | codec (ES8311 registers) | deepsleep [N] (N: 5 s grace then deep sleep with an N s timer wake - one batlog window per N, BOOT wakes it; no N: the keeper's sleep, grace then power-off) | poweroff (save + PMIC cut now)");
+    ESP_LOGI(TAG, "batlog [clear] (the tank's own battery log: SoC/VBAT every 5 min awake, 30 min asleep, mA derived - read it after a night on battery) | codec (ES8311 registers) | deepsleep [N] (N: 5 s grace then deep sleep with an N s timer wake - one batlog window per N, BOOT wakes it; no N: the keeper's sleep, grace then power-off) | poweroff (save + PMIC cut now) | keytime [N] (N s of timing every PWR press - is a tap under the PMIC's 128 ms power-on hold?)");
     ESP_LOGI(TAG, "overgrown (grass to the ceiling + fouled glass; fish stress climbs) | court (pair circles the reef now and every ~minute; fry at the next light-on) | arrive (the fry, now)");
 }
 
@@ -259,21 +266,30 @@ static void run(tank_t *t, char *line) {
                  (int)t->algae_colonies, t->trim_px / PX_PER_INCH);
     } else if (!strcmp(c, "buy") && argc > 1) {      /* buy <key>: the shop's sale, at the price (keys: SD_ITEMS[].key) */
         int item = progression_sd_item_by_key(argv[1]);
-        if (item < 0) ESP_LOGW(TAG, "buy plant|snail|laser|bass|glow|totem");
+        if (item < 0) ESP_LOGW(TAG, "buy plant|snail|castle|laser|bass|glow|totem");
         else if (progression_buy(t, item)) ESP_LOGI(TAG, "%s unlocked, %d sand dollars left%s", SD_ITEMS[item].name, (int)t->sd_balance,
                                                     tank_decor_placeable(item) ? " (`place` opens the placement page)" : "");
         else ESP_LOGW(TAG, "%s refused: owned, or %d < %d", SD_ITEMS[item].name, (int)t->sd_balance, SD_ITEMS[item].price);
+    } else if (!strcmp(c, "box") && argc > 1) {      /* box <key> [out|in]: take a piece out of the tank, or put it back */
+        int item = progression_sd_item_by_key(argv[1]);
+        if (item < 0) { ESP_LOGW(TAG, "box plant|snail|castle|laser|bass|glow|totem [out|in]"); return; }
+        bool stow = argc > 2 ? !strcmp(argv[2], "out") : tank_item_live(t, item);
+        if (progression_stow(t, item, stow)) ESP_LOGI(TAG, "%s is %s", SD_ITEMS[item].key, stow ? "in the box" : "back in the tank");
+        else ESP_LOGW(TAG, "%s: not bought, or already %s", SD_ITEMS[item].key, stow ? "in the box" : "in the tank");
     } else if (!strcmp(c, "place")) {                /* place [key] [x [behind|among|front]]: a piece's spot (the plant
                                                         without a key); no x = the page */
         int item = argc > 1 ? progression_sd_item_by_key(argv[1]) : -1, a = item >= 0 ? 2 : 1;
         if (item < 0) item = SD_IDX_PLANT;
         if (!tank_decor_placeable(item)) { ESP_LOGW(TAG, "the %s is not for placing", SD_ITEMS[item].name); return; }
         if (!(t->sd_unlocks & SD_ITEMS[item].bit)) { ESP_LOGW(TAG, "no %s in the tank (`buy %s`)", SD_ITEMS[item].key, SD_ITEMS[item].key); return; }
+        progression_stow(t, item, false);            /* placing it means putting it in the tank */
         if (argc <= a) { touch_port_show_shop(false); setup_begin_place(t, item); ESP_LOGI(TAG, "placement page up for the %s (drag on the glass, DEPTH, DONE)", SD_ITEMS[item].name); return; }
-        int z = t->decor_z[item];
+        int z = tank_decor_z(t, item);
         if (argc > a + 1) z = !strcmp(argv[a + 1], "behind") || !strcmp(argv[a + 1], "back") ? DECOR_Z_BACK : !strcmp(argv[a + 1], "front") ? DECOR_Z_FRONT : DECOR_Z_MIDDLE;
-        tank_decor_set(t, item, (float)atof(argv[a]), z); progression_save(t);
-        ESP_LOGI(TAG, "%s at x %.0f, %s, saved", SD_ITEMS[item].key, tank_decor_x(t, item), z == DECOR_Z_BACK ? "BEHIND the fish" : z == DECOR_Z_FRONT ? "IN FRONT of the fish" : "AMONG the fish");
+        tank_decor_set(t, item, (float)atof(argv[a]), z); progression_save(t); z = tank_decor_z(t, item);   /* re-read: a 2-depth piece clamps AMONG away */
+        ESP_LOGI(TAG, "%s at x %.0f, %s, saved", SD_ITEMS[item].key, tank_decor_x(t, item),
+                 tank_decor_z_count(item) == 2 ? (z == DECOR_Z_BACK ? "BEHIND the grass" : "IN FRONT of the grass")
+                 : z == DECOR_Z_BACK ? "BEHIND the fish" : z == DECOR_Z_FRONT ? "IN FRONT of the fish" : "AMONG the fish");
     } else if (!strcmp(c, "pmic")) {
         if (argc > 2 && (!strcmp(argv[1], "on") || !strcmp(argv[1], "off")))
             ESP_LOGI(TAG, "rail %s %s: %s", argv[2], argv[1], battery_port_set_rail(argv[2], !strcmp(argv[1], "on")) ? "ok" : "REFUSED");
@@ -288,6 +304,9 @@ static void run(tank_t *t, char *line) {
         ESP_LOGI(TAG, "%s - the USB port vanishes until the wake", n > 0 ? "5 s grace, then deep sleep with the timer" : "the keeper's sleep: the grace, then power-off (the PWR key boots it)");
         vTaskDelay(pdMS_TO_TICKS(50));
         device_sleep(n);
+    } else if (!strcmp(c, "keytime")) {
+        int n = argc > 1 ? atoi(argv[1]) : 15; if (n < 1) n = 1; if (n > 60) n = 60;
+        battery_port_key_trace(n);
     } else if (!strcmp(c, "poweroff")) {
         ESP_LOGI(TAG, "power-off now (the PWR key or USB boots it) - the USB port vanishes");
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -330,6 +349,14 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "setup")) {
         if (argc > 1 && !strcmp(argv[1], "off")) { setup_cancel(t); ESP_LOGI(TAG, "setup panel dropped%s", progression_setup_pending() || progression_newborn() >= 0 ? " (still owed: it returns at the next boot)" : ""); }
         else { setup_begin(t); ESP_LOGI(TAG, "setup: welcome page up (tap through on the glass)"); }
+    } else if (!strcmp(c, "battery")) {              /* battery <pct>|real: a staged gauge for the pill + the low-battery rule */
+        if (argc > 1) device_fake_battery(!strcmp(argv[1], "real") ? -1 : atoi(argv[1]));
+        if (argc > 1 && strcmp(argv[1], "real")) ESP_LOGI(TAG, "gauge STAGED at %d%% on battery (10 or less: the notice, the cue, the pill stays up; `battery real` ends it)", atoi(argv[1]));
+        else ESP_LOGI(TAG, "the real gauge (battery <pct> stages one)");
+    } else if (!strcmp(c, "kbd")) {                  /* the name page's rejected designs, to be shown: kbd wheel|grid|pages */
+        if (argc > 1) setup_set_keyboard(!strcmp(argv[1], "grid") ? SETUP_KBD_GRID : !strcmp(argv[1], "pages") ? SETUP_KBD_PAGES : SETUP_KBD_WHEEL);
+        ESP_LOGI(TAG, "name page: %s", setup_keyboard() == SETUP_KBD_GRID ? "GRID (the first cut: 7 x 4 keys on a panel)" :
+                 setup_keyboard() == SETUP_KBD_PAGES ? "PAGES (the second: half the alphabet, big keys)" : "the letter wheel");
     } else if (!strcmp(c, "touch")) {
         if (argc > 2 && !strcmp(argv[1], "bias")) touch_port_set_bias(atoi(argv[2]));
         ESP_LOGI(TAG, "touch bias %d px (reported y - %d)", touch_port_bias(), touch_port_bias());

@@ -50,7 +50,7 @@
 #define VEG_BEDS_MAX 4                         /* + the shop's sword plant, bed 3 (2026-09-15:
                                                 * live only once bought; tank_veg_beds) */
 typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
-#define SD_ITEM_N 6                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
+#define SD_ITEM_N 8                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
 #define VEG_START  0.35f                       /* a fresh tank (and a bought plant): comfortable cover */
 #define VEG_NUB    0.03f                       /* trim floor: ~13 px green stubble */
 #define VEG_BARE   0.10f                       /* tallest bed under this = no cover
@@ -73,6 +73,13 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
 #define ALGAE_COLS (TANK_W / ALGAE_CELL)       /* 28 */
 #define ALGAE_ROWS (TANK_H / ALGAE_CELL)       /* 23 */
 #define ALGAE_CELLS (ALGAE_COLS * ALGAE_ROWS)
+#define ALGAE_DIRTY 0.15f                      /* film on more of the glass than this =
+                                                * a DIRTY tank: no fry is conceived in
+                                                * it until it is wiped back under (a
+                                                * fry gate, 2026-09-16). Some film is
+                                                * fine; growth stops claiming cells at
+                                                * ALGAE_COVER_CAP (tank.c, 0.30), and one
+                                                * night's sleep films ~25% (selftest-tend) */
 
 typedef enum {
     GOAL_SEEK_FOOD, GOAL_FLEE_SHADOW, GOAL_VISIT_BUBBLES, GOAL_FOLLOW_FRIEND,
@@ -82,6 +89,7 @@ typedef enum {
 
 extern const char *const GOAL_NAMES[GOAL_COUNT];   /* schema.md lowercase names */
 
+#define MS_LOCAL_BIT0 20        /* this fork's milestone bits start here (see the MS_ enum) */
 typedef enum { STAGE_FRY, STAGE_JUV, STAGE_ADULT, STAGE_ELDER } stage_t;
 extern const char *const STAGE_NAMES[4];           /* schema.md v2 stage tokens */
 extern const char *const TRAINED_NAMES[N_TRAINED_NAMES]; /* mira bolt kelp nori */
@@ -107,6 +115,14 @@ enum {
      * saves keep their layout - cleared on load, never set, never shown */
     MS_RETIRED_6 = 1u << 6, MS_RETIRED_7 = 1u << 7, MS_FIRST_FOLLOW = 1u << 8,
     MS_REACHED_JUV = 1u << 9, MS_REACHED_ADULT = 1u << 10, MS_REACHED_ELDER = 1u << 11,
+    /* This fork's own milestones start high, for the same reason the shop
+     * items do: upstream keeps taking the next low bit, and a sync must never
+     * renumber something already sitting in somebody's save. They are HIDDEN
+     * until earned - they show on the fish's own page and nowhere else. */
+    MS_CASTLE_GATE = 1u << (MS_LOCAL_BIT0 + 0),   /* swam through the castle's gate */
+    MS_GLOW_TOSS   = 1u << (MS_LOCAL_BIT0 + 1),   /* carried a glow stick up and let it go */
+    MS_TOTEM_HOLD  = 1u << (MS_LOCAL_BIT0 + 2),   /* lifted the totem and led a parade */
+    MS_BASS_PARTY  = 1u << (MS_LOCAL_BIT0 + 3),   /* stayed for a party at the speaker */
     MS_FISH_COUNT = 12
 };
 #define MS_RETIRED_MASK (MS_RETIRED_6 | MS_RETIRED_7)
@@ -171,6 +187,8 @@ typedef struct {
     float  rest_dx, rest_dy;/* this fish's own spot by the reef (individuation) */
     uint32_t sig;           /* coarse state signature at the last advisor ask */
     uint32_t ms_bits;       /* MS_* milestones reached */
+    int16_t  parties;       /* bass parties this fish has been to (2026-09-20). It makes a fish
+                             * keener to lift the totem next time; saved in this fork's own tail. */
     uint32_t ms_seen;       /* MS_* the keeper has looked at on the milestones page (new = bits & ~seen) */
     /* colors as 0xRRGGBB, used by render only: the preset's, or the keeper's
      * picks from LOOK_BODY / LOOK_ACCENT (setup.c); saved per fish */
@@ -184,6 +202,38 @@ typedef struct {
 
 typedef struct { float x, y, age; bool alive, from_player; } food_t;
 typedef struct { float x, y, vy, wobble; bool column; } bubble_t;
+/* ---- glow sticks the fish actually play with (2026-09-20) ----------------
+ * The shop drops four in a fan where the keeper put the pile, but they do not
+ * stay there. A fish the MODEL has put on GOAL_DART_PLAY picks up a stick it
+ * swims near, carries it up, and lets go near the surface; the stick tumbles
+ * back down and lies wherever it lands. Over a few days the pile ends up
+ * strewn across the floor, which is the whole point.
+ *
+ * Nothing here reaches the advisor. Schema v4 is frozen and the model is
+ * never told a stick exists: it decides to PLAY, and this layer decides what
+ * playing looks like, exactly as it already turns every other goal into
+ * motion. A startled or frightened fish drops what it is holding, and so does
+ * one caught by lights-out. */
+#define GLOW_N            4
+#define GLOW_REST_Y       (TANK_H - 18.0f)   /* lying on the sand */
+#define GLOW_SINK_PX_S    17.0f              /* terminal speed of a dropped stick */
+#define GLOW_REACH        20.0f              /* a playing fish this close can take one */
+#define GLOW_CARRY_MIN_S  1.2f               /* ... and holds it at least this long */
+#define GLOW_CARRY_MAX_S  16.0f              /* ... and has let go by then, wherever it is */
+#define GLOW_RELEASE_Y    (TANK_H * 0.32f)   /* "up to the top": let go at or above this */
+/* the quiet after a fish plays with a stick. Lights-out is the BEST time for
+ * glow sticks, so the dark halves it: they come back to them twice as often. */
+#define GLOW_PLAY_COOL_S  20.0f              /* lights on */
+#define GLOW_PLAY_COOL_NIGHT_S 10.0f         /* lights out: more play, not less */
+typedef struct {
+    float  x, y;          /* centre; y == GLOW_REST_Y means it is lying on the sand */
+    float  ang, spin;     /* it tumbles as it falls and keeps the angle it lands at */
+    float  vx, vy;        /* 0 while resting or carried; vx is what the carrier's own
+                           * motion threw it sideways with, and it is what scatters the pile */
+    float  held_s;        /* seconds the carrier has had it */
+    int8_t carrier;       /* the fish holding it, or -1 */
+} glow_t;
+
 
 typedef struct tank {
     fish_t   fish[N_FISH_MAX];
@@ -251,6 +301,14 @@ typedef struct tank {
      * PX_PER_INCH to the inch. Both saved. */
     int32_t  algae_colonies;
     float    trim_px;
+    /* ---- the box (2026-09-20) ----
+     * Buying something is forever; having it IN THE TANK is not. An owned
+     * piece can be taken out and kept in the box: it stops being drawn and
+     * stops doing whatever it does, while everything about it is kept for
+     * when it goes back - where it stood, the plant's leaves, the snail's
+     * spot, wherever the fish left the glow sticks. That is how you
+     * reposition something, or just change the tank for a while. Saved. */
+    uint32_t sd_stowed;
     /* sand dollars (progression.c owns the economy; tank.c reads the unlocks):
      * the balance, the lifetime total, what the shop has sold (SD_ITEM_*),
      * and the ledger that keeps an award from paying twice - per fish (bits
@@ -266,14 +324,31 @@ typedef struct tank {
     float    snail_x, snail_y, snail_heading;
     int16_t  snail_cell;           /* the algae cell it is heading for, -1 = wandering */
     float    snail_graze;          /* seconds on the current cell */
+    int32_t  snail_grazed;         /* algae cells it has grazed clean, lifetime (its card,
+                                    * 2026-09-16; saved) */
     /* where the keeper put the decor (2026-09-16, the placement page; one
-     * slot per shop item since 2026-09-18): each placeable piece's centre x
-     * along the floor (<= 0 = its default spot) and its depth layer
-     * (DECOR_Z_*). Both saved. Indexed by SD_IDX_*. */
+     * slot per shop item since 2026-09-18, replacing the per-piece plant_x /
+     * castle_x pairs): each placeable piece's centre x along the floor
+     * (<= 0 = its default spot) and its depth layer (DECOR_Z_*). Both saved.
+     * Indexed by SD_IDX_*. */
     float    decor_x[SD_ITEM_N];
     uint8_t  decor_z[SD_ITEM_N];
     /* the bass stack's next drop, on the tank clock (tank.c; not saved) */
     float    bass_drop_at;
+    /* the glow sticks, once bought: where each one is and who has it. The
+     * positions and angles are saved (that IS the scattering); who is holding
+     * one is not - a boot starts with every stick on the sand. */
+    glow_t   glow[GLOW_N];
+    /* the totem parade: who is carrying it, and for how long. Not saved - a
+     * boot finds the totem back in the sand where the keeper put it. */
+    bool     totem_light_was;    /* the light state the parade interrupted, put back when it ends */
+    int8_t   totem_carrier;      /* the fish leading the whole event, or -1 */
+    float    totem_held_s;       /* seconds in the current phase */
+    uint8_t  totem_phase;        /* TOTEM_* above */
+    float    disco_drop, disco_spin, disco_show_s;   /* the ball: lowered fraction, turns, show left (not saved) */
+    bool     totem_planted;      /* standing in the sand at the party, not in a mouth */
+    float    totem_party_x;      /* where it was slammed down, and the lean it kept */
+    float    totem_party_ang;
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -433,6 +508,10 @@ void  tank_veg_set(tank_t *t, int b, float g);
 /* the tallest bed at VEG_NURSERY or better, -1 if none (progression gates
  * courtship and arrivals on it; tank.c stages the courtship there) */
 int   tank_nursery_bed(const tank_t *t);
+/* the share of the glass wearing film, 0..1 (cells with any algae over all
+ * cells - what the keeper sees covered, not how thick). > ALGAE_DIRTY = a
+ * dirty tank: the fry checklist's GLASS gate (progression.c) */
+float tank_algae_cover(const tank_t *t);
 void  tank_veg_sync(tank_t *t);                 /* veg_growth[] from veg_h[][] (after a load) */
 void  tank_grow_algae(tank_t *t, int steps);
 
@@ -463,11 +542,24 @@ void  tank_set_look(tank_t *t, int slot, uint32_t body, uint32_t accent);
 #define BUBBLE_X_DEFAULT (TANK_W * 0.8f)
 void  tank_set_bubble_x(tank_t *t, float x);
 
+/* ---- the last thing that happened to a fish (2026-09-20, the detail page) ----
+ * tank_emit already names the moment and who it belongs to, but nothing kept
+ * it: the listener is the platform's and fires and forgets. tank.c now
+ * remembers the most recent TEV_* per fish and when, so the fish's page can
+ * say "ATE A PELLET, 12S AGO". Not saved - a boot starts the tank quiet.
+ * Returns false when that fish has had nothing happen yet. */
+bool  tank_last_event(int fish, int *ev, float *seconds_ago);
+
 /* ---- the shop (2026-09-15): sand dollars buy things for the tank ----
  * The items are bits in tank_t.sd_unlocks; progression.c sells them
  * (progression_buy) and tank.c gives them their place. A bought thing is in
  * the tank for good. */
-enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1,
+/* Upstream owns the low bits and keeps taking the next one (the castle took
+ * bit 2). Anything added in THIS fork starts at SD_LOCAL_BIT0, so a sync can
+ * never renumber an unlock that is already sitting in somebody's save. The
+ * bit is therefore NOT the index any more: read SD_ITEMS[i].bit, never 1u<<i. */
+#define SD_LOCAL_BIT0 16
+enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2,
        /* the festival shelf (2026-09-18, Strato: two tanks gifted at a bass
         * music festival): a LASER RIG hung under the surface that sweeps
         * beams through the water once the light is out, a BASS STACK on the
@@ -475,10 +567,13 @@ enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1,
         * cracked and scattered on the floor, a rail TOTEM. Set dressing:
         * the model sees none of it (schema v4 is frozen) and nothing here
         * touches the fish - it is the tank's night out, not theirs. */
-       SD_ITEM_LASER = 1u << 2, SD_ITEM_BASS = 1u << 3, SD_ITEM_GLOW = 1u << 4, SD_ITEM_TOTEM = 1u << 5,
+       SD_ITEM_LASER = 1u << (SD_LOCAL_BIT0 + 0), SD_ITEM_BASS  = 1u << (SD_LOCAL_BIT0 + 1),
+       SD_ITEM_GLOW  = 1u << (SD_LOCAL_BIT0 + 2), SD_ITEM_TOTEM = 1u << (SD_LOCAL_BIT0 + 3),
+       SD_ITEM_DISCO = 1u << (SD_LOCAL_BIT0 + 4),
        SD_ITEM_COUNT = SD_ITEM_N };
-/* item INDEXES (the bit's position: SD_ITEMS[], the shop rows, decor_x[]) */
-enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_LASER = 2, SD_IDX_BASS = 3, SD_IDX_GLOW = 4, SD_IDX_TOTEM = 5 };
+/* item INDEXES (the row in SD_ITEMS[], the shop rows, decor_x[]) */
+enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_CASTLE = 2,
+       SD_IDX_LASER = 3, SD_IDX_BASS = 4, SD_IDX_GLOW = 5, SD_IDX_TOTEM = 6, SD_IDX_DISCO = 7 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -490,6 +585,35 @@ veg_kind_t tank_veg_kind(const tank_t *t, int b);
  * snail on the glass, bottom left */
 void  tank_plant_place(tank_t *t);
 void  tank_snail_place(tank_t *t);
+/* (re)pile the sticks in a fan at the keeper's spot - the purchase, and every
+ * MOVE of the pile on the placement page */
+void  tank_glow_place(tank_t *t);
+/* The castle's top surface at world x (2026-09-20): the y a falling glow stick
+ * comes to rest on, or GLOW_REST_Y out on the open sand. The profile is taken
+ * from what render.c actually draws - the gate wall's walk between its
+ * merlons, and the crenellated right tower's rampart, both flat enough to
+ * hold a stick. `slide` comes back true on one of the two POINTED towers:
+ * nothing stays on a cone, so a stick that hits one is shed sideways and
+ * carries on down, which is the fun bit. There is no drawbridge in the art. */
+float tank_castle_top_y(const tank_t *t, float x, bool *slide);
+/* true while a fish is parading the totem; *x / *y come back as the point it
+ * is being held at (render draws it there instead of in the sand) */
+bool  tank_totem_carry(const tank_t *t, float *x, float *y);
+/* where the totem actually is: *ang is its lean, 0 upright. Returns false when
+ * it is simply standing at the keeper's spot. */
+bool  tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carried);
+/* the party at the speaker is on (the disco ball and anything else that wants
+ * to join in reads this) */
+bool  tank_bass_party(const tank_t *t);
+/* the disco ball: where it is right now (y travels as it lowers), how far
+ * down it has come (0 parked .. 1 fully lowered) and its spin in turns */
+void  tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin);
+bool  tank_disco_hit(const tank_t *t, float x, float y);   /* a tap on the ball itself */
+/* is this fish inside the castle's gate opening right now? (the milestone, and
+ * the only thing that ever asks - fish have no collision with anything) */
+bool  tank_in_castle_gate(const tank_t *t, int fish);
+void  tank_disco_toggle(tank_t *t);                        /* the keeper's show: on, or off */
+void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
  * placeable item has a centre x along the floor - clamped inside the
@@ -504,21 +628,90 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define DECOR_MARGIN    30                 /* the snail's margin: inside the panel's rounded bezel */
 #define PLANT_HALF_W    21                 /* four leaves at a 14 px pitch: centre to the outer leaf */
 #define PLANT_X_DEFAULT (208.0f + PLANT_HALF_W)   /* the open floor between the reef bed and bed 2 */
+/* the castle (2026-09-16, Strato's castle-v2 mockup, drawn procedurally in
+ * render.c): ~184 px wide on the floor, a swim-through arch. Its depths are
+ * BEHIND and IN FRONT only (Strato: "no among"), and they mean the PLANT
+ * LAYER: BACK = behind the grass and the fish, a backdrop the fish pass in
+ * front of; FRONT = in front of the grass, and the fish swim THROUGH the arch
+ * (the keep behind them, the gate wall and the front towers over them). */
+#define CASTLE_HALF_W   92
+#define CASTLE_H        164                /* rows above the floor line (render.c CASTLE_ROWS) */
+#define CASTLE_SPIRE_H  146                /* the tallest spire: what the placement page highlights */
+#define CASTLE_ARCH_R   26                 /* the gate opening's half-width (render.c draws to these too) */
+#define CASTLE_ARCH_S   24                 /* the spring line: straight jambs below, the vault above */
+#define CASTLE_X_DEFAULT 300.0f
 #define LASER_HALF_W    18                 /* the bar under the surface: three emitters at a 14 px pitch */
 #define LASER_X_DEFAULT (TANK_W * 0.5f)
 #define BASS_HALF_W     14                 /* the cabinet: 28 x 30 on the sand */
-#define BASS_X_DEFAULT  392.0f             /* the right-hand floor, past bed 2's fronds */
-#define GLOW_HALF_W     13                 /* four sticks fanned on the sand */
-#define GLOW_X_DEFAULT  263.0f             /* the open floor, right of the plant's spot */
+#define BASS_X_DEFAULT  404.0f             /* the right-hand floor, clear of the castle's default span */
+#define GLOW_HALF_W     13                 /* four sticks fanned on the sand (glow_t and the
+                                            * play rules are up with the other tank types) */
+#define GLOW_X_DEFAULT  150.0f             /* the open floor left of the castle (208..392 by default) */
 #define TOTEM_HALF_W    9                  /* the pole and its emblem */
-#define TOTEM_X_DEFAULT 318.0f             /* among bed 2's fronds */
+#define TOTEM_X_DEFAULT 110.0f             /* left of the glow sticks, clear of the castle */
 #define TOTEM_H         64                 /* pole foot to the emblem's top */
+/* ---- the totem parade (2026-09-20) ---------------------------------------
+ * A really sociable fish - TOTEM_SOCIAL_MIN or above - lifts the rail totem
+ * out of the sand and carries it. While it does, every other fish whose goal
+ * is already a sociable or idle one converges on the carrier, and the carrier
+ * heads for the bass stack if the tank has one, so the school ends up at the
+ * speaker together. Hunger and fright still win: a fish on SEEK_FOOD,
+ * FLEE_SHADOW or REST is never redirected, because those are the model's call
+ * and this is not. The totem goes back to the keeper's spot when it ends. */
+#define TOTEM_SOCIAL_MIN 0.75f              /* a first-timer has to be this sociable to lift it ... */
+#define TOTEM_PARTY_BONUS 0.04f             /* ... and every party it has been to lowers that bar ... */
+#define TOTEM_SOCIAL_FLOOR 0.45f            /* ... but never below this */
+#define TOTEM_REACH      26.0f
+/* The event, once someone lifts it. With a bass stack in the tank it is a
+ * march to the speaker, a ninety-second party there, and a march home; with
+ * no speaker it is just a parade and then home again.
+ *
+ *   WALK    the carrier leads to the speaker; ends on ARRIVAL, not a clock
+ *   HOLD    45 s: still carrying it, circling the speaker, everyone dancing
+ *   PLANTED 45 s: the totem slammed into the sand at a jaunty angle by the
+ *           speaker, the carrier now dancing with the rest
+ *   HOME    it is picked back up and led to where it started, planted, and
+ *           everyone goes back to their own business
+ *
+ * The walking legs are arrival-driven with a cap, because how long the swim
+ * takes depends on where the keeper put things. */
+enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
+#define TOTEM_PARADE_S     40.0f            /* no speaker: how long the parade itself lasts */
+#define TOTEM_WALK_MAX_S   60.0f            /* a walking leg cannot outstay this */
+#define TOTEM_HOLD_S       45.0f
+#define TOTEM_PLANTED_S    45.0f
+#define TOTEM_ARRIVE_PX    50.0f            /* close enough to the speaker, or to home */
+#define TOTEM_COOL_S       90.0f            /* the quiet after the whole thing */
+/* ---- the disco ball (2026-09-20) -----------------------------------------
+ * It hangs at the top of the tank wherever the keeper put it. When a party
+ * starts at the speaker it lowers itself to the middle of the water and
+ * spins, throwing rays; when the party ends it winds back up. Out of party
+ * time the keeper can tap it to run the show by hand - tap again to stop,
+ * and it stops by itself after DISCO_SHOW_S. */
+#define DISCO_HALF_W    14
+#define DISCO_X_DEFAULT (TANK_W * 0.62f)
+#define DISCO_TOP_Y     26.0f               /* parked, just under the surface */
+#define DISCO_MID_Y     (TANK_H * 0.46f)    /* lowered, out in the middle of the water */
+#define DISCO_R         13.0f
+#define DISCO_DROP_S    3.5f                /* seconds to lower or raise */
+#define DISCO_SHOW_S    30.0f               /* a tap-started show stops itself */
+#define DISCO_SPIN_RPS  0.32f               /* turns a second once it is down */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16
 #define BASS_DROP_PUFFS 3                  /* free bubbles the drop shakes out of the cone */
+/* an item's SD_ITEM_* bit from its index - the bits are sparse now, so this
+ * is not 1u << item */
+uint32_t tank_item_bit(int item);
+/* owned AND in the tank, which is what every piece of behaviour should ask:
+ * a stowed item is still bought, but it is not here. */
+static inline bool tank_bit_live(const tank_t *t, uint32_t bit) { return (t->sd_unlocks & bit) && !(t->sd_stowed & bit); }
+static inline bool tank_item_live(const tank_t *t, int item) { return tank_bit_live(t, tank_item_bit(item)); }
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
 bool  tank_decor_hangs(int item);          /* hung under the surface (the laser rig), not on the sand */
+int   tank_decor_z_count(int item);        /* depths the item offers: 3 (BACK/MIDDLE/FRONT) or 2 (BACK/FRONT) */
+int   tank_decor_z_at(int item, int i);    /* the i-th offered depth (the placement bar's segment i) */
+int   tank_decor_z_index(int item, int z); /* the inverse: which segment shows depth z */
 void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);
@@ -531,5 +724,8 @@ float tank_decor_top_y(const tank_t *t, int item);   /* the piece's top edge on 
  * on the floor it is SNAIL_FLOOR_Y, the foot on the sand line. */
 #define SNAIL_FLOOR_Y (TANK_H - 24.0f)
 bool  tank_snail_upright(const tank_t *t);
+/* a tap on the snail (its card, 2026-09-16): placed, and within a fingertip
+ * of the sprite's centre. Platforms test the fish first. */
+bool  tank_snail_hit(const tank_t *t, float x, float y);
 
 #endif

@@ -21,6 +21,7 @@
 #include "display_port.h"
 #include "advisor_llm_esp.h"
 #include "touch_port.h"
+#include "ui_ext.h"
 #include "battery_port.h"
 #include "imu_port.h"
 #include "director.h"
@@ -35,6 +36,7 @@
 #include "setup.h"
 #include "setup.h"
 #include "nvs_flash.h"
+#include "esp_app_desc.h"
 #include "rtc_port.h"
 #include "driver/i2c_master.h"
 #include "esp_async_memcpy.h"
@@ -101,11 +103,17 @@ static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no p
 
 /* Sleep (2026-09-14, revised the same day after Strato found a quick
  * sleep/wake "feels like a soft boot"): two stages.
- *  1. GRACE, 90 s: save, panel and touch off, IMU quiesced, then RAM-alive
+ *  1. GRACE, 20 min (was 90 s until 2026-09-16 evening): save, panel and touch off, IMU quiesced, then RAM-alive
  *     LIGHT sleep with BOOT (GPIO, level low) and a timer armed. A press in
  *     this window resumes IN PLACE - the fish exactly where they were,
  *     mid-goal - after crediting the nap to tank_tick_sleep. Costs what the
- *     old drowse did, for 90 s at most.
+ *     old drowse did (~4.7 mA), for 20 min at most - ~1.6 mAh per sleep.
+ *     Why 20 min and not 90 s: from the PMIC power-off only a PWRON hold
+ *     longer than ONLEVEL (128 ms, the shortest the AXP2101 offers) boots
+ *     the board; a lighter tap does nothing at all (Strato's presses time
+ *     at ~150 ms on the PMIC's own clock - director `keytime`). Inside the
+ *     grace the chip is awake and any tap wakes it, so the short absences
+ *     stay a tap and only a real absence ends in the power-off.
  *  2. DEEP sleep once the grace passes: BOOT armed as ext0, chip down to
  *     microamps, RAM and PSRAM gone. Waking is a boot: app_main sees the
  *     ext0 (or the director's timer) wake cause and calls progression_wake -
@@ -123,7 +131,7 @@ static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no p
  *  I2S + amp lines driven low, gpio_deep_sleep_hold_en), which is also what
  *  makes esp-idf isolate every other digital pad: un-isolated, deep sleep
  *  drew ~15 mA by the batlog, three times the light-sleep drowse it replaced. */
-#define SLEEP_GRACE_US    (90LL * 1000000)
+#define SLEEP_GRACE_US    (20LL * 60 * 1000000)  /* 2026-09-16: was 90 s; see the note above */
 #define DIRECTOR_GRACE_US (5LL * 1000000)     /* `deepsleep N`: straight to stage 2 */
 #define KEY_POLL_US       (1000000LL)         /* the grace wakes once a second to ask the PMIC about the PWR key */
 static int battery_pct(void) { float f; bool c; return battery_port_read(&f, &c) ? (int)(f * 100 + 0.5f) : -1; }
@@ -323,13 +331,38 @@ static void on_tank_event(int ev, int fish, void *ud) {
  * the pill then stays on screen until charging is seen or the gauge has
  * read above 10% for 30 s */
 #define LOW_BATTERY_FRAC 0.10f
+/* the last line (2026-09-20). Below the 10% notice there used to be nothing:
+ * the tank ran until the AXP2101's own undervoltage protection dropped the
+ * rails, an abrupt cut with no save, and a cell taken all the way flat also
+ * loses the RTC - so the next boot cannot tell how long the tank was away and
+ * the fish never live the missing days. At CRIT_BATTERY_FRAC the tank saves
+ * and powers off itself, the same path the PWR key's long press takes. It is
+ * confirmed over CRIT_BATTERY_READS consecutive one-second reads, so one bad
+ * sample from the gauge can never switch off a healthy tank. The director's
+ * staged gauge feeds this too: `battery 1` powers a bench unit off in ~3 s,
+ * which is how to check it without draining a real cell. */
+#define CRIT_BATTERY_FRAC  0.02f
+#define CRIT_BATTERY_READS 3
 static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
+static int   s_bat_crit;                    /* consecutive reads at or under CRIT_BATTERY_FRAC */
+static int s_bat_fake = -1;                 /* director `battery N`: a staged gauge, for the camera (-1 = the real one) */
+void device_fake_battery(int pct) { s_bat_fake = pct < 0 ? -1 : pct > 100 ? 100 : pct; if (pct < 0) s_bat_low = false; }
 static void battery_frame(int64_t now) {
     static int64_t bat_us, above_since;
     if (now - bat_us < 1000000) return;
     bat_us = now;
     s_bat_ok = battery_port_read(&s_bat_frac, &s_bat_chg);
+    if (s_bat_fake >= 0) { s_bat_ok = true; s_bat_frac = s_bat_fake / 100.0f; s_bat_chg = false; }   /* staged: on battery at that level, whatever the cable says */
     if (!s_bat_ok) return;
+    if (!s_bat_chg && s_bat_frac <= CRIT_BATTERY_FRAC) {      /* the last line: save while there is still power to do it */
+        if (++s_bat_crit >= CRIT_BATTERY_READS) {
+            ESP_LOGW(TAG, "battery critical: %d%% on %d reads - saving the tank and powering off",
+                     (int)(s_bat_frac * 100 + 0.5f), s_bat_crit);
+            enter_poweroff();                                 /* saves, quiesces, cuts the rails */
+            return;
+        }
+        ESP_LOGW(TAG, "battery critical: %d%% (%d/%d reads)", (int)(s_bat_frac * 100 + 0.5f), s_bat_crit, CRIT_BATTERY_READS);
+    } else s_bat_crit = 0;
     if (!s_bat_low) {
         if (!s_bat_chg && s_bat_frac <= LOW_BATTERY_FRAC) {
             s_bat_low = true; above_since = 0; notice_low_battery();
@@ -377,8 +410,17 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
-        { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE */
-          if (r >= SHOP_TAP_MOVE) {                                     /* a piece already in the tank: place it again */
+        { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / REMOVE */
+          if (r >= SHOP_TAP_STOW) {                                     /* REMOVE to the box, or PUT BACK */
+              int item = r - SHOP_TAP_STOW;
+              bool was_live = tank_item_live(&tank, item);
+              if (progression_stow(&tank, item, was_live)) {
+                  audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  ESP_LOGI(TAG, "shop: %s %s", SD_ITEMS[item].name, was_live ? "out of the tank, kept in the box" : "back in the tank");
+                  if (!was_live && tank_decor_placeable(item)) {         /* coming back: say where it goes */
+                      touch_port_show_shop(false); setup_begin_place(&tank, item); }
+              }
+          } else if (r >= SHOP_TAP_MOVE) {                              /* a piece already in the tank: place it again */
               int item = r - SHOP_TAP_MOVE;
               touch_port_show_shop(false); setup_begin_place(&tank, item);
               ESP_LOGI(TAG, "shop: MOVE %s - placement page up (drag, DEPTH, DONE)", SD_ITEMS[item].name);
@@ -397,7 +439,7 @@ static void tank_task(void *arg) {
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
         progression_tick(&tank, dt);
         battery_frame(now);
-        notice_tick(&tank, dt, setup_active() || touch_port_confirm_up() || touch_port_milestones() || touch_port_settings() || touch_port_shop());
+        notice_tick(&tank, dt, setup_active() || touch_port_confirm_up() || touch_port_milestones() || touch_port_settings() || touch_port_shop() || touch_port_fishpage() >= 0);
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
         audio_port_set_night(tank.night);
         { static bool loop_on;                     /* the bubble loop rides the setup's placement page */
@@ -426,7 +468,10 @@ static void tank_task(void *arg) {
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
-            if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
+            if (touch_port_fishpage() >= 0) {    /* a fish's own page: its levels, what it is doing, what last happened */
+                ui_fish_page(&tank, touch_port_fishpage(), fb[cur], TANK_W, tank.clock);
+                sel = -1;
+            } else if (touch_port_milestones()) {  /* milestones page: covers the tank until a tap */
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
@@ -436,11 +481,14 @@ static void tank_task(void *arg) {
                 render_shop(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
-            if (sel >= 0) {                      /* tapped fish: stats card + battery */
+            if (sel >= 0) {                      /* tapped fish: stats card + the exact pill */
                 render_stats_card(&tank, sel, fb[cur], TANK_W);
                 if (s_bat_ok) render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_chg);
-            } else if (s_bat_low && s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop())
-                render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_chg);   /* low: the pill stays up */
+            } else if (s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop() && touch_port_fishpage() < 0)
+                /* the charge bolt (2026-09-20): always on over the live tank, green
+                   through red by quartile, so the tank says it is getting low without
+                   being asked. The precise pill is still a tap away, on the card. */
+                ui_battery_bolt(fb[cur], TANK_W, s_bat_frac, s_bat_chg, tank.clock);
             if (!touch_port_milestones() && !touch_port_settings() && !touch_port_shop()) {   /* an announcement over the live tank */
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
@@ -500,6 +548,12 @@ static void tank_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(rest < 1 ? 1 : rest));
     }
 }
+
+/* the settings page's dim version line: ESP-IDF stamps the app descriptor
+   with `git describe --always --tags --dirty` of the checkout at build (the
+   installer's Actions job checks out with the full history), the same words
+   the installer page shows for what it would write */
+const char *version_port_string(void) { return esp_app_get_description()->version; }
 
 void app_main(void) {
     ESP_LOGI(TAG, "pocket-tank boot%s",

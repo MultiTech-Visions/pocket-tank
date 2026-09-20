@@ -172,6 +172,84 @@ was before.
   render.c): the tank's night is when the rig comes on. Nothing here
   reaches the fish - no cover, no film, no stress; set dressing only.
 - Dollars earned during play show as a small "+N" toast over the live tank.
+- **Taking a piece out again (2026-09-20, `sd_stowed`, `progression_stow`).**
+  Buying is forever; being IN THE TANK is not. An owned item's shop modal has
+  REMOVE, and a removed piece stops being drawn and stops doing whatever it
+  does. Removing genuinely FORGETS - its placement and state are cleared, so
+  the glow sticks come back as a tidy pile, the plant comes back young, the
+  snail picks a fresh spot, and PUT BACK runs the placement page again, just
+  as taking a thing out of a real tank would. Every behaviour now asks
+  `tank_bit_live` / `tank_item_live` rather than reading `sd_unlocks`
+  directly; ownership questions (the price, the sale) still read `sd_unlocks`,
+  because those are a different question. The mask rides this fork's save tail,
+  so an older save reads zero and everything owned is in the tank as before.
+
+## The fish play with it (2026-09-20, `tank.c` glow_tick / totem_tick)
+
+None of this reaches the advisor. **Schema v4 is frozen and the model is never
+told a glow stick or a totem exists.** It asks for `dart_play` or
+`follow_friend`, and the reflex layer decides what that looks like when there
+is something to play with - the same seam the snail already sits behind, and
+the same one `follow_friend` uses to pick who to follow.
+
+- **Glow sticks are toys.** A fish on `GOAL_DART_PLAY` picks up a stick it
+  swims near (`GLOW_REACH`), carries it under its mouth, and lets go once it
+  has taken it above `GLOW_RELEASE_Y` - or after `GLOW_CARRY_MAX_S` wherever
+  it is. The stick keeps the sideways throw of its carrier (`vx`), tumbles,
+  and lies where it lands, so the pile walks around the floor over days. A
+  per-fish cooldown stops one fish monopolising them: `GLOW_PLAY_COOL_S` (20 s)
+  with the lights on, halved to 10 s with them out, because **lights-out is the
+  best time for a glow stick** - a carry now survives the dark, and only a
+  startle or stress over 7.5 ends one.
+- **The castle catches them** (`tank_castle_top_y`). Its surface profile is
+  taken from the constants `render.c` draws with, so physics and art cannot
+  drift: the gate wall's walk (58 px up) and the right tower's rampart (70 px)
+  are flat and hold a stick; the two pointed towers are cones and shed one
+  sideways, often onto the wall below. A cone is never a resting place - while
+  a stick is over one it is always falling, which is what stops it balancing on
+  the point.
+- **The totem parade.** A fish lifts it when its `sociable` clears a bar that
+  starts at `TOTEM_SOCIAL_MIN` (0.75) and drops by `TOTEM_PARTY_BONUS` for
+  every party it has been to, down to `TOTEM_SOCIAL_FLOOR` (0.45) - experience
+  makes a fish keener to lead. Lifting takes the lights out by itself, and
+  they go back as they were when it ends. Every other fish whose goal is
+  already sociable or idle converges on the carrier; **a fish on `seek_food`,
+  `flee_shadow`, `rest` or `inspect_reef` is never redirected**, because those
+  are the model's call. It hooks in at exactly one place,
+  `target_for_goal`.
+- **The party at the speaker**, when a bass stack is in the tank: WALK to it
+  (arrival-driven, not a clock), HOLD 45 s circling it with the totem up,
+  PLANTED 45 s with the totem slammed into the sand at a lean and the carrier
+  dancing too, then HOME to where it started. Measured: 18 s walk, 45, 45, 9 s
+  home, 117 s in all. With no speaker it is a `TOTEM_PARADE_S` parade and a
+  walk home, no party stages.
+- **The disco ball** hangs at the keeper's x and watches `tank_bass_party`:
+  it lowers itself to the middle over `DISCO_DROP_S`, spins, and throws twelve
+  turning rays, then winds back up. Out of party time a tap runs the same show
+  by hand, a second tap stops it, and `DISCO_SHOW_S` (30 s) stops it anyway.
+  A party always wins over a hand-started show.
+
+## This fork's own milestones (2026-09-20, `MS_LOCAL_BIT0`)
+
+Four, all **hidden until earned** - no grey slot, nothing to see until it
+happens: through the castle's gate, a glow stick tossed, the totem lifted, a
+party stayed for. They live on the fish's own page rather than the overview,
+whose badge row is hard-capped at six across the full width.
+
+Their bits start at `MS_LOCAL_BIT0` (20), the same discipline the shop items
+use: upstream keeps claiming the next low bit, and a sync must never renumber
+something already sitting in a save.
+
+Fish have **no collision with anything** in this tank and never have, so they
+already swim into, through and behind the castle - which side they appear on
+is purely the depth it was placed at. The gate milestone is therefore a plain
+position test against the arch (`tank_in_castle_gate`), and `CASTLE_ARCH_R` /
+`_S` moved to tank.h so the test and the drawing share one number.
+
+The party is **counted** per fish, not just ticked (`fish_t.parties`, saved in
+this fork's tail), and that count is what feeds the keenness bar above.
+
+
 
 ## IMU (motion)
 

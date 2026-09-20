@@ -17,11 +17,27 @@ const char *const GOAL_NAMES[GOAL_COUNT] = {
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
 const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
-    "welcome", "wheel_tick", "confirm",
+    "welcome", "wheel_tick", "confirm", "glow_play", "totem_lift",
 };
+static float s_glow_cool[N_FISH_MAX];   /* glow sticks: seconds until this fish may take one again (not saved) */
+static float s_totem_cool;              /* the quiet after a totem parade (not saved) */
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
-void tank_emit(int ev, int fish) { if (s_ev_fn) s_ev_fn(ev, fish, s_ev_ud); }
+/* the last moment per fish (tank.h): tank_emit has no tank_t, so tank_tick
+ * leaves the clock here for it. One tank at a time, like the rest of tank.c's
+ * module state. */
+static float s_emit_clock;
+static struct { int8_t ev; float clock; } s_fish_ev[N_FISH_MAX];
+void tank_emit(int ev, int fish) {
+    if (fish >= 0 && fish < N_FISH_MAX) { s_fish_ev[fish].ev = (int8_t)ev; s_fish_ev[fish].clock = s_emit_clock; }
+    if (s_ev_fn) s_ev_fn(ev, fish, s_ev_ud);
+}
+bool tank_last_event(int fish, int *ev, float *seconds_ago) {
+    if (fish < 0 || fish >= N_FISH_MAX || s_fish_ev[fish].ev < 0) return false;
+    if (ev) *ev = s_fish_ev[fish].ev;
+    if (seconds_ago) *seconds_ago = s_emit_clock - s_fish_ev[fish].clock;
+    return true;
+}
 
 const char *const STAGE_NAMES[4] = { "fry", "juv", "adult", "elder" };
 const char *const TRAINED_NAMES[N_TRAINED_NAMES] = { "mira", "bolt", "kelp", "nori" };
@@ -155,7 +171,7 @@ void tank_make_fish(tank_t *t, int slot, int preset, float sociable, float bold,
     f->eaten = 0; f->eaten_player = 0; f->at_bubbles = false;
     /* its own spot by the reef: bolder fish rest a little further out */
     f->rest_dx = 8 + slot * 24 + bold * 14; f->rest_dy = -slot * 9 - tank_randf(t, 0, 10);   /* a body apart (was 9 px per slot) */
-    f->sig = 0xffffffffu; f->ms_bits = 0; f->ms_seen = 0;
+    f->sig = 0xffffffffu; f->ms_bits = 0; f->parties = 0; f->ms_seen = 0;
     f->color = p->color; f->fin = p->fin; f->accent = p->accent;
     f->parent_a = f->parent_b = -1;
 }
@@ -260,12 +276,21 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < ALGAE_CELLS; i++) t->algae[i] = 0;
     t->algae_acc = 0; t->trims = 0; t->cells_cleaned = 0;
     t->algae_colonies = 0; t->trim_px = 0;
-    t->sd_balance = t->sd_earned = 0; t->sd_unlocks = 0;
+    t->sd_balance = t->sd_earned = 0; t->sd_unlocks = 0; t->sd_stowed = 0;
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = 0;
     t->sd_colonies_paid = t->sd_inches_paid = 0;
     t->snail_x = -1; t->snail_y = -1; t->snail_heading = 0; t->snail_cell = -1; t->snail_graze = 0;
+    t->snail_grazed = 0;
     for (int i = 0; i < SD_ITEM_COUNT; i++) { t->decor_x[i] = 0; t->decor_z[i] = DECOR_Z_MIDDLE; }
+    t->decor_z[SD_IDX_CASTLE] = DECOR_Z_FRONT;      /* the castle has no AMONG; it starts swim-through */
     t->bass_drop_at = 0;
+    for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; t->glow[i].held_s = 0; t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].ang = 0; }
+    for (int i = 0; i < N_FISH_MAX; i++) s_glow_cool[i] = 0;
+    t->totem_carrier = -1; t->totem_held_s = 0; t->totem_phase = TOTEM_OFF;
+    t->totem_planted = false; t->totem_party_x = t->totem_party_ang = 0; s_totem_cool = 0;
+    t->disco_drop = t->disco_spin = t->disco_show_s = 0;
+    for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
+    s_emit_clock = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
     tank_scatter_food(t, 2);
 }
@@ -319,6 +344,8 @@ void tank_init(tank_t *t, uint32_t seed) {
  * dark tank is where the garden gets away from you). */
 #define VEG_GROW_AWAKE_S    108000.0f /* nubs -> full canopy in ~30 h awake */
 #define VEG_GROW_SLEEP_S    36000.0f  /* ~10 h of drowse */
+#define VEG_SWORD_GROW      1.25f     /* the sword plant grows a bit faster than the
+                                       * grass (nubs -> full in ~24 h awake / ~8 h asleep) */
 #define VEG_SEG_PX          3.2f      /* render.c VEG_SEG_DY: px of height per segment */
 #define VEG_SLOW            0.60f     /* cruise speed factor inside a canopy */
 #define ALGAE_STEP_AWAKE_S  240.0f    /* one film growth step per 4 min awake */
@@ -381,7 +408,7 @@ static void veg_bed_base(const tank_t *t, int b, float *bx0, int *n) {
     while (nn > 1 && *bx0 + nn * 12 > TANK_W - 8) nn--;   /* beds stop at the glass */
     *n = nn;
 }
-int tank_veg_beds(const tank_t *t) { return (t->sd_unlocks & SD_ITEM_PLANT) ? VEG_BEDS_MAX : VEG_BEDS; }
+int tank_veg_beds(const tank_t *t) { return tank_bit_live(t, SD_ITEM_PLANT) ? VEG_BEDS_MAX : VEG_BEDS; }
 veg_kind_t tank_veg_kind(const tank_t *t, int b) { (void)t; return b == 3 ? VEG_KIND_SWORD : VEG_KIND_GRASS; }
 void tank_veg_bed(const tank_t *t, int b, float *x0, float *x1, float *top_y, int *fronds) {
     float bx0; int n;
@@ -425,9 +452,11 @@ static void veg_sync(tank_t *t) {
     }
 }
 static void veg_grow(tank_t *t, float dg) {
-    for (int b = 0; b < tank_veg_beds(t); b++)
+    for (int b = 0; b < tank_veg_beds(t); b++) {
+        float dgb = tank_veg_kind(t, b) == VEG_KIND_SWORD ? dg * VEG_SWORD_GROW : dg;
         for (int i = 0; i < VEG_FRONDS_MAX; i++)
-            t->veg_h[b][i] = fminf(1, t->veg_h[b][i] + dg);
+            t->veg_h[b][i] = fminf(1, t->veg_h[b][i] + dgb);
+    }
     veg_sync(t);
 }
 void tank_veg_sync(tank_t *t) { veg_sync(t); }
@@ -495,6 +524,12 @@ static int veg_cut(tank_t *t, float x0, float y0, float x1, float y1, bool landi
     }
     if (cuts) veg_sync(t);
     return cuts;
+}
+
+float tank_algae_cover(const tank_t *t) {
+    int covered = 0;
+    for (int i = 0; i < ALGAE_CELLS; i++) covered += t->algae[i] > 0;
+    return (float)covered / ALGAE_CELLS;
 }
 
 /* one film step: thicken a covered cell, or claim a fresh one (preferring
@@ -608,8 +643,16 @@ static int snail_nearest_cell(const tank_t *t) {
     return best;
 }
 bool tank_snail_upright(const tank_t *t) { return t->snail_cell < 0 && t->snail_y >= SNAIL_FLOOR_Y - 1; }
+#define SNAIL_TAP_RADIUS 48.0f     /* generous round the 32 px sprite: a fingertip on this 322 ppi
+                                    * panel covers ~60 px, and the snail is small and low on the glass
+                                    * (Strato, 2026-09-16: "challenging to tap the little guy" at 30;
+                                    * the fish take 38 and are tested first) */
+bool tank_snail_hit(const tank_t *t, float x, float y) {
+    if (!tank_bit_live(t, SD_ITEM_SNAIL) || t->snail_x < 0) return false;
+    return tank_dist(t->snail_x, t->snail_y, x, y) <= SNAIL_TAP_RADIUS;
+}
 static void snail_tick(tank_t *t, float dt) {
-    if (!(t->sd_unlocks & SD_ITEM_SNAIL)) return;
+    if (!tank_bit_live(t, SD_ITEM_SNAIL)) return;
     if (t->snail_x < 0) tank_snail_place(t);
     if (t->snail_cell < 0 || !t->algae[t->snail_cell]) { t->snail_cell = (int16_t)snail_nearest_cell(t); t->snail_graze = 0; }
     if (t->snail_cell >= 0) {
@@ -625,6 +668,7 @@ static void snail_tick(tank_t *t, float dt) {
             t->snail_graze += dt;
             int v = t->algae[t->snail_cell] - (int)(SNAIL_GRAZE_PER_S * dt + 0.5f);
             t->algae[t->snail_cell] = (uint8_t)(v < 0 ? 0 : v);
+            if (v <= 0) t->snail_grazed++;                  /* a cell eaten clean: its card's tally */
         }
     } else if (t->snail_y < SNAIL_FLOOR_Y - 1) {            /* clean glass: down to the floor, flat on the glass, head down.
                                                                A hair off straight down keeps the sideways facing it had
@@ -647,13 +691,13 @@ static void snail_tick(tank_t *t, float dt) {
 }
 /* asleep: the snail keeps working, coarsely - the nearest cells go, one by one */
 static void snail_sleep(tank_t *t, float seconds) {
-    if (!(t->sd_unlocks & SD_ITEM_SNAIL)) return;
+    if (!tank_bit_live(t, SD_ITEM_SNAIL)) return;
     if (t->snail_x < 0) tank_snail_place(t);
     int cells = (int)(seconds / 3600.0f * SNAIL_SLEEP_CELLS_PER_H);
     for (int k = 0; k < cells; k++) {
         int c = snail_nearest_cell(t);
         if (c < 0) break;
-        t->algae[c] = 0;
+        t->algae[c] = 0; t->snail_grazed++;
         t->snail_x = clampf((c % ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, SNAIL_MARGIN, TANK_W - SNAIL_MARGIN);
         t->snail_y = clampf((c / ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, SNAIL_MARGIN, TANK_H - SNAIL_MARGIN);
     }
@@ -666,19 +710,40 @@ void tank_snail_place(tank_t *t) {
 void tank_plant_place(tank_t *t) {
     tank_veg_set(t, 3, VEG_START);                          /* a young plant; it grows from here */
 }
+void tank_castle_place(tank_t *t) {
+    t->decor_x[SD_IDX_CASTLE] = 0;                  /* the default spot ... */
+    t->decor_z[SD_IDX_CASTLE] = DECOR_Z_FRONT;      /* ... and the fish swim through */
+}
 /* the decor's spot and layer (see tank.h): one table row per shop item -
- * half the footprint (0 = not placeable) and the default centre */
-static const struct { float half_w, x_default; bool hangs; } DECOR[SD_ITEM_COUNT] = {
-    { PLANT_HALF_W, PLANT_X_DEFAULT, false },
-    { 0, 0, false },                                          /* the snail goes where the film is */
-    { LASER_HALF_W, LASER_X_DEFAULT, true },
-    { BASS_HALF_W,  BASS_X_DEFAULT,  false },
-    { GLOW_HALF_W,  GLOW_X_DEFAULT,  false },
-    { TOTEM_HALF_W, TOTEM_X_DEFAULT, false },
+ * half the footprint (0 = not placeable), the default centre, whether the
+ * piece HANGS from the surface instead of standing on the sand, and how many
+ * depths it offers (the castle has no AMONG, so the bar shows two tiles). */
+static const struct { float half_w, x_default; bool hangs; uint8_t z_count; } DECOR[SD_ITEM_COUNT] = {
+    [SD_IDX_PLANT]  = { PLANT_HALF_W,  PLANT_X_DEFAULT,  false, DECOR_Z_N },
+    [SD_IDX_SNAIL]  = { 0, 0, false, 0 },                      /* the snail goes where the film is */
+    [SD_IDX_CASTLE] = { CASTLE_HALF_W, CASTLE_X_DEFAULT, false, 2 },
+    [SD_IDX_LASER]  = { LASER_HALF_W,  LASER_X_DEFAULT,  true,  DECOR_Z_N },
+    [SD_IDX_BASS]   = { BASS_HALF_W,   BASS_X_DEFAULT,   false, DECOR_Z_N },
+    [SD_IDX_GLOW]   = { GLOW_HALF_W,   GLOW_X_DEFAULT,   false, DECOR_Z_N },
+    [SD_IDX_TOTEM]  = { TOTEM_HALF_W,  TOTEM_X_DEFAULT,  false, DECOR_Z_N },
+    [SD_IDX_DISCO]  = { DISCO_HALF_W,  DISCO_X_DEFAULT,  true,  DECOR_Z_N },
 };
+static const uint32_t SD_BIT[SD_ITEM_COUNT] = { SD_ITEM_PLANT, SD_ITEM_SNAIL, SD_ITEM_CASTLE,
+                                                SD_ITEM_LASER, SD_ITEM_BASS, SD_ITEM_GLOW, SD_ITEM_TOTEM,
+                                                SD_ITEM_DISCO };
+uint32_t tank_item_bit(int item) { return (item >= 0 && item < SD_ITEM_COUNT) ? SD_BIT[item] : 0; }
 bool  tank_decor_placeable(int item) { return item >= 0 && item < SD_ITEM_COUNT && DECOR[item].half_w > 0; }
 bool  tank_decor_hangs(int item) { return tank_decor_placeable(item) && DECOR[item].hangs; }
 float tank_decor_half_w(int item) { return tank_decor_placeable(item) ? DECOR[item].half_w : 0; }
+int   tank_decor_z_count(int item) { return tank_decor_placeable(item) ? DECOR[item].z_count : DECOR_Z_N; }
+int   tank_decor_z_at(int item, int i) {            /* a two-depth piece: BEHIND, then IN FRONT */
+    if (tank_decor_z_count(item) == 2) return i <= 0 ? DECOR_Z_BACK : DECOR_Z_FRONT;
+    return i < 0 ? 0 : i >= DECOR_Z_N ? DECOR_Z_N - 1 : i;
+}
+int   tank_decor_z_index(int item, int z) {
+    if (tank_decor_z_count(item) == 2) return z == DECOR_Z_BACK ? 0 : 1;
+    return z;
+}
 float tank_decor_x(const tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return 0;
     return t->decor_x[item] > 0 ? t->decor_x[item] : DECOR[item].x_default;
@@ -687,27 +752,294 @@ int tank_decor_z(const tank_t *t, int item) { return tank_decor_placeable(item) 
 float tank_decor_top_y(const tank_t *t, int item) {
     switch (item) {
     case SD_IDX_PLANT: { float top; tank_veg_bed(t, 3, NULL, NULL, &top, NULL); return top; }   /* the leaves' reach */
-    case SD_IDX_LASER: return 0;                                  /* hung under the surface: the beams reach the floor */
-    case SD_IDX_BASS:  return TANK_H - 16 - 30;
-    case SD_IDX_GLOW:  return TANK_H - 16 - 16;
-    case SD_IDX_TOTEM: return TANK_H - 16 - TOTEM_H;
+    case SD_IDX_LASER:  return 0;                                 /* hung under the surface: the beams reach the floor */
+    case SD_IDX_CASTLE: return TANK_H - 16 - CASTLE_SPIRE_H;
+    case SD_IDX_BASS:   return TANK_H - 16 - 30;
+    case SD_IDX_GLOW:   return TANK_H - 16 - 16;
+    case SD_IDX_TOTEM:  return TANK_H - 16 - TOTEM_H;
+    case SD_IDX_DISCO:  return 0;                                 /* hung: the rays reach down from it */
     default: return TANK_H - 16;
     }
 }
 void tank_decor_set(tank_t *t, int item, float x, int z) {
+    if (item < 0 || item >= SD_ITEM_COUNT) return;      /* explicit, so the writes below are provably in range */
     if (!tank_decor_placeable(item)) return;
     float half = tank_decor_half_w(item), lo = DECOR_MARGIN + half, hi = TANK_W - DECOR_MARGIN - half;
     if (x < lo) x = lo;
     if (x > hi) x = hi;
     if (z < 0) z = 0;
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
+    if (tank_decor_z_count(item) == 2 && z == DECOR_Z_MIDDLE) z = DECOR_Z_FRONT;   /* no AMONG */
     t->decor_x[item] = x; t->decor_z[item] = (uint8_t)z;
+    if (item == SD_IDX_GLOW && tank_bit_live(t, SD_ITEM_GLOW)) tank_glow_place(t);   /* the pile follows the finger */
 }
+/* ---- the glow sticks (SD_ITEM_GLOW): the fish play with them -----------
+ * See the note in tank.h. The model is never told; it asks for DART_PLAY and
+ * this is what that turns into when there is a stick within reach. */
+/* the castle's silhouette, in the castle's own local x, matching render.c:
+ * the pointed left tower (cone, apex 108 above the floor), the short far-left
+ * tower (cone, apex 72), the crenellated right tower (flat rampart at 70) and
+ * the gate wall's walk (flat at 58). Checked tallest-first where they overlap. */
+float tank_castle_top_y(const tank_t *t, float x, bool *slide) {
+    if (slide) *slide = false;
+    if (!tank_bit_live(t, SD_ITEM_CASTLE)) return GLOW_REST_Y;
+    const float FY = TANK_H - 16.0f;
+    float lx = x - tank_decor_x(t, SD_IDX_CASTLE);
+    if (lx >= -66 && lx <= -30) {                      /* the pointed tower: a cone, nothing stays on it */
+        if (slide) *slide = true;
+        return FY - 78 - 30 * (1.0f - fabsf(lx + 48) / 18.0f);
+    }
+    if (lx >= -90 && lx <= -56) {                      /* the short far-left tower: a cone too */
+        if (slide) *slide = true;
+        return FY - 46 - 26 * (1.0f - fabsf(lx + 73) / 17.0f);
+    }
+    if (lx >= 56 && lx <= 86) return FY - 70;          /* the right tower's crenellated rampart */
+    if (lx >= -44 && lx <= 44) return FY - 58;         /* the gate wall's walk, between the merlons */
+    return GLOW_REST_Y;
+}
+void tank_glow_place(tank_t *t) {
+    static const float dx[GLOW_N]  = { -8, -2, 4, 9 };
+    static const float ang[GLOW_N] = { -0.35f, 0.55f, -0.12f, 0.75f };
+    float gx = tank_decor_x(t, SD_IDX_GLOW);
+    for (int i = 0; i < GLOW_N; i++) {
+        /* exactly ON the sand line, so a freshly laid pile reads as resting
+           and a fish can take one at once (they used to sit a hair above it,
+           which glow_tick correctly treated as still falling) */
+        t->glow[i].x = gx + dx[i]; t->glow[i].y = tank_castle_top_y(t, gx + dx[i], NULL);   /* the sand, or the castle if the pile sits on it */
+        t->glow[i].ang = ang[i]; t->glow[i].spin = 0; t->glow[i].vx = t->glow[i].vy = 0;
+        t->glow[i].held_s = 0; t->glow[i].carrier = -1;
+    }
+}
+/* is this fish already holding one? (a fish carries at most a single stick) */
+static bool glow_busy(const tank_t *t, int fish) {
+    for (int g = 0; g < GLOW_N; g++) if (t->glow[g].carrier == fish) return true;
+    return false;
+}
+static void glow_tick(tank_t *t, float dt) {
+    if (!tank_bit_live(t, SD_ITEM_GLOW)) return;
+    for (int i = 0; i < N_FISH_MAX; i++) if (s_glow_cool[i] > 0) s_glow_cool[i] -= dt;
+    for (int g = 0; g < GLOW_N; g++) {
+        glow_t *s = &t->glow[g];
+        if (s->carrier >= 0) {                              /* being carried */
+            if (s->carrier >= t->n_fish) { s->carrier = -1; s->held_s = 0; continue; }
+            const fish_t *f = &t->fish[s->carrier];
+            s->x = f->x + cosf(f->heading) * 9.0f;          /* just under the mouth, turned the way it swims */
+            s->y = f->y + 5.0f;
+            s->ang = f->heading + 0.5f;
+            s->held_s += dt;
+            bool high    = s->y <= GLOW_RELEASE_Y;          /* got it up to the top: the whole point */
+            /* Lights-out used to end a carry. It is exactly the wrong call:
+               the dark is the best time to have one, so only a real fright
+               makes a fish let go now. */
+            bool rattled = t->startled || f->stress > 7.5f;
+            if ((s->held_s > GLOW_CARRY_MIN_S && high) || s->held_s > GLOW_CARRY_MAX_S || rattled) {
+                int who = s->carrier;
+                s->carrier = -1; s->held_s = 0; s->vy = 0;
+                s->vx = cosf(f->heading) * tank_randf(t, 5.0f, 16.0f);   /* let go by a moving fish: it keeps
+                                                                            that sideways throw, and THAT is
+                                                                            what walks the pile down the tank */
+                s->spin = tank_randf(t, -1.4f, 1.4f);       /* it tumbles on the way down */
+                s_glow_cool[who] = t->night ? GLOW_PLAY_COOL_NIGHT_S : GLOW_PLAY_COOL_S;
+                if (high && !rattled) { t->fish[who].ms_bits |= MS_GLOW_TOSS; tank_emit(TEV_GLOW_PLAY, who); }
+            }
+            continue;
+        }
+        bool on_cone; float top = tank_castle_top_y(t, s->x, &on_cone);
+        /* `|| on_cone` matters: a stick that comes to within a whisker of a
+           tower's point would otherwise count as RESTING and sit balanced on
+           it forever. Nothing rests on a cone - while it is over one it is
+           always falling, so it gets shed and carries on down. */
+        if (s->y < top - 0.25f || on_cone) {                /* falling - to the sand, or onto the castle */
+            s->vy += (GLOW_SINK_PX_S - s->vy) * (dt * 3.0f < 1.0f ? dt * 3.0f : 1.0f);
+            s->y += s->vy * dt;
+            s->x += s->vx * dt;
+            s->vx -= s->vx * (dt * 0.7f);                                /* the water takes the throw out of it */
+            s->x += sinf(t->clock * 1.7f + g * 1.3f) * dt * 7.0f;        /* ... and it wanders as it sinks */
+            s->ang += s->spin * dt;
+            if (s->y >= top) {
+                if (on_cone) {                              /* a tower's point: it is shed, and keeps falling */
+                    /* Pick a way off ONCE and keep it. The two pointed towers
+                       sit side by side, so re-deciding every tick pushed the
+                       stick left off one and right off the other, and it sat
+                       ping-ponging in the valley between them forever. */
+                    if (s->vx > -1.0f && s->vx < 1.0f) {
+                        float apex = tank_decor_x(t, SD_IDX_CASTLE) + (s->x - tank_decor_x(t, SD_IDX_CASTLE) < -56 ? -73.0f : -48.0f);
+                        s->vx = (s->x < apex ? -1.0f : 1.0f) * tank_randf(t, 20.0f, 34.0f);
+                        s->spin = tank_randf(t, -2.2f, 2.2f);   /* it tumbles off */
+                    }
+                    s->y = top - 0.5f;
+                } else {                                    /* a rampart, a wall walk, or the open sand */
+                    s->y = top; s->vy = 0; s->vx = 0; s->spin = 0;
+                    s->ang = tank_randf(t, -0.6f, 0.6f);
+                    s->x = clampf(s->x, DECOR_MARGIN, TANK_W - DECOR_MARGIN);
+                }
+            }
+            continue;
+        }
+        for (int i = 0; i < t->n_fish; i++) {               /* lying there: can a playing fish take it? */
+            const fish_t *f = &t->fish[i];
+            if (s_glow_cool[i] > 0 || f->goal.id != GOAL_DART_PLAY) continue;
+            if (glow_busy(t, i)) continue;
+            if (tank_dist(f->x, f->y, s->x, s->y) > GLOW_REACH) continue;
+            s->carrier = (int8_t)i; s->held_s = 0;
+            break;
+        }
+    }
+}
+
+/* the totem event (tank.h): lift, march, party at the speaker, march home */
+bool tank_totem_carry(const tank_t *t, float *x, float *y) {
+    if (t->totem_phase == TOTEM_OFF || t->totem_planted) return false;
+    if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) return false;
+    const fish_t *f = &t->fish[t->totem_carrier];
+    if (x) *x = f->x;
+    if (y) *y = f->y - TOTEM_H * 0.55f;                 /* held aloft, above the fish */
+    return true;
+}
+bool tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carried) {
+    float cx, cy;
+    if (tank_totem_carry(t, &cx, &cy)) {
+        if (x) *x = cx;
+        if (y) *y = cy;
+        if (ang) *ang = 0;
+        if (carried) *carried = true;
+        return true;
+    }
+    if (t->totem_planted) {                             /* slammed into the sand by the speaker */
+        if (x) *x = t->totem_party_x;
+        if (y) *y = (float)(TANK_H - 16 - TOTEM_H);
+        if (ang) *ang = t->totem_party_ang;
+        if (carried) *carried = false;
+        return true;
+    }
+    return false;                                       /* home, upright, where the keeper put it */
+}
+bool tank_bass_party(const tank_t *t) { return t->totem_phase == TOTEM_HOLD || t->totem_phase == TOTEM_PLANTED; }
+
+/* the castle's gate: fish swim freely through everything in this tank, so
+ * "through the gate" is purely a question of where the fish is - the opening
+ * is CASTLE_ARCH_R either side of the castle's centre, from the sand up to
+ * the top of the vault. */
+bool tank_in_castle_gate(const tank_t *t, int fish) {
+    if (!tank_bit_live(t, SD_ITEM_CASTLE) || fish < 0 || fish >= t->n_fish) return false;
+    const fish_t *f = &t->fish[fish];
+    float lx = f->x - tank_decor_x(t, SD_IDX_CASTLE), floor_y = TANK_H - 16.0f;
+    return fabsf(lx) <= CASTLE_ARCH_R && f->y <= floor_y && f->y >= floor_y - (CASTLE_ARCH_S + CASTLE_ARCH_R);
+}
+static void gate_tick(tank_t *t) {
+    for (int i = 0; i < t->n_fish; i++)
+        if (!(t->fish[i].ms_bits & MS_CASTLE_GATE) && tank_in_castle_gate(t, i))
+            t->fish[i].ms_bits |= MS_CASTLE_GATE;
+}
+
+/* ---- the disco ball (tank.h) ---- */
+void tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin) {
+    if (x) *x = tank_decor_x(t, SD_IDX_DISCO);
+    if (y) *y = DISCO_TOP_Y + (DISCO_MID_Y - DISCO_TOP_Y) * t->disco_drop;
+    if (drop) *drop = t->disco_drop;
+    if (spin) *spin = t->disco_spin;
+}
+bool tank_disco_hit(const tank_t *t, float x, float y) {
+    if (!tank_bit_live(t, SD_ITEM_DISCO)) return false;
+    float bx, by; tank_disco_state(t, &bx, &by, NULL, NULL);
+    return tank_dist(x, y, bx, by) <= DISCO_R + 12.0f;          /* the ball, plus a fingertip */
+}
+void tank_disco_toggle(tank_t *t) {
+    if (!tank_bit_live(t, SD_ITEM_DISCO)) return;
+    t->disco_show_s = t->disco_show_s > 0 ? 0.0f : DISCO_SHOW_S;   /* tap on, tap off */
+}
+static void disco_tick(tank_t *t, float dt) {
+    if (!tank_bit_live(t, SD_ITEM_DISCO)) { t->disco_drop = 0; t->disco_show_s = 0; return; }
+    if (t->disco_show_s > 0) t->disco_show_s -= dt;              /* the keeper's show times out */
+    bool want = tank_bass_party(t) || t->disco_show_s > 0;        /* a party always wins */
+    float target = want ? 1.0f : 0.0f;
+    float step = dt / DISCO_DROP_S;
+    if (t->disco_drop < target) t->disco_drop = t->disco_drop + step > target ? target : t->disco_drop + step;
+    if (t->disco_drop > target) t->disco_drop = t->disco_drop - step < target ? target : t->disco_drop - step;
+    if (t->disco_drop > 0.02f) {                                 /* it only turns once it is on its way down */
+        t->disco_spin += DISCO_SPIN_RPS * dt * t->disco_drop;
+        if (t->disco_spin > 1.0f) t->disco_spin -= 1.0f;
+    }
+}
+
+static void totem_end(tank_t *t) {
+    if (t->totem_phase != TOTEM_OFF) t->light_manual_off = t->totem_light_was;   /* the light goes back how it was */
+    t->totem_phase = TOTEM_OFF; t->totem_planted = false;
+    t->totem_carrier = -1; t->totem_held_s = 0;
+    s_totem_cool = TOTEM_COOL_S;
+}
+static void totem_tick(tank_t *t, float dt) {
+    if (!tank_bit_live(t, SD_ITEM_TOTEM)) { if (t->totem_phase != TOTEM_OFF) totem_end(t); return; }
+    if (s_totem_cool > 0) s_totem_cool -= dt;
+    if (t->totem_phase != TOTEM_OFF) {
+        if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) { totem_end(t); return; }
+        const fish_t *f = &t->fish[t->totem_carrier];
+        /* Lights-out does NOT end it any more - the dark is when the party is
+           worth having. Only a real fright breaks it up. */
+        if (t->startled || f->stress > 7.5f) { totem_end(t); return; }
+        t->totem_held_s += dt;
+        bool speaker = tank_bit_live(t, SD_ITEM_BASS);
+        float bx = tank_decor_x(t, SD_IDX_BASS), home = tank_decor_x(t, SD_IDX_TOTEM);
+        switch (t->totem_phase) {
+        case TOTEM_WALK:
+            if (!speaker) {                              /* no speaker: a parade, then home */
+                if (t->totem_held_s > TOTEM_PARADE_S) { t->totem_phase = TOTEM_HOME; t->totem_held_s = 0; }
+            } else if (fabsf(f->x - bx) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) {
+                t->totem_phase = TOTEM_HOLD; t->totem_held_s = 0;   /* they made it: the party starts */
+            }
+            break;
+        case TOTEM_HOLD:
+            if (t->totem_held_s > TOTEM_HOLD_S) {        /* down it goes, with gusto */
+                t->totem_planted = true;
+                t->totem_party_x = clampf(f->x, DECOR_MARGIN + TOTEM_HALF_W, TANK_W - DECOR_MARGIN - TOTEM_HALF_W);
+                t->totem_party_ang = tank_randf(t, 0.12f, 0.26f) * (tank_randf(t, -1, 1) < 0 ? -1.0f : 1.0f);
+                t->totem_phase = TOTEM_PLANTED; t->totem_held_s = 0;
+                for (int i = 0; i < t->n_fish; i++) {         /* everyone who stayed for it was AT the party */
+                    fish_t *g = &t->fish[i];
+                    if (fabsf(g->x - bx) > 130.0f) continue;
+                    if (g->parties < 30000) g->parties++;
+                    g->ms_bits |= MS_BASS_PARTY;
+                }
+            }
+            break;
+        case TOTEM_PLANTED:
+            if (t->totem_held_s > TOTEM_PLANTED_S) {     /* picked back up for the march home */
+                t->totem_planted = false;
+                t->totem_phase = TOTEM_HOME; t->totem_held_s = 0;
+            }
+            break;
+        default:                                          /* TOTEM_HOME */
+            if (fabsf(f->x - home) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) totem_end(t);
+            break;
+        }
+        return;
+    }
+    if (s_totem_cool > 0 || t->night) return;            /* it is lifted by day; the party may run into the dark */
+    float tx = tank_decor_x(t, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
+    for (int i = 0; i < t->n_fish; i++) {
+        fish_t *f = &t->fish[i];
+        /* a first-timer has to be really sociable; a fish that has been to
+           parties before is keener, down to TOTEM_SOCIAL_FLOOR */
+        float bar = TOTEM_SOCIAL_MIN - f->parties * TOTEM_PARTY_BONUS;
+        if (bar < TOTEM_SOCIAL_FLOOR) bar = TOTEM_SOCIAL_FLOOR;
+        if (f->sociable < bar || f->stress > 5.0f) continue;
+        if (tank_dist(f->x, f->y, tx, ty) > TOTEM_REACH) continue;
+        t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
+        t->totem_phase = TOTEM_WALK; t->totem_planted = false;
+        /* the lights go out for it: a parade is a night-time thing */
+        t->totem_light_was = t->light_manual_off;
+        t->light_manual_off = true;
+        f->ms_bits |= MS_TOTEM_HOLD;
+        tank_emit(TEV_TOTEM_LIFT, i);
+        break;
+    }
+}
+
 /* the bass stack (SD_ITEM_BASS): the thump is a picture (render.c reads the
  * clock); the DROP, every BASS_DROP_BEATS beats, shakes BASS_DROP_PUFFS of
  * the free bubbles out of the cone - the flirt's puff, from the sand */
 static void bass_tick(tank_t *t) {
-    if (!(t->sd_unlocks & SD_ITEM_BASS)) return;
+    if (!tank_bit_live(t, SD_ITEM_BASS)) return;
     if (t->clock < t->bass_drop_at) return;
     t->bass_drop_at = t->clock + BASS_DROP_BEATS * BASS_BEAT_S;
     float bx = tank_decor_x(t, SD_IDX_BASS), by = TANK_H - 16 - 12;
@@ -958,6 +1290,36 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         f->y + sinf(f->heading + cosf(f->wander * 0.7f) * 0.45f) * 39,
         lerpf(12, 23, f->bold) * (1 - f->lazy * 0.35f), true,
     };
+    /* The totem event (tank.h). Only goals that are ALREADY sociable or idle
+       are redirected: a hungry, frightened or resting fish is the model's
+       call and is left exactly alone. Where "with the others" IS depends on
+       which part of the event is running. */
+    if (t->totem_phase != TOTEM_OFF && t->totem_carrier >= 0 && t->totem_carrier < t->n_fish &&
+        (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES)) {
+        const fish_t *lead = &t->fish[t->totem_carrier];
+        bool leader = idx == t->totem_carrier;
+        float bx = tank_decor_x(t, SD_IDX_BASS), home = tank_decor_x(t, SD_IDX_TOTEM);
+        float ang = f->wander + idx * 1.7f;
+        if (t->totem_phase == TOTEM_HOLD && leader) {          /* circling the speaker, totem up */
+            tg.x = bx + cosf(tm * 0.8f) * 46;
+            tg.y = TANK_H - 16 - 62 + sinf(tm * 0.8f) * 22;
+        } else if (tank_bass_party(t) && !leader) {            /* the dance floor, around the stack */
+            tg.x = bx + cosf(tm * 1.1f + idx * 2.1f) * (34 + idx * 7);
+            tg.y = TANK_H - 16 - 54 + sinf(tm * 1.4f + idx * 1.3f) * (26 + idx * 4);
+        } else if (t->totem_phase == TOTEM_PLANTED && leader) { /* it is in the sand; the leader dances too */
+            tg.x = t->totem_party_x + cosf(tm * 1.2f) * 30;
+            tg.y = TANK_H - 16 - 50 + sinf(tm * 1.5f) * 20;
+        } else if (leader) {                                   /* walking: out to the speaker, or back home */
+            float goal_x = t->totem_phase == TOTEM_HOME ? home : (tank_bit_live(t, SD_ITEM_BASS) ? bx : tg.x);
+            tg.x = goal_x; tg.y = TANK_H - 16 - 44;
+        } else {                                               /* everyone else falls in around the leader */
+            tg.x = lead->x + cosf(ang) * 46;
+            tg.y = lead->y + sinf(ang) * 30;
+        }
+        tg.x = clampf(tg.x, 23, TANK_W - 23);
+        tg.y = clampf(tg.y, 32, TANK_H - 23);
+        return tg;
+    }
     switch (goal) {
     case GOAL_SEEK_FOOD: {
         float d; int i = tank_nearest_food(t, f, &d);
@@ -1364,6 +1726,7 @@ static uint32_t state_signature(const tank_t *t, int idx) {
 
 void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     t->clock += dt;
+    s_emit_clock = t->clock;            /* tank_emit stamps the fish's last moment with it */
     /* the light: on while the device is handled, off LIGHT_IDLE_S after the
      * last touch or movement (tank_handled) - a tank left on the desk goes
      * dark and the fish sleep. A setup page or a prompt holds it on; the
@@ -1418,6 +1781,10 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     }
     snail_tick(t, dt);
     bass_tick(t);
+    glow_tick(t, dt);
+    totem_tick(t, dt);
+    disco_tick(t, dt);
+    gate_tick(t);
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {

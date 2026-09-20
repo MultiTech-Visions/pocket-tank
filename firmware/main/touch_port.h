@@ -5,8 +5,9 @@
 #include "tank.h"
 bool touch_port_init(void);
 void touch_port_poll(tank_t *t);
-int  touch_port_selected(void);   /* tapped fish for the stats card, -1 = none */
-/* milestones page: a tap ON the open stats card flips to it; it has no
+int  touch_port_selected(void);   /* tapped fish for the stats card, RENDER_CARD_SNAIL for the snail's, -1 = none */
+/* milestones page: a tap ON the open stats card (its MORE button, or any of
+ * it) flips to it; it has no
  * auto-dismiss - the next tap anywhere closes it (and the card, if still up).
  * touch_port_show_milestones is the director's cue (needs no card). */
 bool touch_port_milestones(void);
@@ -37,6 +38,12 @@ int  touch_port_take_setting(int *value);       /* SET_TAP_* or 0 */
 bool touch_port_shop(void);
 void touch_port_show_shop(bool on);
 int  touch_port_take_shop(void);
+/* a fish's own page (2026-09-20, ui_fish_page): opened by the MORE button on
+ * the stats card or on a fish's popup on the overview page. Returns the fish
+ * whose page is up, or -1. Its CLOSE button ends it; while it is up every
+ * other gesture is swallowed, like the other pages. */
+int  touch_port_fishpage(void);
+void touch_port_show_fishpage(int fish);       /* -1 closes it */
 void touch_port_set_bias(int px);              /* finger-landing correction: reported y moves up by px */
 int  touch_port_bias(void);
 #endif

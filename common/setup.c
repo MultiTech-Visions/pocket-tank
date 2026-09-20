@@ -33,6 +33,10 @@ static float s_px, s_py;       /* press point */
 static float s_ly;             /* last y, for the wheel */
 static float s_acc;            /* vertical travel toward the next step */
 static bool  s_spun;           /* this press has turned the wheel (or moved the column): no tap on release */
+/* the legacy keyboards (setup.h, SETUP_KBD_*) */
+static int  s_kbd;             /* the name page's design: the wheel unless the director says otherwise */
+static bool s_typed;           /* this name page: the keeper has typed (the default is gone) */
+static int  s_kb_page;         /* SETUP_KBD_PAGES: 0 = A-M, 1 = N-Z */
 
 static int page_fish(void) { return s_birth ? s_fish : s_place ? 0 : (s_page == SETUP_PG_NAME_A || s_page == SETUP_PG_LOOK_A) ? 0 : 1; }
 static bool page_is_name(void) { return s_page == SETUP_PG_NAME_A || s_page == SETUP_PG_NAME_B || s_page == SETUP_PG_NAME_NEW; }
@@ -40,7 +44,7 @@ static bool page_is_look(void) { return s_page == SETUP_PG_LOOK_A || s_page == S
 static bool page_is_last(void) { return s_page == SETUP_PG_CARE || s_page == SETUP_PG_FAMILY; }
 static bool page_one_button(void) { return s_page == SETUP_PG_WELCOME || s_page == SETUP_PG_BORN; }   /* a lone NEXT at the foot */
 static int  first_page(void) { return s_place ? SETUP_PG_PLACE : s_birth ? SETUP_PG_BORN : SETUP_PG_WELCOME; }
-static bool nav_on_top(void) { return page_is_name() || page_is_look() || s_page == SETUP_PG_BUBBLES || s_page == SETUP_PG_PLACE; }
+static bool nav_on_top(void) { return (page_is_name() && s_kbd != SETUP_KBD_GRID) || page_is_look() || s_page == SETUP_PG_BUBBLES || s_page == SETUP_PG_PLACE; }
 static const char *fish_name(const tank_t *t, int i) { return i >= 0 && i < t->n_fish ? t->fish[i].name : "?"; }
 static void stage(tank_t *t);
 
@@ -84,6 +88,69 @@ void setup_cancel(tank_t *t) {
 }
 int  setup_page(void)   { return s_page; }
 int  setup_slot(void)   { return s_slot; }
+void setup_set_keyboard(int mode) { s_kbd = mode == SETUP_KBD_GRID || mode == SETUP_KBD_PAGES ? mode : SETUP_KBD_WHEEL; s_typed = false; s_kb_page = 0; }
+int  setup_keyboard(void) { return s_kbd; }
+
+/* ---- the legacy keyboards: geometry and hit test as they were on 2026-09-13 ----
+ * GRID: A-Z in 7 columns at a 50 x 38 px pitch, the last row V..Z + a
+ * double-width DEL. PAGES: 5 x 3 cells at 72 x 80, the page's 13 letters,
+ * then DEL, then the flip in the corner. Both: a tap anywhere over the block
+ * picks the NEAREST key. */
+#define KG_COLS 7
+#define KG_X  (SETUP_X + 17)
+#define KG_Y  (SETUP_Y + 116)
+#define KG_PX 50
+#define KG_PY 38
+#define KG_W  46
+#define KG_H  34
+#define KP_COLS 5
+#define KP_ROWS 3
+#define KP_PX 72
+#define KP_PY 80
+#define KP_W  66
+#define KP_H  74
+#define KP_X  (SETUP_X + (SETUP_W - (KP_COLS - 1) * KP_PX - KP_W) / 2)
+#define KP_Y  (SETUP_Y + 76)
+#define KP_HALF 13
+static int kg_row(int k) { return k == SETUP_KEY_DEL ? 3 : k / KG_COLS; }
+static int kg_col(int k) { return k == SETUP_KEY_DEL ? 5 : k % KG_COLS; }
+static int kg_w(int k)   { return k == SETUP_KEY_DEL ? KG_W + KG_PX : KG_W; }
+static void kg_center(int k, float *x, float *y) {
+    *x = KG_X + kg_col(k) * KG_PX + kg_w(k) * 0.5f;
+    *y = KG_Y + kg_row(k) * KG_PY + KG_H * 0.5f;
+}
+static int kp_key(int cell) { return cell < KP_HALF ? cell + s_kb_page * KP_HALF : cell == KP_HALF ? SETUP_KEY_DEL : SETUP_KEY_PAGE; }
+static int kbd_hit(float x, float y) {
+    int best = -1; float bd = 1e9f;
+    if (s_kbd == SETUP_KBD_GRID) {
+        int kw = KG_COLS * KG_PX - (KG_PX - KG_W), kh = 4 * KG_PY - (KG_PY - KG_H);
+        if (x < KG_X - 6 || x >= KG_X + kw + 6 || y < KG_Y - 6 || y >= KG_Y + kh + 6) return 0;
+        for (int k = 0; k <= SETUP_KEY_DEL; k++) {
+            float kx, ky; kg_center(k, &kx, &ky);
+            float dx = x - kx, dy = (y - ky) * 1.3f;    /* rows are tighter than columns */
+            if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = k; }
+        }
+    } else {
+        int kw = (KP_COLS - 1) * KP_PX + KP_W, kh = (KP_ROWS - 1) * KP_PY + KP_H;
+        if (x < KP_X - 16 || x >= KP_X + kw + 16 || y < KP_Y - 16 || y >= KP_Y + kh + 16) return 0;
+        for (int cell = 0; cell < KP_COLS * KP_ROWS; cell++) {
+            float dx = x - (KP_X + (cell % KP_COLS) * KP_PX + KP_W * 0.5f), dy = y - (KP_Y + (cell / KP_COLS) * KP_PY + KP_H * 0.5f);
+            if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = kp_key(cell); }
+        }
+    }
+    return best < 0 ? 0 : SETUP_HIT_KEY0 + best;
+}
+static void kbd_key(fish_t *f, int k) {
+    int n = (int)strlen(f->name);
+    if (k == SETUP_KEY_PAGE) { s_kb_page ^= 1; return; }
+    if (k == SETUP_KEY_DEL) {
+        if (!s_typed) { f->name[0] = 0; s_typed = true; }              /* the default goes in one stroke */
+        else if (n) f->name[n - 1] = 0;
+        return;
+    }
+    if (!s_typed) { f->name[0] = 0; n = 0; s_typed = true; }          /* first letter replaces the default */
+    if (n < FISH_NAME_MAX) { f->name[n] = (char)('a' + k); f->name[n + 1] = 0; }   /* lowercase inside; the font draws upper */
+}
 
 const char *setup_hit_name(int id) {
     static char buf[12];
@@ -92,6 +159,9 @@ const char *setup_hit_name(int id) {
     if (id == SETUP_HIT_UP)   return "up";
     if (id == SETUP_HIT_DOWN) return "down";
     if (id >= SETUP_HIT_SLOT0 && id < SETUP_HIT_SLOT0 + FISH_NAME_MAX) { snprintf(buf, sizeof buf, "slot %d", id - SETUP_HIT_SLOT0); return buf; }
+    if (id == SETUP_HIT_KEY0 + SETUP_KEY_DEL) return "DEL";
+    if (id == SETUP_HIT_KEY0 + SETUP_KEY_PAGE) return "page flip";
+    if (id >= SETUP_HIT_KEY0 && id < SETUP_HIT_KEY0 + 26) { snprintf(buf, sizeof buf, "key %c", 'A' + id - SETUP_HIT_KEY0); return buf; }
     if (id >= SETUP_HIT_BODY0 && id < SETUP_HIT_BODY0 + LOOK_N) { snprintf(buf, sizeof buf, "body %d", id - SETUP_HIT_BODY0); return buf; }
     if (id >= SETUP_HIT_Z0 && id < SETUP_HIT_Z0 + DECOR_Z_N) return id == SETUP_HIT_Z0 ? "BEHIND" : id == SETUP_HIT_Z0 + 1 ? "AMONG" : "IN FRONT";
     return "nothing";
@@ -160,6 +230,7 @@ int setup_hit(float x, float y) {
         if (in_box(x, y, SETUP_NEXT_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
         if (in_box(x, y, SETUP_BACK_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
     }
+    if (page_is_name() && s_kbd) return kbd_hit(x, y);
     if (page_is_name()) {
         int rw = (FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W;
         if (x < SETUP_SLOT_X - 24 || x >= SETUP_SLOT_X + rw + 24) return 0;
@@ -173,12 +244,14 @@ int setup_hit(float x, float y) {
         return 0;
     }
     if (s_page == SETUP_PG_PLACE) {
-        /* the DEPTH bar: a band 8 px around it, the segment under the finger */
-        if (!in_box(x, y, SETUP_DEPTH_X, SETUP_DEPTH_Y, SETUP_DEPTH_W, SETUP_DEPTH_H, 8)) return 0;
-        int i = (int)((x - SETUP_DEPTH_X) / SETUP_DEPTH_SEG_W);
+        /* the DEPTH bar: a band 8 px around it, the segment under the finger
+           (the item's own depths: the plant's three, the castle's two) */
+        int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (TANK_W - bw) / 2;
+        if (!in_box(x, y, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, 8)) return 0;
+        int i = (int)((x - bx) / SETUP_DEPTH_SEG_W);
         if (i < 0) i = 0;
-        if (i >= DECOR_Z_N) i = DECOR_Z_N - 1;
-        return SETUP_HIT_Z0 + i;
+        if (i >= n) i = n - 1;
+        return SETUP_HIT_Z0 + tank_decor_z_at(s_item, i);
     }
     if (page_is_look()) {
         /* the swatch row, a tall band (40 px above, 40 below - fingers land
@@ -210,13 +283,17 @@ void setup_activate(tank_t *t, int id) {
             if (s_birth) progression_newborn_done(t); else progression_setup_done(t);
             return;
         }
-        s_page++; s_slot = 0; stage(t);
+        s_page++; s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
         return;
     }
     if (id == SETUP_HIT_BACK) {
         if (page_is_name()) tidy_name(t, page_fish());
         if (s_page > first_page()) s_page--;
-        s_slot = 0; stage(t);
+        s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
+        return;
+    }
+    if (page_is_name() && s_kbd) {
+        if (id >= SETUP_HIT_KEY0 && id < SETUP_HIT_KEY0 + SETUP_KEY_N) kbd_key(f, id - SETUP_HIT_KEY0);
         return;
     }
     if (page_is_name()) {
@@ -311,14 +388,36 @@ static void leaf_glyph(uint16_t *fb, int stride, int cx, int y_bot, int h, uint3
         render_rect(fb, stride, cx - w / 2, y_bot - i, w, 1, rgb);
     }
 }
-/* a depth tile: two leaves and the keeper's first fish, in the order the
- * choice means - BEHIND (the plant behind the fish): leaves, then the fish
- * over them; AMONG: one leaf, the fish, the other leaf; IN FRONT: the fish,
- * then both leaves over it */
-static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int z, float clock) {
+/* a little castle for the castle's depth tiles: two towers, a wall with
+ * merlons, the arch - the stone tones of the real one */
+static void castle_glyph(uint16_t *fb, int stride, int cx, int y_bot, uint32_t wall, uint32_t roof) {
+    const uint32_t tower = 0x87795f, dark = 0x0b1a22, trim = 0xc25f38;
+    render_rect(fb, stride, cx - 14, y_bot - 14, 29, 15, wall);
+    for (int x = cx - 14; x + 2 <= cx + 14; x += 6) render_rect(fb, stride, x, y_bot - 17, 3, 3, wall);
+    render_rect(fb, stride, cx - 21, y_bot - 24, 8, 25, tower);
+    for (int i = 0; i < 7; i++) render_rect(fb, stride, cx - 17 - i / 2, y_bot - 31 + i, 1 + i, 1, roof);
+    render_rect(fb, stride, cx + 13, y_bot - 20, 8, 21, tower);
+    for (int i = 0; i < 6; i++) render_rect(fb, stride, cx + 17 - i / 2, y_bot - 26 + i, 1 + i, 1, roof);
+    render_rect(fb, stride, cx - 5, y_bot - 9, 11, 1, trim);
+    render_rect(fb, stride, cx - 3, y_bot - 8, 7, 9, dark);
+    render_rect(fb, stride, cx - 4, y_bot - 6, 9, 7, dark);
+}
+/* a depth tile: the plant's - two leaves and the keeper's first fish, in
+ * the order the choice means - BEHIND (the plant behind the fish): leaves,
+ * then the fish over them; AMONG: one leaf, the fish, the other leaf; IN
+ * FRONT: the fish, then both leaves over it. The castle's (2026-09-16):
+ * the castle and two leaves - BEHIND: the castle, the leaves over it; IN
+ * FRONT: the leaves, the castle over them (its depths mean the plant layer) */
+static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int z, int item, float clock) {
     const int cx = x + w / 2, cy = y + h / 2, lh = h - 6, yb = y + h - 3;
     const uint32_t la = 0x8dbb48, lb = 0x6c9d38;
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
+    if (item == 2) {
+        if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+        return;
+    }
     if (z == DECOR_Z_BACK)  { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
     if (z == DECOR_Z_MIDDLE)  leaf_glyph(fb, stride, cx - 8, yb, lh, la);
     if (who) render_fish_portrait(fb, stride, (float)cx, (float)cy, 0.62f, who, clock);
@@ -367,25 +466,63 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            one lit; a picture tile on each and the word under it */
         static const char *const zl[DECOR_Z_N] = { "BEHIND", "AMONG", "IN FRONT" };
         static const char *const hint[DECOR_Z_N] = { "THE FISH SWIM IN FRONT OF IT", "THE FISH SWIM THROUGH IT", "THE FISH SWIM BEHIND IT" };
-        int z = tank_decor_z(t, s_item);
+        static const char *const castle_hint[DECOR_Z_N] = { "THE PLANTS GROW IN FRONT OF IT", "", "IT STANDS IN FRONT OF THE PLANTS" };
+        int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);
+        int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (TANK_W - bw) / 2;   /* the item's own depths */
         text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "DEPTH");
-        render_rect(fb, stride, SETUP_DEPTH_X, SETUP_DEPTH_Y, SETUP_DEPTH_W, SETUP_DEPTH_H, C_KEY);
-        for (int i = 0; i < DECOR_Z_N; i++) {
-            int sx = SETUP_DEPTH_X + i * SETUP_DEPTH_SEG_W;
-            if (i == z) { render_rect(fb, stride, sx, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_INNER);
-                          render_rect_edge(fb, stride, sx + 1, SETUP_DEPTH_Y + 1, SETUP_DEPTH_SEG_W - 2, SETUP_DEPTH_H - 2, C_EDGE); }
+        render_rect(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_KEY);
+        for (int i = 0; i < n; i++) {
+            int sx = bx + i * SETUP_DEPTH_SEG_W, zi_ = tank_decor_z_at(s_item, i);
+            if (i == zi) { render_rect(fb, stride, sx, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_INNER);
+                           render_rect_edge(fb, stride, sx + 1, SETUP_DEPTH_Y + 1, SETUP_DEPTH_SEG_W - 2, SETUP_DEPTH_H - 2, C_EDGE); }
             else if (i > 0) render_rect(fb, stride, sx, SETUP_DEPTH_Y + 6, 1, SETUP_DEPTH_H - 12, C_DIM);   /* a divider */
-            depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + 4, SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, i, clock);
-            text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + 10, 2, i == z ? C_TEXT : dim(C_CAPT, 45), zl[i]);
+            depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + 4, SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, zi_, s_item, clock);
+            text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + 10, 2, i == zi ? C_TEXT : dim(C_CAPT, 45), zl[zi_]);
         }
-        render_rect_edge(fb, stride, SETUP_DEPTH_X, SETUP_DEPTH_Y, SETUP_DEPTH_W, SETUP_DEPTH_H, C_EDGE);
-        text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, hint[z]);
+        render_rect_edge(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_EDGE);
+        text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, s_item == SD_IDX_CASTLE ? castle_hint[z] : hint[z]);
         float x0 = tank_decor_x(t, s_item) - tank_decor_half_w(s_item) - 10, x1 = tank_decor_x(t, s_item) + tank_decor_half_w(s_item) + 10;
-        float top = tank_decor_top_y(t, s_item);            /* the piece's reach (the plant: its leaves) */
+        float top = tank_decor_top_y(t, s_item);            /* the piece's reach: the plant's leaves, the castle's spire */
         int sy = (int)top - 8; if (sy < SETUP_PLACE_Y) sy = SETUP_PLACE_Y;
         render_rect_blend(fb, stride, (int)x0, sy, (int)(x1 - x0), TANK_H - 16 - sy + 4, C_EDGE, 46);
         chevron(fb, stride, (int)((x0 + x1) * 0.5f), tank_decor_hangs(s_item) ? sy + 8 : TANK_H - 16 - 34, true, C_EDGE);   /* hung: it points up at the rig */
         text_c(fb, stride, CX, 296, 2, C_CAPT, "DRAG IT LEFT OR RIGHT");
+    } else if (page_is_name() && s_kbd) {
+        /* the two rejected designs, drawn as they were: a panel over the tank,
+           the name as underlined slots (the next free one blinks; an untouched
+           default sits dimmed, as a placeholder does), the keys */
+        const fish_t *f = &t->fish[page_fish()];
+        bool grid = s_kbd == SETUP_KBD_GRID;
+        panel(fb, stride);
+        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
+        if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
+        const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
+        int n = name_len(f);
+        for (int i = 0; i < FISH_NAME_MAX; i++) {
+            int x = NX + i * SL;
+            bool cursor = i == n && ((int)(clock * 2) & 1);
+            render_rect(fb, stride, x, NY + 26, SL - 4, 2, cursor ? C_EDGE : i < n ? f->color : C_DIM);
+            if (i < n) { char ch[2] = { f->name[i], 0 }; render_text(fb, stride, x + 3, NY, 3, s_typed ? C_TEXT : C_CAPT, ch); }
+        }
+        if (grid) for (int k = 0; k <= SETUP_KEY_DEL; k++) {
+            int x = KG_X + kg_col(k) * KG_PX, y = KG_Y + kg_row(k) * KG_PY, w = kg_w(k);
+            render_rect(fb, stride, x, y, w, KG_H, C_KEY);
+            render_rect_edge(fb, stride, x, y, w, KG_H, C_DIM);
+            char lab[4] = { (char)('A' + k), 0 };
+            if (k == SETUP_KEY_DEL) strcpy(lab, "DEL");
+            render_text(fb, stride, x + (w - render_text_w(lab, 2)) / 2, y + (KG_H - 14) / 2, 2, C_TEXT, lab);
+        } else for (int cell = 0; cell < KP_COLS * KP_ROWS; cell++) {
+            int k = kp_key(cell), x = KP_X + (cell % KP_COLS) * KP_PX, y = KP_Y + (cell / KP_COLS) * KP_PY;
+            bool special = k >= 26;
+            render_rect(fb, stride, x, y, KP_W, KP_H, special ? C_INNER : C_KEY);
+            render_rect_edge(fb, stride, x, y, KP_W, KP_H, special ? C_EDGE : C_DIM);
+            char lab[4] = { (char)('A' + k), 0 };
+            if (k == SETUP_KEY_DEL) strcpy(lab, "DEL");
+            if (k == SETUP_KEY_PAGE) strcpy(lab, s_kb_page ? "A-M" : "N-Z");
+            render_text(fb, stride, x + (KP_W - render_text_w(lab, 3)) / 2, y + (KP_H - 21) / 2, 3, C_TEXT, lab);
+        }
+        nav(fb, stride, !grid, "NEXT", false);
+        if (grid) dots(fb, stride, SETUP_Y + SETUP_H - 8);
     } else if (page_is_name()) {
         /* straight on the tank: the fish being named wears a ring in its own
            colour, its name spans the middle in that colour, the active slot
