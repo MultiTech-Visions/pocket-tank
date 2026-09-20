@@ -34,6 +34,7 @@ extern const icon_t icon_ms_sand_dollar;
 extern const icon_t icon_ms_tank_changed_someone;
 extern const icon_t icon_shop_bass;
 extern const icon_t icon_shop_castle;
+extern const icon_t icon_shop_disco;
 extern const icon_t icon_shop_glow;
 extern const icon_t icon_shop_laser;
 extern const icon_t icon_shop_plant;

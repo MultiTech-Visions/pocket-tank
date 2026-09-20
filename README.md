@@ -249,7 +249,13 @@ first forty-five the carrier is still holding the totem up, circling the
 stack while the others dance around it; then it slams the totem into the sand
 at a lean and joins them for the other forty-five; then it pulls the totem
 back out, leads everyone home, plants it where it started and they all go back
-to their own business. With no speaker it is simply a parade and a walk home. Lights-out is the best time for a glow stick, so a fish
+to their own business. With no speaker it is simply a parade and a walk home.
+
+**The disco ball** (120) hangs at the top of the tank wherever you put it.
+When a party starts at the speaker it lowers itself into the middle of the
+water and spins, throwing coloured rays across the tank, and winds back up
+when the party ends. Out of party time you can tap it to run the show by
+hand; tap again to stop it, and it stops by itself after thirty seconds. Lights-out is the best time for a glow stick, so a fish
 keeps hold of one when the tank goes dark and comes back to them twice as
 often. The dark itself is a little less deep than it used to be, because
 there is more worth seeing down there now. A hungry or frightened fish is

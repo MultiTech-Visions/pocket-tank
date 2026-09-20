@@ -427,14 +427,53 @@ static void draw_totem(ctx_t *c, const tank_t *t) {
     fill_ellipse(&lit, topx - 3.5f, topy + 9.5f, 2.6f, 4, 0x061006, 255);           /* the eyes */
     fill_ellipse(&lit, topx + 3.5f, topy + 9.5f, 2.6f, 4, 0x061006, 255);
 }
+/* the disco ball: parked under the surface on its cord until a party starts
+ * at the speaker (or the keeper taps it), then lowered into the middle of the
+ * water, spinning, throwing rays. The facets scroll with the spin so it reads
+ * as turning rather than just glowing. */
+static void draw_disco(ctx_t *c, const tank_t *t) {
+    float bx, by, drop, spin;
+    tank_disco_state(t, &bx, &by, &drop, &spin);
+    src_t cord = src_color(0x4a4a58, c->dim);
+    for (int y = 0; y < (int)(by - DISCO_R); y++) px_blend_s(c, (int)bx, y, &cord, 200);
+    ctx_t lit = *c; if (t->night || drop > 0.02f) lit.dim = 1.0f;
+    if (drop > 0.05f) {                                   /* the rays, turning with the ball */
+        static const uint32_t RAY[4] = { 0x9fe8ff, 0xff8de0, 0xbaff8d, 0xffe08d };
+        for (int i = 0; i < 12; i++) {
+            float a = spin * TAU + i * (TAU / 12);
+            float len = (88.0f + 44.0f * fast_sin(spin * TAU * 2 + i)) * drop;
+            src_t s = src_color(RAY[i & 3], 1.0f);
+            line_blend(&lit, bx, by, bx + cosf(a) * len, by + sinf(a) * len, &s, (int)(62 * drop), true);
+        }
+    }
+    const int R = (int)DISCO_R;
+    for (int dy = -R; dy <= R; dy++)                      /* the faceted ball itself */
+        for (int dx = -R; dx <= R; dx++) {
+            float u = dx / DISCO_R, v = dy / DISCO_R;
+            if (u * u + v * v > 1.0f) continue;
+            float w = 1.0f - v * v; if (w < 0.04f) w = 0.04f;
+            float lon = u / sqrtf(w);
+            int fu = (int)((lon * 0.5f + 0.5f + spin) * 10) & 1;
+            int fv = (int)((v * 0.5f + 0.5f) * 7) & 1;
+            float gx = u + 0.4f, gy = v + 0.4f;
+            float shine = 1.0f - sqrtf(gx * gx + gy * gy);
+            if (shine < 0) shine = 0;
+            float b = 0.35f + 0.65f * shine;
+            if (fu ^ fv) b *= 0.60f;
+            uint32_t col = b > 0.80f ? 0xffffff : b > 0.50f ? 0xc9f2ff : 0x6fbcdc;
+            px_blend(&lit, (int)(bx + dx), (int)(by + dy), col, (int)(200 + 55 * b));
+        }
+}
+
 /* every festival piece on layer z (DECOR_Z_*), in item order */
 static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
-    for (int i = SD_IDX_LASER; i <= SD_IDX_TOTEM; i++) {
+    for (int i = SD_IDX_LASER; i <= SD_IDX_DISCO; i++) {
         if (!tank_bit_live(t, SD_ITEMS[i].bit) || tank_decor_z(t, i) != z) continue;
         if (i == SD_IDX_LASER) draw_laser(c, t);
         else if (i == SD_IDX_BASS) draw_bass(c, t);
         else if (i == SD_IDX_GLOW) draw_glow(c, t);
-        else draw_totem(c, t);
+        else if (i == SD_IDX_TOTEM) draw_totem(c, t);
+        else draw_disco(c, t);
     }
 }
 
@@ -2234,7 +2273,8 @@ static bool g_shp_earn;              /* the HOW TO EARN modal is up */
 static int  g_shp_page;              /* the shelf on show */
 static const icon_t *shop_icon(int item) {
     static const icon_t *const ic[SD_ITEM_COUNT] = { &icon_shop_plant, &icon_shop_snail, &icon_shop_castle,
-                                                     &icon_shop_laser, &icon_shop_bass, &icon_shop_glow, &icon_shop_totem };
+                                                     &icon_shop_laser, &icon_shop_bass, &icon_shop_glow, &icon_shop_totem,
+                                                     &icon_shop_disco };
     return ic[item];
 }
 static int shop_page_rows(int page) { int n = SD_ITEM_COUNT - page * SHP_PAGE_ROWS; return n > SHP_PAGE_ROWS ? SHP_PAGE_ROWS : n; }

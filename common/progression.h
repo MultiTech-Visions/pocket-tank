@@ -167,6 +167,7 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_BASS  70
 #define SD_PRICE_GLOW  30
 #define SD_PRICE_TOTEM 45
+#define SD_PRICE_DISCO 120            /* the ball (2026-09-20): the centrepiece, priced like one */
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
     const char *key;               /* one lowercase word: the director's `buy` / `place` */

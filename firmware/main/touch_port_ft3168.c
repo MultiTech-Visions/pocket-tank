@@ -183,6 +183,10 @@ void touch_port_poll(tank_t *t) {
                 if (d2 < bd) { bd = d2; best = i; }
             }
             if (best >= 0) { s_sel = (best == s_sel) ? -1 : best; s_sel_us = now; }
+            else if (tank_disco_hit(t, s_px, s_py)) {   /* the ball: the keeper's own show */
+                tank_disco_toggle(t);
+                ESP_LOGI(TAG, "disco ball: %s", t->disco_show_s > 0 ? "lowering, show on" : "show off");
+            }
             else if (tank_snail_hit(t, s_px, s_py)) {   /* the snail: its card (2026-09-16), the fish first */
                 s_sel = s_sel == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL; s_sel_us = now;
                 ESP_LOGI(TAG, "snail tapped: card %s (%d spots grazed)", s_sel >= 0 ? "up" : "down", (int)t->snail_grazed); }

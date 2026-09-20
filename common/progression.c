@@ -171,6 +171,7 @@ const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {   /* rows in SD_IDX_* order; the BIT
     { SD_ITEM_BASS,   "bass",   "BASS STACK",  "A SPEAKER ON THE SAND.",    "THE DROP SHAKES BUBBLES",      SD_PRICE_BASS },
     { SD_ITEM_GLOW,   "glow",   "GLOW STICKS", "CRACKED AND SCATTERED.",    "THEY GLOW AFTER DARK",         SD_PRICE_GLOW },
     { SD_ITEM_TOTEM,  "totem",  "TOTEM",       "A RAIL TOTEM IN THE SAND.", "FIND YOUR FRIENDS BY IT",      SD_PRICE_TOTEM },
+    { SD_ITEM_DISCO,  "disco",  "DISCO BALL",  "IT DROPS AND SPINS WHEN",   "THE PARTY STARTS. OR TAP IT",  SD_PRICE_DISCO },
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;

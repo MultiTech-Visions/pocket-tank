@@ -50,7 +50,7 @@
 #define VEG_BEDS_MAX 4                         /* + the shop's sword plant, bed 3 (2026-09-15:
                                                 * live only once bought; tank_veg_beds) */
 typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
-#define SD_ITEM_N 7                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
+#define SD_ITEM_N 8                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
 #define VEG_START  0.35f                       /* a fresh tank (and a bought plant): comfortable cover */
 #define VEG_NUB    0.03f                       /* trim floor: ~13 px green stubble */
 #define VEG_BARE   0.10f                       /* tallest bed under this = no cover
@@ -333,6 +333,7 @@ typedef struct tank {
     int8_t   totem_carrier;      /* the fish leading the whole event, or -1 */
     float    totem_held_s;       /* seconds in the current phase */
     uint8_t  totem_phase;        /* TOTEM_* above */
+    float    disco_drop, disco_spin, disco_show_s;   /* the ball: lowered fraction, turns, show left (not saved) */
     bool     totem_planted;      /* standing in the sand at the party, not in a mouth */
     float    totem_party_x;      /* where it was slammed down, and the lean it kept */
     float    totem_party_ang;
@@ -556,10 +557,11 @@ enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 
         * touches the fish - it is the tank's night out, not theirs. */
        SD_ITEM_LASER = 1u << (SD_LOCAL_BIT0 + 0), SD_ITEM_BASS  = 1u << (SD_LOCAL_BIT0 + 1),
        SD_ITEM_GLOW  = 1u << (SD_LOCAL_BIT0 + 2), SD_ITEM_TOTEM = 1u << (SD_LOCAL_BIT0 + 3),
+       SD_ITEM_DISCO = 1u << (SD_LOCAL_BIT0 + 4),
        SD_ITEM_COUNT = SD_ITEM_N };
 /* item INDEXES (the row in SD_ITEMS[], the shop rows, decor_x[]) */
 enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_CASTLE = 2,
-       SD_IDX_LASER = 3, SD_IDX_BASS = 4, SD_IDX_GLOW = 5, SD_IDX_TOTEM = 6 };
+       SD_IDX_LASER = 3, SD_IDX_BASS = 4, SD_IDX_GLOW = 5, SD_IDX_TOTEM = 6, SD_IDX_DISCO = 7 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -591,6 +593,11 @@ bool  tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *car
 /* the party at the speaker is on (the disco ball and anything else that wants
  * to join in reads this) */
 bool  tank_bass_party(const tank_t *t);
+/* the disco ball: where it is right now (y travels as it lowers), how far
+ * down it has come (0 parked .. 1 fully lowered) and its spin in turns */
+void  tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin);
+bool  tank_disco_hit(const tank_t *t, float x, float y);   /* a tap on the ball itself */
+void  tank_disco_toggle(tank_t *t);                        /* the keeper's show: on, or off */
 void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
@@ -656,6 +663,20 @@ enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
 #define TOTEM_PLANTED_S    45.0f
 #define TOTEM_ARRIVE_PX    50.0f            /* close enough to the speaker, or to home */
 #define TOTEM_COOL_S       90.0f            /* the quiet after the whole thing */
+/* ---- the disco ball (2026-09-20) -----------------------------------------
+ * It hangs at the top of the tank wherever the keeper put it. When a party
+ * starts at the speaker it lowers itself to the middle of the water and
+ * spins, throwing rays; when the party ends it winds back up. Out of party
+ * time the keeper can tap it to run the show by hand - tap again to stop,
+ * and it stops by itself after DISCO_SHOW_S. */
+#define DISCO_HALF_W    14
+#define DISCO_X_DEFAULT (TANK_W * 0.62f)
+#define DISCO_TOP_Y     26.0f               /* parked, just under the surface */
+#define DISCO_MID_Y     (TANK_H * 0.46f)    /* lowered, out in the middle of the water */
+#define DISCO_R         13.0f
+#define DISCO_DROP_S    3.5f                /* seconds to lower or raise */
+#define DISCO_SHOW_S    30.0f               /* a tap-started show stops itself */
+#define DISCO_SPIN_RPS  0.32f               /* turns a second once it is down */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16

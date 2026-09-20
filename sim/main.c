@@ -1903,6 +1903,18 @@ static int selftest_shop(void) {
           if (tank.totem_carrier >= 0) { printf("FAIL: a frightened fish kept parading\n"); return 1; }
           tank.fish[1].stress = 1;
           printf("selftest-shop: the totem: a shy fish leaves it, a sociable one lifts it, a fright puts it back\n"); }
+        /* the disco ball (2026-09-20): parked until a party or a tap */
+        { tank.sd_unlocks |= SD_ITEM_DISCO; tank_decor_set(&tank, SD_IDX_DISCO, 270, DECOR_Z_MIDDLE);
+          float x, y, drop, spin; SHOP_TICK(60);
+          tank_disco_state(&tank, &x, &y, &drop, &spin);
+          if (drop > 0.01f) { printf("FAIL: the disco ball lowered itself with no party and no tap\n"); return 1; }
+          tank_disco_toggle(&tank); SHOP_TICK((int)(60 * (DISCO_DROP_S + 0.5f)));
+          tank_disco_state(&tank, &x, &y, &drop, &spin);
+          if (drop < 0.99f || fabsf(y - DISCO_MID_Y) > 0.5f) { printf("FAIL: a tap did not bring the ball down (%.2f, y %.0f)\n", drop, y); return 1; }
+          tank_disco_toggle(&tank); SHOP_TICK((int)(60 * (DISCO_DROP_S + 0.5f)));
+          tank_disco_state(&tank, &x, &y, &drop, &spin);
+          if (drop > 0.01f) { printf("FAIL: a second tap did not send the ball back up\n"); return 1; }
+          printf("selftest-shop: the disco ball: parked until asked, down to the middle on a tap, back up on the next\n"); }
         printf("selftest-shop: the festival shelf: MORE turns the page; rig, stack, sticks and totem bought and placed (the rig hangs); the drop shook %d bubbles; the spots rode the save, a 09-16 save left them at their defaults\n", near);
     }
     /* the save carries it all */
@@ -2247,6 +2259,10 @@ int main(int argc, char **argv) {
                     printf("fish page: %s, from the card\n", tank.fish[fishpage_fish].name);
                 }
                 else if (best >= 0) selected_fish = (best == selected_fish) ? -1 : best;
+                else if (tank_disco_hit(&tank, (float)press_x, (float)press_y)) {   /* the ball: run the show by hand */
+                    tank_disco_toggle(&tank);
+                    printf("disco ball: %s\n", tank.disco_show_s > 0 ? "lowering, show on (30 s)" : "show off, winding back up");
+                }
                 else if (tank_snail_hit(&tank, (float)press_x, (float)press_y))   /* the snail: its card (2026-09-16) */
                     selected_fish = selected_fish == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL;
                 else if (selected_fish >= 0) selected_fish = -1;   /* card up: empty-glass tap dismisses, nothing else */

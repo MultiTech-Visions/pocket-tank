@@ -288,6 +288,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < N_FISH_MAX; i++) s_glow_cool[i] = 0;
     t->totem_carrier = -1; t->totem_held_s = 0; t->totem_phase = TOTEM_OFF;
     t->totem_planted = false; t->totem_party_x = t->totem_party_ang = 0; s_totem_cool = 0;
+    t->disco_drop = t->disco_spin = t->disco_show_s = 0;
     for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
     s_emit_clock = 0;
     t->tank_ms_bits = 0; t->tank_ms_seen = 0; t->ask_rr = 0; t->advisor_asks = 0;
@@ -725,9 +726,11 @@ static const struct { float half_w, x_default; bool hangs; uint8_t z_count; } DE
     [SD_IDX_BASS]   = { BASS_HALF_W,   BASS_X_DEFAULT,   false, DECOR_Z_N },
     [SD_IDX_GLOW]   = { GLOW_HALF_W,   GLOW_X_DEFAULT,   false, DECOR_Z_N },
     [SD_IDX_TOTEM]  = { TOTEM_HALF_W,  TOTEM_X_DEFAULT,  false, DECOR_Z_N },
+    [SD_IDX_DISCO]  = { DISCO_HALF_W,  DISCO_X_DEFAULT,  true,  DECOR_Z_N },
 };
 static const uint32_t SD_BIT[SD_ITEM_COUNT] = { SD_ITEM_PLANT, SD_ITEM_SNAIL, SD_ITEM_CASTLE,
-                                                SD_ITEM_LASER, SD_ITEM_BASS, SD_ITEM_GLOW, SD_ITEM_TOTEM };
+                                                SD_ITEM_LASER, SD_ITEM_BASS, SD_ITEM_GLOW, SD_ITEM_TOTEM,
+                                                SD_ITEM_DISCO };
 uint32_t tank_item_bit(int item) { return (item >= 0 && item < SD_ITEM_COUNT) ? SD_BIT[item] : 0; }
 bool  tank_decor_placeable(int item) { return item >= 0 && item < SD_ITEM_COUNT && DECOR[item].half_w > 0; }
 bool  tank_decor_hangs(int item) { return tank_decor_placeable(item) && DECOR[item].hangs; }
@@ -754,6 +757,7 @@ float tank_decor_top_y(const tank_t *t, int item) {
     case SD_IDX_BASS:   return TANK_H - 16 - 30;
     case SD_IDX_GLOW:   return TANK_H - 16 - 16;
     case SD_IDX_TOTEM:  return TANK_H - 16 - TOTEM_H;
+    case SD_IDX_DISCO:  return 0;                                 /* hung: the rays reach down from it */
     default: return TANK_H - 16;
     }
 }
@@ -911,6 +915,36 @@ bool tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carr
     return false;                                       /* home, upright, where the keeper put it */
 }
 bool tank_bass_party(const tank_t *t) { return t->totem_phase == TOTEM_HOLD || t->totem_phase == TOTEM_PLANTED; }
+
+/* ---- the disco ball (tank.h) ---- */
+void tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin) {
+    if (x) *x = tank_decor_x(t, SD_IDX_DISCO);
+    if (y) *y = DISCO_TOP_Y + (DISCO_MID_Y - DISCO_TOP_Y) * t->disco_drop;
+    if (drop) *drop = t->disco_drop;
+    if (spin) *spin = t->disco_spin;
+}
+bool tank_disco_hit(const tank_t *t, float x, float y) {
+    if (!tank_bit_live(t, SD_ITEM_DISCO)) return false;
+    float bx, by; tank_disco_state(t, &bx, &by, NULL, NULL);
+    return tank_dist(x, y, bx, by) <= DISCO_R + 12.0f;          /* the ball, plus a fingertip */
+}
+void tank_disco_toggle(tank_t *t) {
+    if (!tank_bit_live(t, SD_ITEM_DISCO)) return;
+    t->disco_show_s = t->disco_show_s > 0 ? 0.0f : DISCO_SHOW_S;   /* tap on, tap off */
+}
+static void disco_tick(tank_t *t, float dt) {
+    if (!tank_bit_live(t, SD_ITEM_DISCO)) { t->disco_drop = 0; t->disco_show_s = 0; return; }
+    if (t->disco_show_s > 0) t->disco_show_s -= dt;              /* the keeper's show times out */
+    bool want = tank_bass_party(t) || t->disco_show_s > 0;        /* a party always wins */
+    float target = want ? 1.0f : 0.0f;
+    float step = dt / DISCO_DROP_S;
+    if (t->disco_drop < target) t->disco_drop = t->disco_drop + step > target ? target : t->disco_drop + step;
+    if (t->disco_drop > target) t->disco_drop = t->disco_drop - step < target ? target : t->disco_drop - step;
+    if (t->disco_drop > 0.02f) {                                 /* it only turns once it is on its way down */
+        t->disco_spin += DISCO_SPIN_RPS * dt * t->disco_drop;
+        if (t->disco_spin > 1.0f) t->disco_spin -= 1.0f;
+    }
+}
 
 static void totem_end(tank_t *t) {
     t->totem_phase = TOTEM_OFF; t->totem_planted = false;
@@ -1718,6 +1752,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     bass_tick(t);
     glow_tick(t, dt);
     totem_tick(t, dt);
+    disco_tick(t, dt);
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {
