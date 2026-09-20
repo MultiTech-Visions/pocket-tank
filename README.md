@@ -494,24 +494,44 @@ tell how long it was away cannot let its fish live the missing days. Stopping
 at 2 percent leaves enough in the cell to keep the clock running. Press PWR
 to bring it back.
 
-**A Windows upgrader, if you'd rather double-click something.** Every push to
-`main` that touches the firmware also builds `PocketTankUpgrade.exe` and
-attaches it to the repo's `windows-upgrader` release, so the download link
-never changes (`.github/workflows/win-upgrader.yml`). Download it, plug the
-tank in, double-click. It rewrites the bootloader, the partition table and the
-app, and writes nothing else, so the save at NVS `0x9000` and the 8 MB model
-partition are left exactly as they were. Before the exe is ever built,
-`tools/win_upgrade/collect.py` reads the real offsets out of the build's
+**An upgrader you double-click, on Windows or on a Mac.** Every push to
+`main` that touches the firmware builds all three and attaches them to the
+repo's `upgrader` release, so the download links never change
+(`.github/workflows/upgrader.yml`):
+
+| You have | Download |
+| --- | --- |
+| Windows | `PocketTankUpgrade.exe` |
+| Mac, Apple silicon | `PocketTankUpgrade-macOS-AppleSilicon.zip` |
+| Mac, Intel | `PocketTankUpgrade-macOS-Intel.zip` |
+
+Download yours, plug the tank in, double-click. The Mac downloads unzip
+themselves and leave a `PocketTankUpgrade.command`, which is what Finder
+needs to open a Terminal on it; they ship zipped because a release asset
+does not carry the executable bit and Finder will not run a file that has
+lost it. All three are the same script (`tools/upgrade/pocket_tank_upgrade.py`)
+bundled with esptool by PyInstaller — the wording that differs between a PC
+and a Mac is a lookup in one table, so the upgrade itself is written once.
+
+It rewrites the bootloader, the partition table and the app, and writes
+nothing else, so the save at NVS `0x9000` and the 8 MB model partition are
+left exactly as they were. Before any of them is built,
+`tools/upgrade/collect.py` reads the real offsets out of the build's
 `flasher_args.json`, measures each image against `firmware/partitions.csv`,
 and refuses to produce an upgrader at all if any of them could reach `nvs`,
-`phy_init`, `model` or `storage`. The exe is unsigned, so SmartScreen asks
-once: *More info*, then *Run anyway*. It carries no model partition, so a
-brand-new board still wants the browser installer for its first flash.
+`phy_init`, `model` or `storage`.
 
-To host your own copy, `tools/make_installer.py` turns a firmware build plus
-the shipped model into one static folder (`installer/dist/`: the page, a
-manifest with the four parts and their flash offsets, the binaries, and the
-vendored flasher). Any HTTPS static host will do, GitHub Pages included;
+Nothing is signed, so the first run is blocked on both: Windows SmartScreen
+asks once (*More info*, then *Run anyway*), and macOS wants **System Settings
+→ Privacy & Security → Open Anyway** before it will start. They carry no
+model partition, so a brand-new board still needs a full first flash.
+
+Upstream also ships a browser installer that flashes over Web Serial, which
+this fork does not publish: it only works in Chrome and Edge, and the
+double-click upgraders above cover the same ground everywhere. The code is
+still here if you want to host it yourself — `tools/make_installer.py` turns
+a firmware build plus the shipped model into one static folder
+(`installer/dist/`) that any HTTPS host will serve;
 [installer/README.md](installer/README.md) has the details.
 
 ## Run it on real hardware
@@ -520,8 +540,8 @@ The target is the Waveshare **ESP32-S3-Touch-AMOLED-1.8** (ESP32-S3R8,
 16 MB flash, 8 MB PSRAM, 368×448 AMOLED, capacitive touch, IMU, PMIC, RTC).
 Both board revisions are supported and auto-detected. Touch targets sit
 10 px below where they are drawn, because fingers land a little low on a
-glass this small; the touch port corrects for it. The browser installer
-above is the no-toolchain path; this is the developer one.
+glass this small; the touch port corrects for it. The upgraders above are
+the no-toolchain path; this is the developer one.
 
 ```bash
 . ~/esp/esp-idf/export.sh
@@ -581,8 +601,8 @@ seven-minute prompt check before an overnight run is always worth it.
 - `installer/` — the browser installer page and the vendored ESP Web Tools
   bundle; `tools/make_installer.py` assembles the upload folder
 - `tools/` — the icon baker, the sound bank builder, the installer
-  assembler, a serial bench client, and `win_upgrade/` (the Windows
-  double-click upgrader and the guard that proves it cannot reach a save)
+  assembler, a serial bench client, and `upgrade/` (the Windows and macOS
+  double-click upgraders and the guard that proves they cannot reach a save)
 - `assets/icons/` — the pixel-art source for the stats card, the badges,
   the shop and the snail
 - `assets/sounds/` — the cues (16 kHz mono) and their levels

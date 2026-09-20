@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""collect.py - gather what the Windows upgrader flashes, and prove it is safe.
+"""collect.py - gather what the upgraders flash, and prove it is safe.
 
 Reads the firmware build's flasher_args.json (so a partition-layout change can
-never leave a stale offset baked into the exe), copies the three images the
+never leave a stale offset baked into a bundle), copies the three images the
 upgrade writes into one folder, and writes flash.json beside them for
 pocket_tank_upgrade.py to read at run time.
 
-    tools/win_upgrade/collect.py --build-dir firmware/build --out payload
+    tools/upgrade/collect.py --build-dir firmware/build --out payload
 
 The guard: every byte this will write is checked against the data partitions
 in firmware/partitions.csv. If an image has grown far enough to reach `nvs`
