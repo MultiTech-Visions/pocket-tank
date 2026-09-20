@@ -669,8 +669,7 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
  * opening 52 x 50 (an adult fish is ~37 x 22). */
 /* CASTLE_FY (the floor line the keep stands on) and CASTLE_ROWS (rows above
  * it the palette covers) are defined with veg_span above */
-#define CASTLE_ARCH_R 26                     /* the opening's half-width (and the vault's radius) */
-#define CASTLE_ARCH_S 24                     /* the spring line: straight jambs below, the vault above */
+/* CASTLE_ARCH_R / _S live in tank.h: the gate milestone needs the same numbers */
 #define CASTLE_TRIM   5                      /* the brick trim's width */
 enum { CT_LIGHT, CT_MID, CT_MIDDK, CT_DARK, CT_MORTAR, CT_MOSS_A, CT_MOSS_B,
        CT_BRICK_L, CT_BRICK, CT_BRICK_D, CT_ROOF_L, CT_ROOF, CT_ROOF_D, CT_INSIDE, CT_N };

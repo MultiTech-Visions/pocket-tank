@@ -114,6 +114,7 @@ typedef struct {
      * every stick on the sand. */
     float    glow_x[GLOW_N], glow_y[GLOW_N], glow_ang[GLOW_N];
     uint32_t sd_stowed;      /* owned but out of the tank (2026-09-20) */
+    int16_t  fish_parties[N_FISH_MAX];   /* bass parties attended, per fish (2026-09-20) */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -224,7 +225,7 @@ bool progression_save_tail_is_last(void) {
        8-byte aligned (it carries an int64), so an exact == would fail purely
        on padding. What this really asserts is that no upstream sync has
        appended a named field after this fork's tail. */
-    size_t end = offsetof(save_t, sd_stowed) + sizeof(((save_t *)0)->sd_stowed);
+    size_t end = offsetof(save_t, fish_parties) + sizeof(((save_t *)0)->fish_parties);
     return end <= sizeof(save_t) && sizeof(save_t) - end < _Alignof(save_t);
 }
 bool progression_stow(tank_t *t, int item, bool stow) {
@@ -232,8 +233,29 @@ bool progression_stow(tank_t *t, int item, bool stow) {
     uint32_t bit = SD_ITEMS[item].bit;
     if (!(t->sd_unlocks & bit)) return false;                 /* not bought: nothing to put away */
     if (((t->sd_stowed & bit) != 0) == stow) return false;    /* already where it is being asked to be */
-    if (stow) t->sd_stowed |= bit; else t->sd_stowed &= ~bit;
-    if (!stow && item == SD_IDX_SNAIL && t->snail_x < 0) tank_snail_place(t);   /* never placed: give it a spot */
+    if (stow) {
+        /* REMOVE means gone, not parked. Taking a thing out of a real tank
+           loses where it stood and how it lay, and putting it back is a fresh
+           placement - so the sticks come back as a pile, the plant comes back
+           young, the snail picks a new spot, and the placement page runs. */
+        t->sd_stowed |= bit;
+        t->decor_x[item] = 0;
+        t->decor_z[item] = (uint8_t)(item == SD_IDX_CASTLE ? DECOR_Z_FRONT : DECOR_Z_MIDDLE);
+        switch (item) {
+        case SD_IDX_SNAIL: t->snail_x = t->snail_y = -1; t->snail_cell = -1; t->snail_graze = 0; break;
+        case SD_IDX_PLANT: for (int i = 0; i < VEG_FRONDS_MAX; i++) t->veg_h[3][i] = 0; tank_veg_sync(t); break;
+        case SD_IDX_GLOW:  for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; } break;
+        case SD_IDX_TOTEM: t->totem_phase = TOTEM_OFF; t->totem_carrier = -1; t->totem_planted = false; break;
+        case SD_IDX_DISCO: t->disco_drop = t->disco_spin = t->disco_show_s = 0; break;
+        default: break;
+        }
+    } else {
+        t->sd_stowed &= ~bit;                         /* back in, and laid out fresh */
+        if (item == SD_IDX_PLANT)  tank_plant_place(t);
+        if (item == SD_IDX_SNAIL)  tank_snail_place(t);
+        if (item == SD_IDX_CASTLE) tank_castle_place(t);
+        if (item == SD_IDX_GLOW)   tank_glow_place(t);
+    }
     progression_save(t);
     return true;
 }
@@ -590,6 +612,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         if (sv.decor_x[i] > 0) tank_decor_set(t, i, sv.decor_x[i], z); else t->decor_z[i] = (uint8_t)z;   /* x 0 = the default spot */
     }
     t->sd_stowed = sv.sd_stowed & t->sd_unlocks;     /* an older save reads 0: everything owned is in the tank */
+    for (int i = 0; i < t->n_fish; i++) t->fish[i].parties = sv.fish_parties[i];
     if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
         if (sv.glow_x[0] > 0) {
             for (int i = 0; i < GLOW_N; i++) {
@@ -784,6 +807,7 @@ void progression_save(tank_t *t) {
         sv.glow_x[i] = t->glow[i].x; sv.glow_y[i] = t->glow[i].y; sv.glow_ang[i] = t->glow[i].ang;
     }
     sv.sd_stowed = t->sd_stowed;
+    for (int i = 0; i < N_FISH_MAX; i++) sv.fish_parties[i] = i < t->n_fish ? t->fish[i].parties : 0;
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);
     sv.bubble_x = t->bubble_x;

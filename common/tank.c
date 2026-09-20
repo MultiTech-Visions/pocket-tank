@@ -171,7 +171,7 @@ void tank_make_fish(tank_t *t, int slot, int preset, float sociable, float bold,
     f->eaten = 0; f->eaten_player = 0; f->at_bubbles = false;
     /* its own spot by the reef: bolder fish rest a little further out */
     f->rest_dx = 8 + slot * 24 + bold * 14; f->rest_dy = -slot * 9 - tank_randf(t, 0, 10);   /* a body apart (was 9 px per slot) */
-    f->sig = 0xffffffffu; f->ms_bits = 0; f->ms_seen = 0;
+    f->sig = 0xffffffffu; f->ms_bits = 0; f->parties = 0; f->ms_seen = 0;
     f->color = p->color; f->fin = p->fin; f->accent = p->accent;
     f->parent_a = f->parent_b = -1;
 }
@@ -840,7 +840,7 @@ static void glow_tick(tank_t *t, float dt) {
                                                                             what walks the pile down the tank */
                 s->spin = tank_randf(t, -1.4f, 1.4f);       /* it tumbles on the way down */
                 s_glow_cool[who] = t->night ? GLOW_PLAY_COOL_NIGHT_S : GLOW_PLAY_COOL_S;
-                if (high && !rattled) tank_emit(TEV_GLOW_PLAY, who);
+                if (high && !rattled) { t->fish[who].ms_bits |= MS_GLOW_TOSS; tank_emit(TEV_GLOW_PLAY, who); }
             }
             continue;
         }
@@ -916,6 +916,22 @@ bool tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carr
 }
 bool tank_bass_party(const tank_t *t) { return t->totem_phase == TOTEM_HOLD || t->totem_phase == TOTEM_PLANTED; }
 
+/* the castle's gate: fish swim freely through everything in this tank, so
+ * "through the gate" is purely a question of where the fish is - the opening
+ * is CASTLE_ARCH_R either side of the castle's centre, from the sand up to
+ * the top of the vault. */
+bool tank_in_castle_gate(const tank_t *t, int fish) {
+    if (!tank_bit_live(t, SD_ITEM_CASTLE) || fish < 0 || fish >= t->n_fish) return false;
+    const fish_t *f = &t->fish[fish];
+    float lx = f->x - tank_decor_x(t, SD_IDX_CASTLE), floor_y = TANK_H - 16.0f;
+    return fabsf(lx) <= CASTLE_ARCH_R && f->y <= floor_y && f->y >= floor_y - (CASTLE_ARCH_S + CASTLE_ARCH_R);
+}
+static void gate_tick(tank_t *t) {
+    for (int i = 0; i < t->n_fish; i++)
+        if (!(t->fish[i].ms_bits & MS_CASTLE_GATE) && tank_in_castle_gate(t, i))
+            t->fish[i].ms_bits |= MS_CASTLE_GATE;
+}
+
 /* ---- the disco ball (tank.h) ---- */
 void tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin) {
     if (x) *x = tank_decor_x(t, SD_IDX_DISCO);
@@ -947,6 +963,7 @@ static void disco_tick(tank_t *t, float dt) {
 }
 
 static void totem_end(tank_t *t) {
+    if (t->totem_phase != TOTEM_OFF) t->light_manual_off = t->totem_light_was;   /* the light goes back how it was */
     t->totem_phase = TOTEM_OFF; t->totem_planted = false;
     t->totem_carrier = -1; t->totem_held_s = 0;
     s_totem_cool = TOTEM_COOL_S;
@@ -977,6 +994,12 @@ static void totem_tick(tank_t *t, float dt) {
                 t->totem_party_x = clampf(f->x, DECOR_MARGIN + TOTEM_HALF_W, TANK_W - DECOR_MARGIN - TOTEM_HALF_W);
                 t->totem_party_ang = tank_randf(t, 0.12f, 0.26f) * (tank_randf(t, -1, 1) < 0 ? -1.0f : 1.0f);
                 t->totem_phase = TOTEM_PLANTED; t->totem_held_s = 0;
+                for (int i = 0; i < t->n_fish; i++) {         /* everyone who stayed for it was AT the party */
+                    fish_t *g = &t->fish[i];
+                    if (fabsf(g->x - bx) > 130.0f) continue;
+                    if (g->parties < 30000) g->parties++;
+                    g->ms_bits |= MS_BASS_PARTY;
+                }
             }
             break;
         case TOTEM_PLANTED:
@@ -994,11 +1017,19 @@ static void totem_tick(tank_t *t, float dt) {
     if (s_totem_cool > 0 || t->night) return;            /* it is lifted by day; the party may run into the dark */
     float tx = tank_decor_x(t, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
     for (int i = 0; i < t->n_fish; i++) {
-        const fish_t *f = &t->fish[i];
-        if (f->sociable < TOTEM_SOCIAL_MIN || f->stress > 5.0f) continue;   /* it takes a confident joiner */
+        fish_t *f = &t->fish[i];
+        /* a first-timer has to be really sociable; a fish that has been to
+           parties before is keener, down to TOTEM_SOCIAL_FLOOR */
+        float bar = TOTEM_SOCIAL_MIN - f->parties * TOTEM_PARTY_BONUS;
+        if (bar < TOTEM_SOCIAL_FLOOR) bar = TOTEM_SOCIAL_FLOOR;
+        if (f->sociable < bar || f->stress > 5.0f) continue;
         if (tank_dist(f->x, f->y, tx, ty) > TOTEM_REACH) continue;
         t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
         t->totem_phase = TOTEM_WALK; t->totem_planted = false;
+        /* the lights go out for it: a parade is a night-time thing */
+        t->totem_light_was = t->light_manual_off;
+        t->light_manual_off = true;
+        f->ms_bits |= MS_TOTEM_HOLD;
         tank_emit(TEV_TOTEM_LIFT, i);
         break;
     }
@@ -1753,6 +1784,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     glow_tick(t, dt);
     totem_tick(t, dt);
     disco_tick(t, dt);
+    gate_tick(t);
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {

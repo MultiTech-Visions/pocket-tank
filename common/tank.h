@@ -89,6 +89,7 @@ typedef enum {
 
 extern const char *const GOAL_NAMES[GOAL_COUNT];   /* schema.md lowercase names */
 
+#define MS_LOCAL_BIT0 20        /* this fork's milestone bits start here (see the MS_ enum) */
 typedef enum { STAGE_FRY, STAGE_JUV, STAGE_ADULT, STAGE_ELDER } stage_t;
 extern const char *const STAGE_NAMES[4];           /* schema.md v2 stage tokens */
 extern const char *const TRAINED_NAMES[N_TRAINED_NAMES]; /* mira bolt kelp nori */
@@ -114,6 +115,14 @@ enum {
      * saves keep their layout - cleared on load, never set, never shown */
     MS_RETIRED_6 = 1u << 6, MS_RETIRED_7 = 1u << 7, MS_FIRST_FOLLOW = 1u << 8,
     MS_REACHED_JUV = 1u << 9, MS_REACHED_ADULT = 1u << 10, MS_REACHED_ELDER = 1u << 11,
+    /* This fork's own milestones start high, for the same reason the shop
+     * items do: upstream keeps taking the next low bit, and a sync must never
+     * renumber something already sitting in somebody's save. They are HIDDEN
+     * until earned - they show on the fish's own page and nowhere else. */
+    MS_CASTLE_GATE = 1u << (MS_LOCAL_BIT0 + 0),   /* swam through the castle's gate */
+    MS_GLOW_TOSS   = 1u << (MS_LOCAL_BIT0 + 1),   /* carried a glow stick up and let it go */
+    MS_TOTEM_HOLD  = 1u << (MS_LOCAL_BIT0 + 2),   /* lifted the totem and led a parade */
+    MS_BASS_PARTY  = 1u << (MS_LOCAL_BIT0 + 3),   /* stayed for a party at the speaker */
     MS_FISH_COUNT = 12
 };
 #define MS_RETIRED_MASK (MS_RETIRED_6 | MS_RETIRED_7)
@@ -178,6 +187,8 @@ typedef struct {
     float  rest_dx, rest_dy;/* this fish's own spot by the reef (individuation) */
     uint32_t sig;           /* coarse state signature at the last advisor ask */
     uint32_t ms_bits;       /* MS_* milestones reached */
+    int16_t  parties;       /* bass parties this fish has been to (2026-09-20). It makes a fish
+                             * keener to lift the totem next time; saved in this fork's own tail. */
     uint32_t ms_seen;       /* MS_* the keeper has looked at on the milestones page (new = bits & ~seen) */
     /* colors as 0xRRGGBB, used by render only: the preset's, or the keeper's
      * picks from LOOK_BODY / LOOK_ACCENT (setup.c); saved per fish */
@@ -330,6 +341,7 @@ typedef struct tank {
     glow_t   glow[GLOW_N];
     /* the totem parade: who is carrying it, and for how long. Not saved - a
      * boot finds the totem back in the sand where the keeper put it. */
+    bool     totem_light_was;    /* the light state the parade interrupted, put back when it ends */
     int8_t   totem_carrier;      /* the fish leading the whole event, or -1 */
     float    totem_held_s;       /* seconds in the current phase */
     uint8_t  totem_phase;        /* TOTEM_* above */
@@ -597,6 +609,9 @@ bool  tank_bass_party(const tank_t *t);
  * down it has come (0 parked .. 1 fully lowered) and its spin in turns */
 void  tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin);
 bool  tank_disco_hit(const tank_t *t, float x, float y);   /* a tap on the ball itself */
+/* is this fish inside the castle's gate opening right now? (the milestone, and
+ * the only thing that ever asks - fish have no collision with anything) */
+bool  tank_in_castle_gate(const tank_t *t, int fish);
 void  tank_disco_toggle(tank_t *t);                        /* the keeper's show: on, or off */
 void  tank_castle_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
@@ -622,6 +637,8 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define CASTLE_HALF_W   92
 #define CASTLE_H        164                /* rows above the floor line (render.c CASTLE_ROWS) */
 #define CASTLE_SPIRE_H  146                /* the tallest spire: what the placement page highlights */
+#define CASTLE_ARCH_R   26                 /* the gate opening's half-width (render.c draws to these too) */
+#define CASTLE_ARCH_S   24                 /* the spring line: straight jambs below, the vault above */
 #define CASTLE_X_DEFAULT 300.0f
 #define LASER_HALF_W    18                 /* the bar under the surface: three emitters at a 14 px pitch */
 #define LASER_X_DEFAULT (TANK_W * 0.5f)
@@ -641,7 +658,9 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
  * speaker together. Hunger and fright still win: a fish on SEEK_FOOD,
  * FLEE_SHADOW or REST is never redirected, because those are the model's call
  * and this is not. The totem goes back to the keeper's spot when it ends. */
-#define TOTEM_SOCIAL_MIN 0.75f
+#define TOTEM_SOCIAL_MIN 0.75f              /* a first-timer has to be this sociable to lift it ... */
+#define TOTEM_PARTY_BONUS 0.04f             /* ... and every party it has been to lowers that bar ... */
+#define TOTEM_SOCIAL_FLOOR 0.45f            /* ... but never below this */
 #define TOTEM_REACH      26.0f
 /* The event, once someone lifts it. With a bass stack in the tank it is a
  * march to the speaker, a ninety-second party there, and a march home; with

@@ -1915,6 +1915,23 @@ static int selftest_shop(void) {
           tank_disco_state(&tank, &x, &y, &drop, &spin);
           if (drop > 0.01f) { printf("FAIL: a second tap did not send the ball back up\n"); return 1; }
           printf("selftest-shop: the disco ball: parked until asked, down to the middle on a tap, back up on the next\n"); }
+        /* REMOVE forgets (2026-09-20): the sticks come back as a pile */
+        { tank_glow_place(&tank); tank.glow[0].x += 90; tank.glow[1].x -= 60;
+          if (!progression_stow(&tank, SD_IDX_GLOW, true)) { printf("FAIL: the sticks would not go in the box\n"); return 1; }
+          if (tank_item_live(&tank, SD_IDX_GLOW)) { printf("FAIL: a boxed item still reads as live\n"); return 1; }
+          progression_stow(&tank, SD_IDX_GLOW, false);
+          float gx = tank_decor_x(&tank, SD_IDX_GLOW); int piled = 0;
+          for (int i = 0; i < GLOW_N; i++) if (fabsf(tank.glow[i].x - gx) < 20 && fabsf(tank.glow[i].y - GLOW_REST_Y) < 2) piled++;
+          if (piled != GLOW_N) { printf("FAIL: the sticks did not come back as a pile (%d of %d)\n", piled, GLOW_N); return 1; }
+          printf("selftest-shop: REMOVE forgets: scattered sticks came back as a tidy pile\n"); }
+        /* the rave milestones (2026-09-20), hidden until earned */
+        { tank.sd_unlocks |= SD_ITEM_CASTLE; tank_decor_set(&tank, SD_IDX_CASTLE, 300, DECOR_Z_FRONT);
+          tank.fish[0].ms_bits &= ~MS_CASTLE_GATE;
+          tank.fish[0].x = 300 + CASTLE_ARCH_R + 40; tank.fish[0].y = TANK_H - 30; SHOP_TICK(4);
+          if (tank.fish[0].ms_bits & MS_CASTLE_GATE) { printf("FAIL: a fish beside the castle earned the gate\n"); return 1; }
+          tank.fish[0].x = 300; SHOP_TICK(4);
+          if (!(tank.fish[0].ms_bits & MS_CASTLE_GATE)) { printf("FAIL: swimming through the gate earned nothing\n"); return 1; }
+          printf("selftest-shop: the castle gate milestone: earned inside the arch, not beside it\n"); }
         printf("selftest-shop: the festival shelf: MORE turns the page; rig, stack, sticks and totem bought and placed (the rig hangs); the drop shook %d bubbles; the spots rode the save, a 09-16 save left them at their defaults\n", near);
     }
     /* the save carries it all */

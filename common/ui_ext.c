@@ -128,7 +128,32 @@ static const struct {
     { "SOCIAL",    0x38dcc7, &icon_solo,     &icon_social,  { "SOLITARY AT 0, A SCHOOLER",    "AT 10. IT DRIFTS TOO, AND",    "DECIDES WHO IT FOLLOWS." } },
     { "BORED",     0xc58cff, NULL,           NULL,          { "HOW STALE ITS PASTIME IS.",    "EATING AND NIGHT REST NEVER",  "BORE. HIGH SENDS IT OFF." } },
 };
-static int g_fp_modal = -1;          /* the level whose explanation is up, or -1 */
+/* This fork's own milestones (tank.h MS_LOCAL_BIT0). They are HIDDEN until
+ * earned - nothing shows an empty slot - and they live here rather than on
+ * the overview page because that page's badge row is hard-capped at six
+ * across the full width. Tapping one says what earned it. */
+#define FP_MS_N 4
+#define FP_MS_X 268           /* clear of the longest stage line, e.g. ELDER - 24H 30M */
+#define FP_MS_Y 12
+#define FP_MS_DX 38
+static const struct { uint32_t bit; const icon_t *icon; const char *name; const char *d[3]; } FP_MS[FP_MS_N] = {
+    { MS_CASTLE_GATE, &icon_ms_castle_gate, "THROUGH THE GATE",
+      { "IT SWAM THROUGH THE CASTLE'S", "ARCH. NOTHING IN THIS TANK",  "IS SOLID - THEY GO ANYWHERE." } },
+    { MS_GLOW_TOSS,   &icon_ms_glow_toss,   "GLOW STICK TOSS",
+      { "IT CARRIED A GLOW STICK UP",   "AND LET GO NEAR THE TOP,",    "JUST TO WATCH IT SINK." } },
+    { MS_TOTEM_HOLD,  &icon_ms_totem_hold,  "TOTEM BEARER",
+      { "IT LIFTED THE TOTEM AND LED",  "A PARADE. THE LIGHTS GO OUT", "WHEN SOMEONE PICKS IT UP." } },
+    { MS_BASS_PARTY,  &icon_ms_bass_party,  "AT THE SPEAKER",
+      { "IT STAYED FOR A PARTY AT THE", "BASS STACK. EVERY ONE MAKES", "IT KEENER TO LEAD THE NEXT." } },
+};
+/* the i-th EARNED milestone, or -1: the strip packs left with no gaps */
+static int fp_ms_at(const fish_t *f, int slot) {
+    int n = 0;
+    for (int i = 0; i < FP_MS_N; i++)
+        if (f->ms_bits & FP_MS[i].bit) { if (n == slot) return i; n++; }
+    return -1;
+}
+static int g_fp_modal = -1;          /* the level (0..FP_N-1) or milestone (FP_N+) whose panel is up, or -1 */
 
 static float fp_value(const fish_t *f, int i) {      /* every level on one 0..10 scale */
     switch (i) {
@@ -196,9 +221,14 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
     render_text(fb, stride, 92, 12, 3, WHITE, f->name);
     { char line[48]; int age = (int)progression_age_s(t, fish);
       const char *stage = FP_STAGE[f->stage < 4 ? f->stage : 3];
-      if (age >= 3600) snprintf(line, sizeof line, "%s - TENDED %dH %dM", stage, age / 3600, (age % 3600) / 60);
-      else             snprintf(line, sizeof line, "%s - TENDED %dM", stage, age / 60);
+      if (age >= 3600) snprintf(line, sizeof line, "%s - %dH %dM", stage, age / 3600, (age % 3600) / 60);
+      else             snprintf(line, sizeof line, "%s - %dM", stage, age / 60);
       render_text(fb, stride, 92, 42, 2, TEAL, line); }
+    for (int i = 0, slot = 0; i < FP_MS_N; i++) {     /* earned milestones only - no empty slots */
+        if (!(f->ms_bits & FP_MS[i].bit)) continue;
+        render_icon(fb, stride, FP_MS_X + slot * FP_MS_DX, FP_MS_Y, FP_MS[i].icon, 255);
+        slot++;
+    }
     for (int x = 24; x < TANK_W - 24; x++) render_rect_blend(fb, stride, x, 70, 1, 1, DIM, 200);
 
     /* the eight levels. Every one of them is a button. */
@@ -251,6 +281,19 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
     render_rect(fb, stride, X, Y, W, H, PANEL);
     render_rect_edge(fb, stride, X, Y, W, H, TEAL);
     render_rect_edge(fb, stride, X + 1, Y + 1, W - 2, H - 2, INNER);
+    if (g_fp_modal >= FP_N) {                          /* a milestone's panel */
+        const int m = g_fp_modal - FP_N;
+        render_icon(fb, stride, X + (W - 32) / 2, Y + 8, FP_MS[m].icon, 255);
+        render_text(fb, stride, X + (W - render_text_w(FP_MS[m].name, 3)) / 2, Y + 44, 3, WHITE, FP_MS[m].name);
+        for (int i = 0; i < 3; i++)
+            render_text(fb, stride, X + (W - render_text_w(FP_MS[m].d[i], 2)) / 2, Y + 72 + i * 20, 2, TEAL, FP_MS[m].d[i]);
+        if (FP_MS[m].bit == MS_BASS_PARTY && f->parties > 0) {
+            char n[32]; snprintf(n, sizeof n, "%d SO FAR", f->parties);
+            render_text(fb, stride, X + (W - render_text_w(n, 2)) / 2, Y + 134, 2, WHITE, n);
+        }
+        render_text(fb, stride, X + (W - render_text_w("TAP TO CLOSE", 2)) / 2, Y + H - 20, 2, FAINT, "TAP TO CLOSE");
+        return;
+    }
     const char *label = FP_STAT[g_fp_modal].label;
     render_text(fb, stride, X + (W - render_text_w(label, 3)) / 2, Y + 18, 3, FP_STAT[g_fp_modal].rgb, label);
     for (int i = 0; i < 3; i++) {
@@ -261,9 +304,13 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
 }
 
 int ui_fish_page_tap(const tank_t *t, int fish, float x, float y) {
-    (void)t; (void)fish;
     if (g_fp_modal >= 0) { g_fp_modal = -1; return UI_FP_KEPT; }     /* any tap dismisses the explanation */
     if (x >= FP_CLOSE_X - 12 && y >= FP_CLOSE_Y - 8) return UI_FP_CLOSE;
+    if (fish >= 0 && fish < t->n_fish && y >= FP_MS_Y - 8 && y < FP_MS_Y + 40 && x >= FP_MS_X - 8) {
+        int slot = (int)((x - (FP_MS_X - 8)) / FP_MS_DX);            /* an earned milestone's badge */
+        int m = fp_ms_at(&t->fish[fish], slot);
+        if (m >= 0) { g_fp_modal = FP_N + m; return UI_FP_KEPT; }
+    }
     for (int i = 0; i < FP_N; i++) {                                 /* a generous band around each bar */
         int bx, by; fp_slot(i, &bx, &by);
         if (x >= bx - 10 && x < bx + FP_COLW + 10 && y >= by - 6 && y < by + 40) {   /* label, icons and bar are all the button */

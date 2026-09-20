@@ -251,6 +251,17 @@ at a lean and joins them for the other forty-five; then it pulls the totem
 back out, leads everyone home, plants it where it started and they all go back
 to their own business. With no speaker it is simply a parade and a walk home.
 
+**The lights go out by themselves** when someone lifts the totem: a parade is
+a night-time thing. They go back to however you had them when it ends.
+
+**Four things a fish can earn here**, and unlike the badges on the overview
+page these are hidden completely until they happen - they show on the fish's
+own page, and you can tap one to read what earned it. Swimming through the
+castle's gate; carrying a glow stick up and letting it go; lifting the totem
+and leading a parade; and staying for a party at the speaker. That last one is
+counted rather than just ticked, and the more parties a fish has been to the
+keener it is to pick the totem up next time.
+
 **The disco ball** (120) hangs at the top of the tank wherever you put it.
 When a party starts at the speaker it lowers itself into the middle of the
 water and spins, throwing coloured rays across the tank, and winds back up
@@ -281,12 +292,13 @@ button that opens the same page again. The snail is not for placing; it
 goes wherever the algae is.
 
 **Taking something out again.** Buying is forever, but being *in the tank* is
-not. An owned item's row in the shop has a REMOVE button that puts it in the
-box: it stops being drawn and stops doing whatever it does, while everything
-about it is kept - where it stood, the plant's leaves, the snail's spot,
-wherever the fish left the glow sticks. PUT BACK returns it exactly as it was,
-and for a placeable piece the placement page opens so you can say where. Use
-it to reposition something, or just to change the tank for a while. The festival pieces place the same way; the
+not. An owned item's row in the shop has a REMOVE button that takes it
+out: it stops being drawn and stops doing whatever it does. Removing really
+does forget, the way taking a thing out of a real tank would - the glow sticks
+come back as a tidy pile wherever you next put them, the plant comes back
+young, the snail picks a fresh spot, and PUT BACK runs the placement page
+again. Use it to reposition something, or just to change the tank for a
+while; it stays bought either way. The festival pieces place the same way; the
 laser rig's stripe marks the column under it.
 
 **The castle.** The third thing in the shop (150) is a stone castle with
