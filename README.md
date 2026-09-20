@@ -267,7 +267,15 @@ through them, or behind them: BEHIND, AMONG or IN FRONT. The tank redraws
 as you choose, a line under the bar says what to watch for, and DONE keeps
 it. If you change your mind later, the plant's row in the shop has a MOVE
 button that opens the same page again. The snail is not for placing; it
-goes wherever the algae is. The festival pieces place the same way; the
+goes wherever the algae is.
+
+**Taking something out again.** Buying is forever, but being *in the tank* is
+not. An owned item's row in the shop has a REMOVE button that puts it in the
+box: it stops being drawn and stops doing whatever it does, while everything
+about it is kept - where it stood, the plant's leaves, the snail's spot,
+wherever the fish left the glow sticks. PUT BACK returns it exactly as it was,
+and for a placeable piece the placement page opens so you can say where. Use
+it to reposition something, or just to change the tank for a while. The festival pieces place the same way; the
 laser rig's stripe marks the column under it.
 
 **The castle.** The third thing in the shop (150) is a stone castle with

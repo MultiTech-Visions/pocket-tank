@@ -423,7 +423,7 @@ static void draw_totem(ctx_t *c, const tank_t *t) {
 /* every festival piece on layer z (DECOR_Z_*), in item order */
 static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
     for (int i = SD_IDX_LASER; i <= SD_IDX_TOTEM; i++) {
-        if (!(t->sd_unlocks & SD_ITEMS[i].bit) || tank_decor_z(t, i) != z) continue;
+        if (!tank_bit_live(t, SD_ITEMS[i].bit) || tank_decor_z(t, i) != z) continue;
         if (i == SD_IDX_LASER) draw_laser(c, t);
         else if (i == SD_IDX_BASS) draw_bass(c, t);
         else if (i == SD_IDX_GLOW) draw_glow(c, t);
@@ -1006,7 +1006,7 @@ static inline void snail_put(ctx_t *c, int x, int y, int tone, float tint) {
  * or flat ON THE GLASS, its underside to the viewer, drawn after the algae
  * like the film itself (it is on the pane). */
 static void draw_snail(ctx_t *c, const tank_t *t, bool upright_pass) {
-    if (!(t->sd_unlocks & SD_ITEM_SNAIL) || t->snail_x < 0) return;
+    if (!tank_bit_live(t, SD_ITEM_SNAIL) || t->snail_x < 0) return;
     bool upright = tank_snail_upright(t);
     if (upright != upright_pass) return;
     int ox = (int)t->snail_x, oy = (int)(t->snail_y + SNAIL_SOLE_DY);
@@ -1036,7 +1036,7 @@ static void draw_snail(ctx_t *c, const tank_t *t, bool upright_pass) {
  * it is drawn live over a scene baked WITHOUT it, instead of a rebake per
  * frame) */
 static bool castle_state(const tank_t *t, int *cx, int *z, bool *placing) {
-    if (!(t->sd_unlocks & SD_ITEM_CASTLE)) { *cx = -1; *z = DECOR_Z_FRONT; *placing = false; return false; }
+    if (!tank_bit_live(t, SD_ITEM_CASTLE)) { *cx = -1; *z = DECOR_Z_FRONT; *placing = false; return false; }
     *cx = (int)tank_decor_x(t, 2); *z = tank_decor_z(t, 2);
     *placing = setup_is_place() && setup_item() == 2;
     return true;
@@ -1519,7 +1519,7 @@ static void snail_card_draw(ctx_t *c, const tank_t *t) {
 
 void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride) {
     if (fish_idx == RENDER_CARD_SNAIL) {
-        if (!(t->sd_unlocks & SD_ITEM_SNAIL) || t->snail_x < 0) return;
+        if (!tank_bit_live(t, SD_ITEM_SNAIL) || t->snail_x < 0) return;
         ctx_t sc = ctx_full(fb, stride, 1.0f);
         snail_card_draw(&sc, t);
         return;
@@ -2220,6 +2220,8 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
 #define SHP_PAGES     ((SD_ITEM_COUNT + SHP_PAGE_ROWS - 1) / SHP_PAGE_ROWS)
 #define SHP_MORE_X    200
 #define SHP_MORE_W    96
+#define SHP_BTN2_L    (SHP_MODAL_X + SHP_MODAL_W / 2 - 8 - MSP_HOW_W)   /* two buttons in one modal: MOVE | REMOVE */
+#define SHP_BTN2_R    (SHP_MODAL_X + SHP_MODAL_W / 2 + 8)
 static int  g_shp_modal = -1;        /* the item whose modal is up, or -1 */
 static bool g_shp_earn;              /* the HOW TO EARN modal is up */
 static int  g_shp_page;              /* the shelf on show */
@@ -2250,9 +2252,10 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
         if (owned) blit_icon(&c, SHP_COIN_X, top, shop_icon(i), 255); else blit_icon_locked(&c, SHP_COIN_X, top, shop_icon(i));
         draw_text(&c, 76, top + 2, 2, 0xffffff, it->name);
-        if (owned) draw_text(&c, 76, top + 20, 2, MSP_TEAL, "IN THE TANK");
+        bool live = tank_bit_live(t, it->bit);
+        if (owned) draw_text(&c, 76, top + 20, 2, live ? MSP_TEAL : MSP_DIM, live ? "IN THE TANK" : "IN THE BOX");
         else price_tag(&c, 76, top + 20, it->price, can ? MSP_TEAL : MSP_DIM);
-        if (owned)     button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "IN TANK", 2);
+        if (owned)     button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, live ? "IN TANK" : "IN BOX", 2);
         else if (can) { button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                         draw_text(&c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
         else           button(&c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
@@ -2292,10 +2295,17 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     draw_text(&c, X + (W - text_w(it->words, 2)) / 2, Y + 118, 2, MSP_TEAL, it->words);
     draw_text(&c, X + (W - text_w(it->words2, 2)) / 2, Y + 138, 2, MSP_TEAL, it->words2);
     const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - 12 - MSP_HOW_H;
-    if (owned && tank_decor_placeable(g_shp_modal)) {         /* a placeable piece: MOVE re-opens the placement page */
-        draw_text(&c, X + (W - text_w("IN THE TANK", 2)) / 2, Y + 164, 2, MSP_TEAL, "IN THE TANK");
-        button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "MOVE", 2);
-    } else if (owned) draw_text(&c, X + (W - text_w("IN THE TANK", 2)) / 2, by + 8, 2, MSP_TEAL, "IN THE TANK");
+    if (owned) {
+        bool live = tank_bit_live(t, it->bit);
+        const char *where = live ? "IN THE TANK" : "IN THE BOX";
+        draw_text(&c, X + (W - text_w(where, 2)) / 2, Y + 164, 2, live ? MSP_TEAL : MSP_DIM, where);
+        if (!live)                                           /* in the box: one button to bring it back */
+            button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "PUT BACK", 2);
+        else if (tank_decor_placeable(g_shp_modal)) {        /* MOVE re-opens the placement page; REMOVE boxes it */
+            button(&c, SHP_BTN2_L, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "MOVE", 2);
+            button(&c, SHP_BTN2_R, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM,  "REMOVE", 2);
+        } else button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "REMOVE", 2);
+    }
     else {
         char line[32]; snprintf(line, sizeof line, "%d", it->price);
         int pw = 20 + text_w(line, 2);
@@ -2312,12 +2322,23 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     if (g_shp_modal >= 0) {
         int item = g_shp_modal; const sd_item_t *it = &SD_ITEMS[item];
         bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
-        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - 12 - MSP_HOW_H;
-        bool on_btn = x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X && y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN;
+        bool live = tank_bit_live(t, it->bit);
+        const int by = SHP_MODAL_Y + SHP_MODAL_H - 12 - MSP_HOW_H;
+        bool row = y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN;
+        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2;
+        bool on_mid = row && x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X;
+        /* the two-button row splits at the modal's centre line */
+        bool on_left  = row && x <  SHP_MODAL_X + SHP_MODAL_W / 2;
+        bool on_right = row && x >= SHP_MODAL_X + SHP_MODAL_W / 2;
         g_shp_modal = -1;
-        if (on_btn && !owned && can) return SHOP_TAP_BUY + item;
-        if (on_btn && owned && tank_decor_placeable(item)) return SHOP_TAP_MOVE + item;
-        return SHOP_TAP_KEPT;
+        if (!owned) return (on_mid && can) ? SHOP_TAP_BUY + item : SHOP_TAP_KEPT;
+        if (!live)  return on_mid ? SHOP_TAP_STOW + item : SHOP_TAP_KEPT;       /* PUT BACK */
+        if (tank_decor_placeable(item)) {
+            if (on_left)  return SHOP_TAP_MOVE + item;
+            if (on_right) return SHOP_TAP_STOW + item;
+            return SHOP_TAP_KEPT;
+        }
+        return on_mid ? SHOP_TAP_STOW + item : SHOP_TAP_KEPT;                   /* REMOVE */
     }
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SHOP_TAP_CLOSE;
     if (x < SHP_EARN_X + SHP_EARN_W + 8 && y >= MSP_CLOSE_Y - 4) { g_shp_earn = true; return SHOP_TAP_KEPT; }

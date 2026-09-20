@@ -129,7 +129,11 @@ void render_milestones_leave(void);
  * HOW TO EARN and CLOSE turns it, and wraps) turned the page. Page state is
  * render-local; render_shop_leave clears it (back to the first shelf) when
  * the page closes. */
-enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32 };   /* BUY / MOVE + item index */
+enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2,
+       SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_STOW = 64 };   /* BUY / MOVE / STOW + item index */
+/* SHOP_TAP_STOW (2026-09-20): the owned item's REMOVE or PUT IN TANK button.
+ * The platform calls progression_stow to flip it, and when a piece comes back
+ * out of the box and can be placed, opens the placement page for it. */
 /* SHOP_TAP_MOVE (2026-09-16): an owned, placeable item's modal carries a MOVE
  * button - the platform closes the shop and opens setup.c's placement page
  * (setup_begin_place), the same page a purchase opens. */

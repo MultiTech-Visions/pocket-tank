@@ -290,6 +290,14 @@ typedef struct tank {
      * PX_PER_INCH to the inch. Both saved. */
     int32_t  algae_colonies;
     float    trim_px;
+    /* ---- the box (2026-09-20) ----
+     * Buying something is forever; having it IN THE TANK is not. An owned
+     * piece can be taken out and kept in the box: it stops being drawn and
+     * stops doing whatever it does, while everything about it is kept for
+     * when it goes back - where it stood, the plant's leaves, the snail's
+     * spot, wherever the fish left the glow sticks. That is how you
+     * reposition something, or just change the tank for a while. Saved. */
+    uint32_t sd_stowed;
     /* sand dollars (progression.c owns the economy; tank.c reads the unlocks):
      * the balance, the lifetime total, what the shop has sold (SD_ITEM_*),
      * and the ledger that keeps an award from paying twice - per fish (bits
@@ -624,6 +632,13 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16
 #define BASS_DROP_PUFFS 3                  /* free bubbles the drop shakes out of the cone */
+/* an item's SD_ITEM_* bit from its index - the bits are sparse now, so this
+ * is not 1u << item */
+uint32_t tank_item_bit(int item);
+/* owned AND in the tank, which is what every piece of behaviour should ask:
+ * a stowed item is still bought, but it is not here. */
+static inline bool tank_bit_live(const tank_t *t, uint32_t bit) { return (t->sd_unlocks & bit) && !(t->sd_stowed & bit); }
+static inline bool tank_item_live(const tank_t *t, int item) { return tank_bit_live(t, tank_item_bit(item)); }
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
 bool  tank_decor_hangs(int item);          /* hung under the surface (the laser rig), not on the sand */
 int   tank_decor_z_count(int item);        /* depths the item offers: 3 (BACK/MIDDLE/FRONT) or 2 (BACK/FRONT) */

@@ -2186,6 +2186,18 @@ int main(int argc, char **argv) {
             else if (shop_view) {                       /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(&tank, (float)press_x, (float)press_y);
                 if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
+                else if (r >= SHOP_TAP_STOW) {              /* REMOVE to the box, or PUT BACK */
+                    int item = r - SHOP_TAP_STOW;
+                    bool was_live = tank_item_live(&tank, item);
+                    if (progression_stow(&tank, item, was_live)) {
+                        snd(SND_CONFIRM, AUDIO_PITCH_ONE);
+                        printf("shop: %s %s\n", SD_ITEMS[item].name, was_live ? "out of the tank, kept in the box" : "back in the tank");
+                        if (!was_live && tank_decor_placeable(item)) {
+                            shop_view = false; render_shop_leave(); setup_begin_place(&tank, item);
+                            printf("shop: placement page up for the %s\n", SD_ITEMS[item].name);
+                        }
+                    }
+                }
                 else if (r >= SHOP_TAP_MOVE) {              /* a piece already in the tank: place it again */
                     int item = r - SHOP_TAP_MOVE;
                     shop_view = false; render_shop_leave(); setup_begin_place(&tank, item);

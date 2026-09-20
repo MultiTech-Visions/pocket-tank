@@ -169,7 +169,7 @@ static void help(void) {
     ESP_LOGI(TAG, "STAGED TANKS (the real one is parked first): fresh (new tank, two fry) | stages (fry juv adult elder) | stage <fish|all> <fry|juv|adult|elder>");
     ESP_LOGI(TAG, "stash (park the real tank now) | restore (bring it back) | age <fish> <hours>");
     ESP_LOGI(TAG, "milestones [off] (the page, on cue; on the device: tap the open stats card)");
-    ESP_LOGI(TAG, "shop [off] (the sand dollar page) | dollars [n] (grant n; the balance and the chore counts) | buy plant|snail|castle|laser|bass|glow|totem (at the price) | place [key] [x [behind|among|front]] (a piece's spot, the plant without a key; no x = the page; the castle has no among)");
+    ESP_LOGI(TAG, "shop [off] (the sand dollar page) | dollars [n] (grant n; the balance and the chore counts) | buy plant|snail|castle|laser|bass|glow|totem (at the price) | place [key] [x [behind|among|front]] (a piece's spot; no x = the page) | box <key> [out|in] (take it out of the tank, or put it back)");
     ESP_LOGI(TAG, "reset (the keeper's confirm prompt, as BOOT + tap opens it) | reset yes|no (answer it here) - YES WIPES EVERY SAVE, a parked tank too");
     ESP_LOGI(TAG, "setup [off] (the first-run flow: welcome, names, colours; off drops the panel - the birth flow too) | name <fish|idx> <newname> (up to %d letters, saved)", FISH_NAME_MAX);
     ESP_LOGI(TAG, "battery <pct>|real (a STAGED gauge, as if on battery at pct: the card's pill, and at 10 or less the low-battery notice + cue + the pill that stays; not saved) | snd battery (just the notice + cue)");
@@ -270,12 +270,19 @@ static void run(tank_t *t, char *line) {
         else if (progression_buy(t, item)) ESP_LOGI(TAG, "%s unlocked, %d sand dollars left%s", SD_ITEMS[item].name, (int)t->sd_balance,
                                                     tank_decor_placeable(item) ? " (`place` opens the placement page)" : "");
         else ESP_LOGW(TAG, "%s refused: owned, or %d < %d", SD_ITEMS[item].name, (int)t->sd_balance, SD_ITEMS[item].price);
+    } else if (!strcmp(c, "box") && argc > 1) {      /* box <key> [out|in]: take a piece out of the tank, or put it back */
+        int item = progression_sd_item_by_key(argv[1]);
+        if (item < 0) { ESP_LOGW(TAG, "box plant|snail|castle|laser|bass|glow|totem [out|in]"); return; }
+        bool stow = argc > 2 ? !strcmp(argv[2], "out") : tank_item_live(t, item);
+        if (progression_stow(t, item, stow)) ESP_LOGI(TAG, "%s is %s", SD_ITEMS[item].key, stow ? "in the box" : "back in the tank");
+        else ESP_LOGW(TAG, "%s: not bought, or already %s", SD_ITEMS[item].key, stow ? "in the box" : "in the tank");
     } else if (!strcmp(c, "place")) {                /* place [key] [x [behind|among|front]]: a piece's spot (the plant
                                                         without a key); no x = the page */
         int item = argc > 1 ? progression_sd_item_by_key(argv[1]) : -1, a = item >= 0 ? 2 : 1;
         if (item < 0) item = SD_IDX_PLANT;
         if (!tank_decor_placeable(item)) { ESP_LOGW(TAG, "the %s is not for placing", SD_ITEMS[item].name); return; }
         if (!(t->sd_unlocks & SD_ITEMS[item].bit)) { ESP_LOGW(TAG, "no %s in the tank (`buy %s`)", SD_ITEMS[item].key, SD_ITEMS[item].key); return; }
+        progression_stow(t, item, false);            /* placing it means putting it in the tank */
         if (argc <= a) { touch_port_show_shop(false); setup_begin_place(t, item); ESP_LOGI(TAG, "placement page up for the %s (drag on the glass, DEPTH, DONE)", SD_ITEMS[item].name); return; }
         int z = tank_decor_z(t, item);
         if (argc > a + 1) z = !strcmp(argv[a + 1], "behind") || !strcmp(argv[a + 1], "back") ? DECOR_Z_BACK : !strcmp(argv[a + 1], "front") ? DECOR_Z_FRONT : DECOR_Z_MIDDLE;

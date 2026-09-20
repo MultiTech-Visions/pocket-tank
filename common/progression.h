@@ -179,6 +179,9 @@ extern const sd_item_t SD_ITEMS[SD_ITEM_COUNT];
  * true = unlocked, placed in the tank (tank_plant_place / tank_snail_place)
  * and saved at once */
 bool progression_buy(tank_t *t, int item);
+/* take an owned piece out of the tank (stow = true) or put it back. Everything
+ * about it is kept either way. false = not owned, or already like that. */
+bool progression_stow(tank_t *t, int item, bool stow);
 /* the item index for a key (SD_ITEMS[].key: "plant", "snail", "laser" ...), -1 for none */
 int  progression_sd_item_by_key(const char *key);
 /* false once an upstream sync has appended fields AFTER this fork's decor

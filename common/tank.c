@@ -276,7 +276,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < ALGAE_CELLS; i++) t->algae[i] = 0;
     t->algae_acc = 0; t->trims = 0; t->cells_cleaned = 0;
     t->algae_colonies = 0; t->trim_px = 0;
-    t->sd_balance = t->sd_earned = 0; t->sd_unlocks = 0;
+    t->sd_balance = t->sd_earned = 0; t->sd_unlocks = 0; t->sd_stowed = 0;
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = 0;
     t->sd_colonies_paid = t->sd_inches_paid = 0;
     t->snail_x = -1; t->snail_y = -1; t->snail_heading = 0; t->snail_cell = -1; t->snail_graze = 0;
@@ -406,7 +406,7 @@ static void veg_bed_base(const tank_t *t, int b, float *bx0, int *n) {
     while (nn > 1 && *bx0 + nn * 12 > TANK_W - 8) nn--;   /* beds stop at the glass */
     *n = nn;
 }
-int tank_veg_beds(const tank_t *t) { return (t->sd_unlocks & SD_ITEM_PLANT) ? VEG_BEDS_MAX : VEG_BEDS; }
+int tank_veg_beds(const tank_t *t) { return tank_bit_live(t, SD_ITEM_PLANT) ? VEG_BEDS_MAX : VEG_BEDS; }
 veg_kind_t tank_veg_kind(const tank_t *t, int b) { (void)t; return b == 3 ? VEG_KIND_SWORD : VEG_KIND_GRASS; }
 void tank_veg_bed(const tank_t *t, int b, float *x0, float *x1, float *top_y, int *fronds) {
     float bx0; int n;
@@ -646,11 +646,11 @@ bool tank_snail_upright(const tank_t *t) { return t->snail_cell < 0 && t->snail_
                                     * (Strato, 2026-09-16: "challenging to tap the little guy" at 30;
                                     * the fish take 38 and are tested first) */
 bool tank_snail_hit(const tank_t *t, float x, float y) {
-    if (!(t->sd_unlocks & SD_ITEM_SNAIL) || t->snail_x < 0) return false;
+    if (!tank_bit_live(t, SD_ITEM_SNAIL) || t->snail_x < 0) return false;
     return tank_dist(t->snail_x, t->snail_y, x, y) <= SNAIL_TAP_RADIUS;
 }
 static void snail_tick(tank_t *t, float dt) {
-    if (!(t->sd_unlocks & SD_ITEM_SNAIL)) return;
+    if (!tank_bit_live(t, SD_ITEM_SNAIL)) return;
     if (t->snail_x < 0) tank_snail_place(t);
     if (t->snail_cell < 0 || !t->algae[t->snail_cell]) { t->snail_cell = (int16_t)snail_nearest_cell(t); t->snail_graze = 0; }
     if (t->snail_cell >= 0) {
@@ -689,7 +689,7 @@ static void snail_tick(tank_t *t, float dt) {
 }
 /* asleep: the snail keeps working, coarsely - the nearest cells go, one by one */
 static void snail_sleep(tank_t *t, float seconds) {
-    if (!(t->sd_unlocks & SD_ITEM_SNAIL)) return;
+    if (!tank_bit_live(t, SD_ITEM_SNAIL)) return;
     if (t->snail_x < 0) tank_snail_place(t);
     int cells = (int)(seconds / 3600.0f * SNAIL_SLEEP_CELLS_PER_H);
     for (int k = 0; k < cells; k++) {
@@ -725,6 +725,9 @@ static const struct { float half_w, x_default; bool hangs; uint8_t z_count; } DE
     [SD_IDX_GLOW]   = { GLOW_HALF_W,   GLOW_X_DEFAULT,   false, DECOR_Z_N },
     [SD_IDX_TOTEM]  = { TOTEM_HALF_W,  TOTEM_X_DEFAULT,  false, DECOR_Z_N },
 };
+static const uint32_t SD_BIT[SD_ITEM_COUNT] = { SD_ITEM_PLANT, SD_ITEM_SNAIL, SD_ITEM_CASTLE,
+                                                SD_ITEM_LASER, SD_ITEM_BASS, SD_ITEM_GLOW, SD_ITEM_TOTEM };
+uint32_t tank_item_bit(int item) { return (item >= 0 && item < SD_ITEM_COUNT) ? SD_BIT[item] : 0; }
 bool  tank_decor_placeable(int item) { return item >= 0 && item < SD_ITEM_COUNT && DECOR[item].half_w > 0; }
 bool  tank_decor_hangs(int item) { return tank_decor_placeable(item) && DECOR[item].hangs; }
 float tank_decor_half_w(int item) { return tank_decor_placeable(item) ? DECOR[item].half_w : 0; }
@@ -763,7 +766,7 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
     if (tank_decor_z_count(item) == 2 && z == DECOR_Z_MIDDLE) z = DECOR_Z_FRONT;   /* no AMONG */
     t->decor_x[item] = x; t->decor_z[item] = (uint8_t)z;
-    if (item == SD_IDX_GLOW && (t->sd_unlocks & SD_ITEM_GLOW)) tank_glow_place(t);   /* the pile follows the finger */
+    if (item == SD_IDX_GLOW && tank_bit_live(t, SD_ITEM_GLOW)) tank_glow_place(t);   /* the pile follows the finger */
 }
 /* ---- the glow sticks (SD_ITEM_GLOW): the fish play with them -----------
  * See the note in tank.h. The model is never told; it asks for DART_PLAY and
@@ -774,7 +777,7 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
  * the gate wall's walk (flat at 58). Checked tallest-first where they overlap. */
 float tank_castle_top_y(const tank_t *t, float x, bool *slide) {
     if (slide) *slide = false;
-    if (!(t->sd_unlocks & SD_ITEM_CASTLE)) return GLOW_REST_Y;
+    if (!tank_bit_live(t, SD_ITEM_CASTLE)) return GLOW_REST_Y;
     const float FY = TANK_H - 16.0f;
     float lx = x - tank_decor_x(t, SD_IDX_CASTLE);
     if (lx >= -66 && lx <= -30) {                      /* the pointed tower: a cone, nothing stays on it */
@@ -808,7 +811,7 @@ static bool glow_busy(const tank_t *t, int fish) {
     return false;
 }
 static void glow_tick(tank_t *t, float dt) {
-    if (!(t->sd_unlocks & SD_ITEM_GLOW)) return;
+    if (!tank_bit_live(t, SD_ITEM_GLOW)) return;
     for (int i = 0; i < N_FISH_MAX; i++) if (s_glow_cool[i] > 0) s_glow_cool[i] -= dt;
     for (int g = 0; g < GLOW_N; g++) {
         glow_t *s = &t->glow[g];
@@ -888,7 +891,7 @@ bool tank_totem_carry(const tank_t *t, float *x, float *y) {
     return true;
 }
 static void totem_tick(tank_t *t, float dt) {
-    if (!(t->sd_unlocks & SD_ITEM_TOTEM)) { t->totem_carrier = -1; return; }
+    if (!tank_bit_live(t, SD_ITEM_TOTEM)) { t->totem_carrier = -1; return; }
     if (s_totem_cool > 0) s_totem_cool -= dt;
     if (t->totem_carrier >= 0) {
         if (t->totem_carrier >= t->n_fish) { t->totem_carrier = -1; t->totem_held_s = 0; return; }
@@ -915,7 +918,7 @@ static void totem_tick(tank_t *t, float dt) {
  * clock); the DROP, every BASS_DROP_BEATS beats, shakes BASS_DROP_PUFFS of
  * the free bubbles out of the cone - the flirt's puff, from the sand */
 static void bass_tick(tank_t *t) {
-    if (!(t->sd_unlocks & SD_ITEM_BASS)) return;
+    if (!tank_bit_live(t, SD_ITEM_BASS)) return;
     if (t->clock < t->bass_drop_at) return;
     t->bass_drop_at = t->clock + BASS_DROP_BEATS * BASS_BEAT_S;
     float bx = tank_decor_x(t, SD_IDX_BASS), by = TANK_H - 16 - 12;
@@ -1172,7 +1175,7 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
     if (t->totem_carrier >= 0 && t->totem_carrier < t->n_fish &&
         (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES)) {
         if (idx == t->totem_carrier) {
-            if (t->sd_unlocks & SD_ITEM_BASS) {            /* lead them to the speaker */
+            if (tank_bit_live(t, SD_ITEM_BASS)) {          /* lead them to the speaker */
                 tg.x = tank_decor_x(t, SD_IDX_BASS);
                 tg.y = TANK_H - 16 - 44;
             }

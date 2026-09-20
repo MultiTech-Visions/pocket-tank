@@ -410,8 +410,17 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
-        { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE */
-          if (r >= SHOP_TAP_MOVE) {                                     /* a piece already in the tank: place it again */
+        { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / REMOVE */
+          if (r >= SHOP_TAP_STOW) {                                     /* REMOVE to the box, or PUT BACK */
+              int item = r - SHOP_TAP_STOW;
+              bool was_live = tank_item_live(&tank, item);
+              if (progression_stow(&tank, item, was_live)) {
+                  audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  ESP_LOGI(TAG, "shop: %s %s", SD_ITEMS[item].name, was_live ? "out of the tank, kept in the box" : "back in the tank");
+                  if (!was_live && tank_decor_placeable(item)) {         /* coming back: say where it goes */
+                      touch_port_show_shop(false); setup_begin_place(&tank, item); }
+              }
+          } else if (r >= SHOP_TAP_MOVE) {                              /* a piece already in the tank: place it again */
               int item = r - SHOP_TAP_MOVE;
               touch_port_show_shop(false); setup_begin_place(&tank, item);
               ESP_LOGI(TAG, "shop: MOVE %s - placement page up (drag, DEPTH, DONE)", SD_ITEMS[item].name);

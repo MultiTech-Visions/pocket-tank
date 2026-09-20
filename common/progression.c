@@ -113,6 +113,7 @@ typedef struct {
      * the keeper's spot. Who was holding one is not saved; a boot starts with
      * every stick on the sand. */
     float    glow_x[GLOW_N], glow_y[GLOW_N], glow_ang[GLOW_N];
+    uint32_t sd_stowed;      /* owned but out of the tank (2026-09-20) */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -218,7 +219,22 @@ bool progression_buy(tank_t *t, int item) {
 }
 size_t progression_save_local_tail_offset(void) { return offsetof(save_t, decor_x); }
 bool progression_save_tail_is_last(void) {
-    return offsetof(save_t, glow_ang) + sizeof(((save_t *)0)->glow_ang) == sizeof(save_t);
+    /* Only the struct's own trailing ALIGNMENT padding may follow: save_t is
+       8-byte aligned (it carries an int64), so an exact == would fail purely
+       on padding. What this really asserts is that no upstream sync has
+       appended a named field after this fork's tail. */
+    size_t end = offsetof(save_t, sd_stowed) + sizeof(((save_t *)0)->sd_stowed);
+    return end <= sizeof(save_t) && sizeof(save_t) - end < _Alignof(save_t);
+}
+bool progression_stow(tank_t *t, int item, bool stow) {
+    if (item < 0 || item >= SD_ITEM_COUNT) return false;
+    uint32_t bit = SD_ITEMS[item].bit;
+    if (!(t->sd_unlocks & bit)) return false;                 /* not bought: nothing to put away */
+    if (((t->sd_stowed & bit) != 0) == stow) return false;    /* already where it is being asked to be */
+    if (stow) t->sd_stowed |= bit; else t->sd_stowed &= ~bit;
+    if (!stow && item == SD_IDX_SNAIL && t->snail_x < 0) tank_snail_place(t);   /* never placed: give it a spot */
+    progression_save(t);
+    return true;
 }
 int progression_sd_item_by_key(const char *key) {
     for (int i = 0; i < SD_ITEM_COUNT; i++) if (!strcmp(key, SD_ITEMS[i].key)) return i;
@@ -572,6 +588,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         int z = sv.decor_z1[i] - 1 < DECOR_Z_N ? sv.decor_z1[i] - 1 : DECOR_Z_MIDDLE;
         if (sv.decor_x[i] > 0) tank_decor_set(t, i, sv.decor_x[i], z); else t->decor_z[i] = (uint8_t)z;   /* x 0 = the default spot */
     }
+    t->sd_stowed = sv.sd_stowed & t->sd_unlocks;     /* an older save reads 0: everything owned is in the tank */
     if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
         if (sv.glow_x[0] > 0) {
             for (int i = 0; i < GLOW_N; i++) {
@@ -765,6 +782,7 @@ void progression_save(tank_t *t) {
     for (int i = 0; i < GLOW_N; i++) {               /* a carried stick saves where it is; it lands on the next boot */
         sv.glow_x[i] = t->glow[i].x; sv.glow_y[i] = t->glow[i].y; sv.glow_ang[i] = t->glow[i].ang;
     }
+    sv.sd_stowed = t->sd_stowed;
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);
     sv.bubble_x = t->bubble_x;
