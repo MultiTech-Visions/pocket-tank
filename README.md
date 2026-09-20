@@ -407,6 +407,20 @@ its foot, small and dim, so you can tell what you run. It is the same mechanism 
 Assistant use ([ESP Web Tools](https://esphome.github.io/esp-web-tools/)),
 running entirely in the browser over Web Serial.
 
+**A Windows upgrader, if you'd rather double-click something.** Every push to
+`main` that touches the firmware also builds `PocketTankUpgrade.exe` and
+attaches it to the repo's `windows-upgrader` release, so the download link
+never changes (`.github/workflows/win-upgrader.yml`). Download it, plug the
+tank in, double-click. It rewrites the bootloader, the partition table and the
+app, and writes nothing else, so the save at NVS `0x9000` and the 8 MB model
+partition are left exactly as they were. Before the exe is ever built,
+`tools/win_upgrade/collect.py` reads the real offsets out of the build's
+`flasher_args.json`, measures each image against `firmware/partitions.csv`,
+and refuses to produce an upgrader at all if any of them could reach `nvs`,
+`phy_init`, `model` or `storage`. The exe is unsigned, so SmartScreen asks
+once: *More info*, then *Run anyway*. It carries no model partition, so a
+brand-new board still wants the browser installer for its first flash.
+
 To host your own copy, `tools/make_installer.py` turns a firmware build plus
 the shipped model into one static folder (`installer/dist/`: the page, a
 manifest with the four parts and their flash offsets, the binaries, and the
