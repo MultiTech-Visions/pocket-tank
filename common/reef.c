@@ -1,269 +1,797 @@
-/* reef.c - the reef builder's grid, catalogue and backdrop (see reef.h). */
+/* reef.c - the reef builder: the coral, the reef, and the page you build it
+ * on (see reef.h). */
 #include "reef.h"
 #include "render.h"
 #include <string.h>
 #include <math.h>
 
 /* Coral reads as saturated colour against dark water, so these are picked
- * bright and spread round the wheel rather than sampled from a photograph -
- * a tank built out of them should look like a reef somebody BUILT. */
+ * bright and spread round the wheel: a reef built out of them should look
+ * like one somebody BUILT. */
 const uint32_t REEF_PALETTE[REEF_COLOURS + 1] = {
-    0x000000,                                   /* 0: empty, never drawn */
-    0xff5f8d, 0xff3fa8, 0xc23ff0, 0x7a5cff,     /* pinks into violet */
-    0x3f7dff, 0x38b8ff, 0x2fe6d8, 0x2fd98a,     /* blues into teal and green */
-    0x7ae03a, 0xd8e63a, 0xffc22e, 0xff8a28,     /* greens into yellow and orange */
-    0xff5236, 0xf2f0e6, 0x9a7bd8,               /* red, bone, and a dusty lilac */
+    0x000000,
+    0xff5f8d, 0xff3fa8, 0xc23ff0, 0x7a5cff,
+    0x3f7dff, 0x38b8ff, 0x2fe6d8, 0x2fd98a,
+    0x7ae03a, 0xd8e63a, 0xffc22e, 0xff8a28,
+    0xff5236, 0xf2f0e6, 0x9a7bd8,
 };
 const char *const REEF_COLOUR_NAMES[REEF_COLOURS + 1] = {
     "EMPTY", "ROSE", "MAGENTA", "ORCHID", "VIOLET", "COBALT", "SKY", "TURQUOISE",
     "JADE", "LIME", "CHARTREUSE", "AMBER", "TANGERINE", "CORAL", "BONE", "LILAC",
 };
 
-/* 4x4 masks, bit (y*4 + x). Written out in binary so the shape is visible
- * in the source - a catalogue you cannot read is a catalogue nobody edits. */
-#define M(a,b,c,d) (uint16_t)(((a) << 0) | ((b) << 4) | ((c) << 8) | ((d) << 12))
-const reef_shape_t REEF_SHAPES[REEF_SHAPE_N] = {
-    { "STUD",   M(0x1, 0x0, 0x0, 0x0) },        /* one cell */
-    { "DUO",    M(0x3, 0x0, 0x0, 0x0) },        /* two across */
-    { "TRIO",   M(0x7, 0x0, 0x0, 0x0) },
-    { "BAR",    M(0xF, 0x0, 0x0, 0x0) },        /* the long one */
-    { "BLOCK",  M(0x3, 0x3, 0x0, 0x0) },        /* 2x2 */
-    { "SLAB",   M(0x7, 0x7, 0x0, 0x0) },        /* 3x2 */
-    { "BOULDER",M(0x7, 0x7, 0x7, 0x0) },        /* 3x3 */
-    { "ELL",    M(0x1, 0x1, 0x3, 0x0) },
-    { "JAY",    M(0x2, 0x2, 0x3, 0x0) },
-    { "TEE",    M(0x7, 0x2, 0x0, 0x0) },
-    { "ESS",    M(0x6, 0x3, 0x0, 0x0) },
-    { "ZED",    M(0x3, 0x6, 0x0, 0x0) },
-    { "PLUS",   M(0x2, 0x7, 0x2, 0x0) },
-    { "FAN",    M(0x5, 0x7, 0x2, 0x0) },        /* two fingers off a stem */
-    { "BRANCH", M(0x5, 0x2, 0x2, 0x2) },        /* a tall stem with arms */
-    { "ARCH",   M(0x7, 0x5, 0x5, 0x0) },        /* something to swim through */
+/* The coral, drawn once and baked in. A '.' is nothing, '-' the deep side,
+ * '=' the body and '*' where the light catches; the keeper's colour is
+ * applied to those three levels, so one drawing works in any of the fifteen.
+ *
+ * Drawn with tools/gen_coral.py and pasted here: the art is FIXED, not made
+ * at run time, so what was looked at is what ships. None of them is a
+ * rectangle - that was the whole complaint about the first cut. */
+static const char *const SPR_STAGHORN[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "............*...................",
+    "...........*=*..................",
+    "............--.............**...",
+    "............-=*...***.***..--..*",
+    "............-=-...-*-.-=-.*=-.*-",
+    "............-=-...-==*==-.-=-.--",
+    ".............-=*.*=======*=-.*=-",
+    ".............-==*======-====*==-",
+    ".............-========-.-=====-.",
+    ".............-=======-.*=====-.*",
+    ".............-======-.**======*-",
+    "..............-====-..-======*=-",
+    "..............-===-..*=-=======-",
+    "..............-==-..*==========-",
+    "..............-==-.*===========-",
+    "..............-==-.-====-======-",
+    "..............-===*=*==-.---===-",
+    "..............-========-....--=-",
+    "..............-========-......--",
+    ".............*====-===-........-",
+    ".............-========-.........",
+    ".............-======-=-.........",
+    "............*=========-.........",
+    "............-========-..........",
+    "...........*==-======-..........",
+    "...........-====-=-==-..........",
+    "..........*======*==-...........",
+    "..........-=========-...........",
+    "..........-=========-...........",
+    ".........*=========-............",
+    ".........-=========-............",
+    ".........-=========-............",
+    ".........-==========*...........",
+    ".........-==========-*..........",
+    ".........-===========-..........",
+    ".........-============*.........",
+    ".........-============-.........",
+    ".........-===*========-.........",
+    ".........-============-.........",
+    ".........--------------.........",
 };
-#undef M
+static const char *const SPR_BRANCH[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    ".***............................",
+    "*==-............................",
+    "-==-........................***.",
+    "-===*.......................-==*",
+    "-===-.......................-==-",
+    "-==-........................-==-",
+    "-==-........................-==-",
+    "-==-........................-==-",
+    "-==-...............***......-==-",
+    "-===**.............-=-*....*=*=-",
+    "-=====*.....***....-===*...-===-",
+    "-======*...*===*..*====-...-===-",
+    ".-=====-...-===-.*======*..-==-.",
+    ".-*=====*..-===-.-======-.*===-.",
+    ".-======-..-===-.-==*====*====-.",
+    ".-=======*.-===-.-============-.",
+    ".-=======-.-===-.-============-.",
+    ".-=======-.-====*=-===========-.",
+    ".-=======-..-=================-.",
+    ".-=======-.*====-===-=========-.",
+    ".-====-=*-.-===-.-======*====*-.",
+    ".---------.-----.--------------.",
+};
+static const char *const SPR_BRAIN[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "........*******.................",
+    ".......*=======**...******......",
+    ".....**--=====--=***=--===**....",
+    "....*=-..-===-..-===-..-===-....",
+    "....-==**=====**===*=**===*=**..",
+    "...*============**============*.",
+    "...-==--=====---====--=====--=-.",
+    "...-=-..-===-..-===-..-===-..-=*",
+    "...-==**=====**=====**==*==**==-",
+    "...-=--*====--=====--=====--===-",
+    "...--..-===-..-===-..-=*=-..-==-",
+    "...--**==*==**=====**-====**=*=-",
+    "...---*====--=====--===-=--====-",
+    "......-===-..-===-..-===-..-===-",
+    "....**=====**=====**=====**====-",
+    ".....-====--=====--=====--====-.",
+    "......-==-..-===-..-*==-..-==-..",
+    "......-===**=====**=====**===-..",
+    "......-==--=====--=====--===-...",
+    "......-=-..-===-..-===-..-=-....",
+    "......-==**=====**=====**=-.....",
+    ".......-=-==========-=====-.....",
+    ".......-*===============*-......",
+    "........------------------......",
+};
+static const char *const SPR_FAN[] = {
+    "........................**......",
+    "....**................**=-......",
+    "....-=*..............*=--.......",
+    "....--=**.......**.**--.........",
+    "......-==***...*=-.-==-.....****",
+    ".......-====*.*=-..-==-..****---",
+    ".....*.-==-==*=-..*====**==--...",
+    "....*=*==-.-===-..-*==-===-.....",
+    ".....-====*=*===**=*======-.....",
+    ".....-==========-========-..****",
+    "......-========-.-======-..*===-",
+    "***.**-=========*========**==--.",
+    "-==*=-.-===========*======*=-...",
+    "-====-.-========**=========-....",
+    "-=====*.-======-==========--....",
+    ".-=-===*=================-......",
+    "..--====================-.......",
+    "....-==*================-.......",
+    ".....-===============---........",
+    "......-==*===========-..........",
+    ".......-=============-..........",
+    "........-===========-...........",
+    ".........--========-............",
+    "...........-======-.............",
+    "............-====-..............",
+    "............-====-..............",
+    ".............-===-..............",
+    ".............-===-..............",
+    ".............-====*.............",
+    "..............-===-.............",
+    "..............-===-.............",
+    "..............-----.............",
+};
+static const char *const SPR_TUBES[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    ".....**.**......***.............",
+    "....*==*==**...*===**...........",
+    "....-=======*..-===*-...........",
+    "....-=======-..-====-...........",
+    ".....-======-...-===-.**........",
+    ".....-======-...-====*==*.......",
+    "....*=======-...-==*=====*......",
+    "....-=======-...-*=======-.****.",
+    "....-=======-..*==========*====*",
+    "....-======-...-===============-",
+    "....-======-...-========*-=====-",
+    "...*===*===-...-========-.-====-",
+    "...-=======-...-=====-=*-.-====-",
+    "...--====*=-..*======-==-.-==*=-",
+    "...-==*===-...-====-===-=*=====-",
+    "...-======-...-===-.-===-======-",
+    "...-======-...-====*===-.-====-.",
+    "..*=======-...-========-.-====-.",
+    "..-=======-...-=====*==-.-====-.",
+    "..-=======-..*=========-.-====-.",
+    "..-=======-..-=========-.-====-.",
+    "..-=======-..-====-====-.-====-.",
+    "..-=======-...-========-.-====-.",
+    "..-======--...-=====-==-.-====-.",
+    "..-===-=*=-...-====-===-.-===*-.",
+    "...--------...-----.----.------.",
+};
+static const char *const SPR_TABLE[] = {
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    ".....********....***.******.....................",
+    "....*========**.*===*======**...................",
+    "...*===========*===*======*==*.****.............",
+    "..*=============**============*====*............",
+    "..-============-===================**...........",
+    "..--================================-...........",
+    "..-=====================*===========-...........",
+    "..-====*===========================-............",
+    "...-=================-=*=========--.............",
+    "....-====*==-------==-=======*==-...............",
+    ".....-------.......-===-========-...............",
+    "...................-======---=--................",
+    "....................-====-...-..................",
+    "....................-====-......................",
+    "....................-=====*.....................",
+    "....................-=====-.....................",
+    ".....................-====-.....................",
+    ".....................-====-.....................",
+    ".....................-====-.....................",
+    ".....................-=====*....................",
+    ".....................-==*==-....................",
+    ".....................-------....................",
+};
+static const char *const SPR_ANEMONE[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "..................**............",
+    ".................*=-............",
+    ".................-=-....**......",
+    ".................-=-...*=-......",
+    "....*.....****...-=-...-=-......",
+    "...*=**...-===*..-=-..*==-......",
+    "...-===***====-.*==-.*==-.......",
+    "....--=========*====*===-.......",
+    "......--===============-........",
+    "........-==============-........",
+    ".........-===========--.........",
+    "..........-==========--.****....",
+    "...........-===========*====**..",
+    "***********==================-..",
+    "--=====================------...",
+    "---------=============-.........",
+    ".........-==========*==*........",
+    ".........-=============-........",
+    ".........-=============-........",
+    ".........-========-====-........",
+    ".........-=============-........",
+    "..........-=========-=-.........",
+    "..........-===========-.........",
+    "...........-----------..........",
+};
+static const char *const SPR_CABBAGE[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "..............*.................",
+    "...........***=***..............",
+    "..........*=*=====*.............",
+    ".........*=========*............",
+    "........*====-======****........",
+    ".......*====-.-=========*.......",
+    "......*====-.*=====*====-.......",
+    "......-===-.*===**====--........",
+    "......-==-.*===--====-..........",
+    ".....*====*====-.-====***.......",
+    "....*===========*=======**......",
+    "...*===*=================-......",
+    "....-================-=*-.......",
+    "....--===*=======-===-===**.....",
+    "......-=========-.-====-===*....",
+    "....**=========-.*=========-....",
+    "...*==========-.*=========-.....",
+    "..*====-=====-.*====-====-......",
+    "..-===-.-=====*====-.-====**....",
+    "...---.*============*=======*...",
+    "......*=====================-...",
+    ".....*============-========-....",
+    "...**====--==========---====*...",
+    "..*=====-..-========-...-====*..",
+    ".*====--....-======-.....-===**.",
+    "..-----......------.......----..",
+};
+static const char *const SPR_PILLAR[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "...........................***..",
+    "..........................*==-..",
+    "..........................-==-..",
+    "..........................-==-..",
+    "..........................-==-..",
+    ".......................***===-..",
+    ".......................-=====-..",
+    "......................*=*====-..",
+    "...................*..-======-..",
+    "..................*=**=*=====-..",
+    ".................*===-=======-..",
+    "..................-====-=====-..",
+    "..................-==========-..",
+    "..................-===========*.",
+    "..................-===========-.",
+    ".................*==*=====-==-..",
+    ".................-=======-.---..",
+    "................*========-......",
+    "................-=-=====-.......",
+    "................-=======-.......",
+    "...............*====-==-........",
+    "...............-=======-........",
+    "...............-=====-=-........",
+    "..............*=======-.........",
+    "..............-=-=-===-.........",
+    "..............-==*====-.........",
+    ".............*=======-..........",
+    ".............-=======-..........",
+    ".............-=======-..........",
+    ".............-=======-..........",
+    ".............-=======-..........",
+    ".............-=======-..........",
+    ".............-======--..........",
+    ".............-=======-..........",
+    ".............-=======-..........",
+    "............*========-..........",
+    "............-*=======-..........",
+    "............-=======-...........",
+    "............---------...........",
+};
+static const char *const SPR_MOUND[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    ".....*****......................",
+    "...**=====**...*****............",
+    "..*=========*.*====***..........",
+    ".*==========**=====*==***.......",
+    "*-=======================**.....",
+    "-==*======================-.....",
+    "-==========================*....",
+    "-==================*======*=*...",
+    "-===============**===========*..",
+    ".-=============-=============-..",
+    "..----------------------------..",
+};
+static const char *const SPR_WHIP[] = {
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "**..............",
+    "--*.............",
+    "-==*............",
+    "-===*...........",
+    "-===-...........",
+    ".-===*..........",
+    "..-===*.........",
+    "..--==-.........",
+    "...-==-.........",
+    "...-===*........",
+    "....-==-........",
+    "....-==-........",
+    "....-=*=*.......",
+    ".....-==-.......",
+    ".....-==-.......",
+    ".....-===*......",
+    "......-==-......",
+    "......-==-......",
+    "......-===*.....",
+    "......-===-.....",
+    ".......-==-.....",
+    ".......-=--.....",
+    ".......-*=-.....",
+    ".......-==-.....",
+    ".......-==-.....",
+    ".......-===*....",
+    ".......-===-....",
+    ".......-===-....",
+    ".......-==-.....",
+    ".......-==-.....",
+    ".......--=-.....",
+    ".......-==-.....",
+    ".......-==-.....",
+    ".......-==-.....",
+    ".......-===*....",
+    ".......-===-....",
+    ".......-==-.....",
+    ".......-==-.....",
+    "......*==--.....",
+    ".......----.....",
+};
+static const char *const SPR_BUBBLE[] = {
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "..........................**....",
+    "........................***=**..",
+    "........****...........*======*.",
+    "......**====**.........-======-.",
+    "......-======-.........-=======*",
+    ".....*========*........-*======-",
+    ".....-=*======-........-======-.",
+    ".....-========-....**..-======-.",
+    ".....-===*====-.***==**.------..",
+    "......-======-.*=======*........",
+    "......--======*=========***.....",
+    "........-==================**...",
+    "........-====================*..",
+    "........-===========*========-..",
+    ".......*======================*.",
+    ".....**========================*",
+    "....*=============-============-",
+    "...*===========================-",
+    "...-=====-==========-==========-",
+    "...-==-=*--------=======*====*=-",
+    "....-----........---------------",
+};
+const reef_shape_t REEF_SHAPES[REEF_SHAPE_N] = {
+    { "STAGHORN", 2, 3, SPR_STAGHORN },
+    { "BRANCH", 2, 2, SPR_BRANCH },
+    { "BRAIN", 2, 2, SPR_BRAIN },
+    { "FAN", 2, 2, SPR_FAN },
+    { "TUBES", 2, 2, SPR_TUBES },
+    { "TABLE", 3, 2, SPR_TABLE },
+    { "ANEMONE", 2, 2, SPR_ANEMONE },
+    { "CABBAGE", 2, 2, SPR_CABBAGE },
+    { "PILLAR", 2, 3, SPR_PILLAR },
+    { "MOUND", 2, 1, SPR_MOUND },
+    { "WHIP", 1, 3, SPR_WHIP },
+    { "BUBBLE", 2, 2, SPR_BUBBLE },
+};
 
-uint16_t reef_shape_rot(uint16_t mask, int rot) {
-    rot &= 3;
-    for (int r = 0; r < rot; r++) {
-        uint16_t out = 0;
-        for (int y = 0; y < REEF_SHAPE_W; y++)
-            for (int x = 0; x < REEF_SHAPE_W; x++)
-                if (mask & (1u << (y * REEF_SHAPE_W + x)))
-                    out |= (uint16_t)(1u << (x * REEF_SHAPE_W + (REEF_SHAPE_W - 1 - y)));
-        mask = out;
+uint8_t reef_shape_px(int shape, int px, int py) {
+    if (shape < 0 || shape >= REEF_SHAPE_N) return 0;
+    const reef_shape_t *s = &REEF_SHAPES[shape];
+    if (px < 0 || py < 0 || px >= s->cw * REEF_CELL || py >= s->ch * REEF_CELL) return 0;
+    switch (s->rows[py][px]) {
+    case '-': return 1;
+    case '=': return 2;
+    case '*': return 3;
+    default:  return 0;
     }
-    return mask;
 }
-void reef_shape_bounds(uint16_t mask, int *x0, int *y0, int *w, int *h) {
-    int lx = REEF_SHAPE_W, ly = REEF_SHAPE_W, hx = -1, hy = -1;
-    for (int y = 0; y < REEF_SHAPE_W; y++)
-        for (int x = 0; x < REEF_SHAPE_W; x++)
-            if (mask & (1u << (y * REEF_SHAPE_W + x))) {
-                if (x < lx) lx = x; if (x > hx) hx = x;
-                if (y < ly) ly = y; if (y > hy) hy = y;
-            }
-    if (hx < 0) { *x0 = *y0 = 0; *w = *h = 0; return; }
-    *x0 = lx; *y0 = ly; *w = hx - lx + 1; *h = hy - ly + 1;
+bool reef_shape_cell(int shape, int cx, int cy) {
+    if (shape < 0 || shape >= REEF_SHAPE_N) return false;
+    const reef_shape_t *s = &REEF_SHAPES[shape];
+    if (cx < 0 || cy < 0 || cx >= s->cw || cy >= s->ch) return false;
+    for (int y = 0; y < REEF_CELL; y++)
+        for (int x = 0; x < REEF_CELL; x++)
+            if (reef_shape_px(shape, cx * REEF_CELL + x, cy * REEF_CELL + y)) return true;
+    return false;
 }
 
-/* tank.h cannot include this header (reef.h needs tank.h), so the field is
- * declared there with a literal size. This is the wire that stops the two
- * drifting: change the grid and the build stops here, not in somebody's
- * save. */
-_Static_assert(sizeof(((tank_t *)0)->reef) == REEF_BYTES,
-               "tank_t.reef is not REEF_BYTES: fix the literal in tank.h");
+/* ---- the reef: a list of pieces, packed into the save's bytes ----
+ * byte 0 is the count; then four bytes each - shape, colour, cx, cy. A list
+ * is what lets a piece be picked back UP whole, which a painted grid could
+ * never do, and it is the natural store for a sprite. */
+_Static_assert(sizeof(((tank_t *)0)->reef) == REEF_SAVE_BYTES,
+               "tank_t.reef is not REEF_SAVE_BYTES: fix the literal in tank.h");
+_Static_assert(1 + REEF_MAX * 4 <= REEF_SAVE_BYTES, "REEF_MAX does not fit the save");
 
-/* ---- the grid: two cells to a byte, low nibble first ---- */
 static unsigned s_epoch = 1;
-uint8_t reef_get(const tank_t *t, int cx, int cy) {
-    if (cx < 0 || cy < 0 || cx >= REEF_COLS || cy >= REEF_ROWS) return 0;
-    int i = cy * REEF_COLS + cx;
-    uint8_t b = t->reef[i >> 1];
-    return (i & 1) ? (uint8_t)(b >> 4) : (uint8_t)(b & 0x0f);
+int reef_count(const tank_t *t) {
+    int n = t->reef[0];
+    return n > REEF_MAX ? REEF_MAX : n;
 }
-void reef_set(tank_t *t, int cx, int cy, uint8_t colour) {
-    if (cx < 0 || cy < 0 || cx >= REEF_COLS || cy >= REEF_ROWS) return;
-    if (colour > REEF_COLOURS) colour = REEF_COLOURS;
-    int i = cy * REEF_COLS + cx;
-    uint8_t *b = &t->reef[i >> 1];
-    uint8_t was = *b;
-    *b = (i & 1) ? (uint8_t)((*b & 0x0f) | (uint8_t)(colour << 4))
-                 : (uint8_t)((*b & 0xf0) | colour);
-    if (*b != was) s_epoch++;
+bool reef_piece(const tank_t *t, int i, reef_piece_t *out) {
+    if (i < 0 || i >= reef_count(t)) return false;
+    const uint8_t *p = &t->reef[1 + i * 4];
+    out->shape = p[0]; out->colour = p[1]; out->cx = (int8_t)p[2]; out->cy = (int8_t)p[3];
+    return out->shape < REEF_SHAPE_N;
 }
-bool reef_empty(const tank_t *t) {
-    for (int i = 0; i < REEF_BYTES; i++) if (t->reef[i]) return false;
-    return true;
-}
+bool reef_empty(const tank_t *t) { return reef_count(t) == 0; }
 void reef_clear(tank_t *t) { memset(t->reef, 0, sizeof t->reef); s_epoch++; }
-int reef_stamp(tank_t *t, uint16_t mask, int cx, int cy, uint8_t colour) {
-    int n = 0;
-    for (int y = 0; y < REEF_SHAPE_W; y++)
-        for (int x = 0; x < REEF_SHAPE_W; x++) {
-            if (!(mask & (1u << (y * REEF_SHAPE_W + x)))) continue;
-            int gx = cx + x, gy = cy + y;
-            if (gx < 0 || gy < 0 || gx >= REEF_COLS || gy >= REEF_ROWS) continue;
-            if (reef_get(t, gx, gy) == colour) continue;
-            reef_set(t, gx, gy, colour);
-            n++;
-        }
-    return n;
-}
 unsigned reef_epoch(const tank_t *t) { (void)t; return s_epoch; }
 
-/* ---- the backdrop ----
- * Only render.h's public primitives are used here, the same discipline
- * ui_ext.c keeps, so render.c needs nothing added for this. The night dim
- * is applied to the colour rather than to the draw, because a flat rect is
- * all that is being asked for. */
-static uint32_t reef_shade(uint32_t rgb, int pct, float dim) {
-    int r = (int)((rgb >> 16) & 0xff), g = (int)((rgb >> 8) & 0xff), b = (int)(rgb & 0xff);
-    if (pct > 0) { r += (255 - r) * pct / 100; g += (255 - g) * pct / 100; b += (255 - b) * pct / 100; }
-    else if (pct < 0) { r = r * (100 + pct) / 100; g = g * (100 + pct) / 100; b = b * (100 + pct) / 100; }
-    if (dim < 1.0f) { r = (int)(r * dim); g = (int)(g * dim); b = (int)(b * dim); }
-    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
-    if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
-    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+bool reef_occupied(const tank_t *t, int cx, int cy) {
+    if (cx < 0 || cy < 0 || cx >= REEF_COLS || cy >= REEF_ROWS) return false;
+    reef_piece_t p;
+    for (int i = 0; i < reef_count(t); i++) {
+        if (!reef_piece(t, i, &p)) continue;
+        if (reef_shape_cell(p.shape, cx - p.cx, cy - p.cy)) return true;
+    }
+    return false;
 }
-void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
-    for (int cy = 0; cy < REEF_ROWS; cy++)
-        for (int cx = 0; cx < REEF_COLS; cx++) {
-            uint8_t col = reef_get(t, cx, cy);
-            if (!col) continue;
-            int x = cx * REEF_CELL, y = cy * REEF_CELL;
-            uint32_t rgb = REEF_PALETTE[col];
-            /* a block, lighter where nothing sits on it and darker where it
-               meets open water: enough to read as stacked pieces rather than
-               a flat field of colour */
-            render_rect(fb, stride, x, y, REEF_CELL, REEF_CELL, reef_shade(rgb, 0, dim));
-            if (!reef_get(t, cx, cy - 1))
-                render_rect(fb, stride, x, y, REEF_CELL, 2, reef_shade(rgb, 28, dim));
-            if (!reef_get(t, cx, cy + 1))
-                render_rect(fb, stride, x, y + REEF_CELL - 2, REEF_CELL, 2, reef_shade(rgb, -38, dim));
-            if (!reef_get(t, cx - 1, cy))
-                render_rect(fb, stride, x, y, 2, REEF_CELL, reef_shade(rgb, -16, dim));
-            if (!reef_get(t, cx + 1, cy))
-                render_rect(fb, stride, x + REEF_CELL - 2, y, 2, REEF_CELL, reef_shade(rgb, -26, dim));
+int reef_at(const tank_t *t, int cx, int cy) {
+    reef_piece_t p;
+    for (int i = reef_count(t) - 1; i >= 0; i--) {          /* the last placed is on top */
+        if (!reef_piece(t, i, &p)) continue;
+        if (reef_shape_cell(p.shape, cx - p.cx, cy - p.cy)) return i;
+    }
+    return -1;
+}
+/* The rule that makes this a reef and not a sticker album: every cell the
+ * piece wants must be free, all of it must be on the glass, and at least one
+ * of its cells must sit on the floor or touch something already built. */
+bool reef_can_place(const tank_t *t, int shape, int cx, int cy) {
+    if (shape < 0 || shape >= REEF_SHAPE_N) return false;
+    if (reef_count(t) >= REEF_MAX) return false;
+    const reef_shape_t *s = &REEF_SHAPES[shape];
+    bool anchored = false, any = false;
+    for (int y = 0; y < s->ch; y++)
+        for (int x = 0; x < s->cw; x++) {
+            if (!reef_shape_cell(shape, x, y)) continue;
+            int gx = cx + x, gy = cy + y;
+            if (gx < 0 || gy < 0 || gx >= REEF_COLS || gy >= REEF_ROWS) return false;
+            if (reef_occupied(t, gx, gy)) return false;
+            any = true;
+            if (gy == REEF_ROWS - 1) anchored = true;        /* standing on the floor */
+            else if (reef_occupied(t, gx, gy + 1) || reef_occupied(t, gx, gy - 1) ||
+                     reef_occupied(t, gx - 1, gy) || reef_occupied(t, gx + 1, gy))
+                anchored = true;                             /* growing off something */
         }
+    return any && anchored;
+}
+int reef_settle(const tank_t *t, int shape, int cx, int cy) {
+    if (shape < 0 || shape >= REEF_SHAPE_N) return -1;
+    const reef_shape_t *sh = &REEF_SHAPES[shape];
+    if (cy < 0) cy = 0;
+    if (cy + sh->ch > REEF_ROWS) cy = REEF_ROWS - sh->ch;
+    /* fall until the next row down would not be legal, then stop where we
+       are - so it lands ON the floor or ON whatever is under it */
+    int y = cy;
+    while (y + sh->ch <= REEF_ROWS && !reef_can_place(t, shape, cx, y)) y++;   /* find the first legal row at all */
+    if (y + sh->ch > REEF_ROWS) return -1;
+    while (y + 1 + sh->ch <= REEF_ROWS && reef_can_place(t, shape, cx, y + 1)) y++;
+    return y;
+}
+bool reef_place(tank_t *t, int shape, uint8_t colour, int cx, int cy) {
+    if (!reef_can_place(t, shape, cx, cy)) return false;
+    int n = reef_count(t);
+    uint8_t *p = &t->reef[1 + n * 4];
+    p[0] = (uint8_t)shape;
+    p[1] = colour < 1 ? 1 : colour > REEF_COLOURS ? REEF_COLOURS : colour;
+    p[2] = (uint8_t)(int8_t)cx; p[3] = (uint8_t)(int8_t)cy;
+    t->reef[0] = (uint8_t)(n + 1);
+    s_epoch++;
+    return true;
+}
+bool reef_remove(tank_t *t, int index) {
+    int n = reef_count(t);
+    if (index < 0 || index >= n) return false;
+    memmove(&t->reef[1 + index * 4], &t->reef[1 + (index + 1) * 4], (size_t)(n - index - 1) * 4);
+    memset(&t->reef[1 + (n - 1) * 4], 0, 4);
+    t->reef[0] = (uint8_t)(n - 1);
+    s_epoch++;
+    return true;
 }
 
-/* ---- the builder ------------------------------------------------------- */
-/* Fifteen colours in one column of 34 px needs 510 px and the glass is 368,
- * so the bar is TWO columns - which also leaves room for the rubber under
- * it. The first cut ran the last five colours and the rubber off the
- * bottom edge entirely. */
+/* ---- drawing ---- */
+static uint32_t reef_shade(uint32_t rgb, int level, float dim) {
+    int r = (int)((rgb >> 16) & 0xff), g = (int)((rgb >> 8) & 0xff), b = (int)(rgb & 0xff);
+    if (level == 1) { r = r * 44 / 100; g = g * 44 / 100; b = b * 44 / 100; }        /* the deep side */
+    else if (level == 3) { r += (255 - r) * 52 / 100; g += (255 - g) * 52 / 100; b += (255 - b) * 52 / 100; }
+    if (dim < 1.0f) { r = (int)(r * dim); g = (int)(g * dim); b = (int)(b * dim); }
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+void reef_draw_shape(uint16_t *fb, int stride, int x, int y, int shape,
+                     uint8_t colour, int alpha, float dim) {
+    if (shape < 0 || shape >= REEF_SHAPE_N) return;
+    const reef_shape_t *s = &REEF_SHAPES[shape];
+    uint32_t base = REEF_PALETTE[colour < 1 ? 1 : colour > REEF_COLOURS ? REEF_COLOURS : colour];
+    uint32_t lut[4] = { 0, reef_shade(base, 1, dim), reef_shade(base, 2, dim), reef_shade(base, 3, dim) };
+    for (int py = 0; py < s->ch * REEF_CELL; py++) {
+        int run = 0, level = 0;
+        for (int px = 0; px <= s->cw * REEF_CELL; px++) {   /* runs, so a row is a few rects not 32 */
+            int v = px < s->cw * REEF_CELL ? reef_shape_px(shape, px, py) : 0;
+            if (v == level) { run++; continue; }
+            if (level && run) {
+                if (alpha >= 255) render_rect(fb, stride, x + px - run, y + py, run, 1, lut[level]);
+                else render_rect_blend(fb, stride, x + px - run, y + py, run, 1, lut[level], alpha);
+            }
+            level = v; run = 1;
+        }
+    }
+}
+/* ---- the carrier ------------------------------------------------------
+ * Living coral grows on the dead skeleton of what grew before it, so a reef
+ * is a MASS with colour on its surface - not a row of stickers. Without
+ * this the pieces read as stamps on the water, which is exactly what they
+ * were (2026-09-21).
+ *
+ * Every occupied cell gets rock. How much depends on where the cell sits:
+ * one with coral on all four sides is solid, one on the outside is eaten
+ * away towards the open water, and the erosion is dithered against a hash
+ * of the pixel so the silhouette comes out ragged instead of square. That
+ * is the whole trick - the boundary must never be a straight cell edge. */
+#define CARRIER_ROCK   0x3a464c
+#define CARRIER_DEEP   0x1b2428
+#define CARRIER_LIGHT  0x5d6c71
+static inline uint32_t carrier_hash(int x, int y) {
+    uint32_t h = (uint32_t)x * 2654435761u ^ (uint32_t)y * 40503u;
+    h ^= h >> 13; h *= 1274126177u; h ^= h >> 16;
+    return h;
+}
+static void reef_draw_carrier(const tank_t *t, uint16_t *fb, int stride, float dim) {
+    uint32_t rock  = reef_shade(CARRIER_ROCK, 2, dim);
+    uint32_t deep  = reef_shade(CARRIER_DEEP, 2, dim);
+    uint32_t light = reef_shade(CARRIER_LIGHT, 2, dim);
+    for (int cy = 0; cy < REEF_ROWS; cy++)
+        for (int cx = 0; cx < REEF_COLS; cx++) {
+            if (!reef_occupied(t, cx, cy)) continue;
+            bool up = reef_occupied(t, cx, cy - 1), dn = cy == REEF_ROWS - 1 || reef_occupied(t, cx, cy + 1);
+            bool lf = reef_occupied(t, cx - 1, cy), rt = reef_occupied(t, cx + 1, cy);
+            for (int y = 0; y < REEF_CELL; y++)
+                for (int x = 0; x < REEF_CELL; x++) {
+                    /* how far into the mass this pixel is, 0 at an open edge
+                       and 1 well inside; an open side pulls it down */
+                    /* The falloff is STEEP, so the inside of a cell is solid
+                       rock and only a band a few pixels wide near an open
+                       side gets eaten. The first cut used a gentle slope and
+                       dithered most of every cell, which came out as static
+                       rather than stone. */
+                    float f = 1.0f;
+                    float ex = (x + 0.5f) / REEF_CELL, ey = (y + 0.5f) / REEF_CELL;
+                    if (!lf) { float d = ex * 4.5f;         if (d < f) f = d; }
+                    if (!rt) { float d = (1 - ex) * 4.5f;   if (d < f) f = d; }
+                    if (!up) { float d = ey * 3.0f;         if (d < f) f = d; }
+                    if (!dn) { float d = (1 - ey) * 4.5f;   if (d < f) f = d; }
+                    if (f <= 0) continue;
+                    int px = cx * REEF_CELL + x, py = cy * REEF_CELL + y;
+                    uint32_t h = carrier_hash(px, py);
+                    if (f < 1.0f && (h & 255) > (uint32_t)(f * f * 255.0f)) continue;   /* the ragged edge */
+                    uint32_t col = rock;
+                    if ((h >> 9 & 31) == 0) col = light;                 /* grain, sparse enough to be stone */
+                    else if ((h >> 15 & 31) == 0) col = deep;
+                    if (!up && ey < 0.30f) col = light;                  /* the top catches the light */
+                    else if (!dn && ey > 0.72f) col = deep;              /* and the underside is in shadow */
+                    render_rect(fb, stride, px, py, 1, 1, col);
+                }
+        }
+}
+void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
+    if (reef_empty(t)) return;
+    reef_draw_carrier(t, fb, stride, dim);           /* the dead mass it all grows on */
+    reef_piece_t p;
+    for (int i = 0; i < reef_count(t); i++) {
+        if (!reef_piece(t, i, &p)) continue;
+        reef_draw_shape(fb, stride, p.cx * REEF_CELL, p.cy * REEF_CELL, p.shape, p.colour, 255, dim);
+    }
+}
+
+/* ---- the builder -------------------------------------------------------
+ * Two states and the swipe between them. The canvas shows the reef with a
+ * ghost of the piece in hand; the ghost says whether it MAY go there, so
+ * the adjacency rule is something you can see rather than something that
+ * silently refuses you. */
 #define RUI_BAR_COLS   2
 #define RUI_DOT_R      11
 #define RUI_DOT_DX     28
 #define RUI_DOT_DY     28
 #define RUI_BAR_W      (RUI_BAR_COLS * RUI_DOT_DX + 6)
 #define RUI_BAR_ROWS   ((REEF_COLOURS + RUI_BAR_COLS - 1) / RUI_BAR_COLS)
-#define RUI_CAT_X      (RUI_BAR_W + 10)      /* the shape catalogue beside it */
-#define RUI_CAT_COLS   4
-#define RUI_TILE       84
+#define RUI_CAT_X      (RUI_BAR_W + 10)
+#define RUI_CAT_COLS   3
+#define RUI_TILE       110
 #define RUI_TILE_PAD   6
-#define RUI_MENU_Y     44                    /* the menu's lid */
-#define RUI_FOOT_Y     (TANK_H - 24)         /* ... and the band its hint sits in */
+#define RUI_MENU_Y     44
+#define RUI_FOOT_Y     (TANK_H - 24)
 #define RUI_HINT_Y     (TANK_H - 22)
-#define RUI_FOOT_H     30
+#define RUI_BTN_H      30
 
 static bool  s_menu;
-static int   s_shape = -1, s_rot, s_colour = 1;   /* what is in hand */
-static int   s_cx = REEF_COLS / 2, s_cy = REEF_ROWS / 2;   /* where the ghost sits */
-static float s_scroll;                            /* the catalogue's scroll, in px */
-static float s_scroll0;                           /* ... where the drag started */
-static bool  s_erase;
+static int   s_shape = -1, s_colour = 1;
+static int   s_cx, s_cy;
+static float s_scroll, s_scroll0;
+static bool  s_rub;
+static bool  s_settled;      /* did the piece in hand find anywhere to rest in this column? */
 
 void reef_ui_open(tank_t *t) {
-    (void)t; s_menu = false; s_shape = -1; s_rot = 0; s_erase = false;
-    s_cx = REEF_COLS / 2; s_cy = REEF_ROWS / 2; s_scroll = 0;
+    (void)t; s_menu = false; s_shape = -1; s_rub = false;
+    s_cx = REEF_COLS / 2; s_cy = REEF_ROWS - 3; s_scroll = 0;
 }
 void reef_ui_close(void) { s_menu = false; s_shape = -1; }
 bool reef_ui_menu_up(void) { return s_menu; }
-void reef_ui_hand(int *shape, int *rot, int *colour) {
+void reef_ui_hand(int *shape, int *colour, bool *rubbing) {
     if (shape) *shape = s_shape;
-    if (rot) *rot = s_rot;
-    if (colour) *colour = s_erase ? 0 : s_colour;
+    if (colour) *colour = s_colour;
+    if (rubbing) *rubbing = s_rub;
 }
-/* the mask in hand, already turned */
-static uint16_t rui_mask(void) {
-    return s_shape < 0 ? 0 : reef_shape_rot(REEF_SHAPES[s_shape].mask, s_rot);
-}
-/* keep the piece on the grid whatever the finger does */
-static void rui_clamp(void) {
-    uint16_t m = rui_mask();
-    if (!m) return;
-    int x0, y0, w, h; reef_shape_bounds(m, &x0, &y0, &w, &h);
-    if (s_cx + x0 < 0) s_cx = -x0;
-    if (s_cy + y0 < 0) s_cy = -y0;
-    if (s_cx + x0 + w > REEF_COLS) s_cx = REEF_COLS - w - x0;
-    if (s_cy + y0 + h > REEF_ROWS) s_cy = REEF_ROWS - h - y0;
-}
-/* one shape drawn into a box, used by the catalogue tiles and the ghost */
-static void rui_shape_tile(uint16_t *fb, int stride, int x, int y, int cell,
-                           uint16_t mask, uint32_t rgb, int alpha) {
-    for (int gy = 0; gy < REEF_SHAPE_W; gy++)
-        for (int gx = 0; gx < REEF_SHAPE_W; gx++)
-            if (mask & (1u << (gy * REEF_SHAPE_W + gx))) {
-                if (alpha >= 255) render_rect(fb, stride, x + gx * cell, y + gy * cell, cell - 1, cell - 1, rgb);
-                else render_rect_blend(fb, stride, x + gx * cell, y + gy * cell, cell - 1, cell - 1, rgb, alpha);
-            }
+/* the finger holds the piece by its middle, and it never leaves the glass */
+static void rui_to_cell(const tank_t *t, float x, float y) {
+    if (s_shape < 0) return;
+    const reef_shape_t *s = &REEF_SHAPES[s_shape];
+    s_cx = (int)(x / REEF_CELL) - s->cw / 2;
+    s_cy = (int)(y / REEF_CELL) - s->ch / 2;
+    if (s_cx < 0) s_cx = 0;
+    if (s_cx + s->cw > REEF_COLS) s_cx = REEF_COLS - s->cw;
+    if (s_cy < 0) s_cy = 0;
+    if (s_cy + s->ch > REEF_ROWS) s_cy = REEF_ROWS - s->ch;
+    int settled = reef_settle(t, s_shape, s_cx, s_cy);   /* it falls to where it would rest */
+    s_settled = settled >= 0;
+    if (s_settled) s_cy = settled;
 }
 
 void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
-    const uint32_t INK = 0x031015, PANEL = 0x04141a, TEAL = 0x9fd8e2, FAINT = 0x3f6a72, WHITE = 0xffffff;
+    const uint32_t INK = 0x031015, PANEL = 0x04141a, TEAL = 0x9fd8e2, FAINT = 0x3f6a72,
+                   WHITE = 0xffffff, NO = 0xf25b65;
     if (!s_menu) {
-        /* the canvas is the tank itself, already drawn by the caller. The
-           grid is shown faintly so you can see what you are building ON. */
-        for (int cx = 1; cx < REEF_COLS; cx++)
-            for (int y = 0; y < TANK_H; y += 4)
-                render_rect_blend(fb, stride, cx * REEF_CELL, y, 1, 2, TEAL, 18);
-        for (int cy = 1; cy < REEF_ROWS; cy++)
-            for (int x = 0; x < TANK_W; x += 4)
-                render_rect_blend(fb, stride, x, cy * REEF_CELL, 2, 1, TEAL, 18);
-        uint16_t m = rui_mask();
-        if (m) {                                   /* the piece under the finger */
+        if (s_shape >= 0) {
+            bool ok = s_settled;
             int pulse = 150 + (int)(70 * (0.5f + 0.5f * sinf(clock * 4.0f)));
-            uint32_t rgb = s_erase ? 0xf25b65 : REEF_PALETTE[s_colour];
-            rui_shape_tile(fb, stride, s_cx * REEF_CELL, s_cy * REEF_CELL, REEF_CELL, m, rgb, pulse);
-            /* its footprint, so the grid it will land on is unambiguous */
-            for (int gy = 0; gy < REEF_SHAPE_W; gy++)
-                for (int gx = 0; gx < REEF_SHAPE_W; gx++)
-                    if (m & (1u << (gy * REEF_SHAPE_W + gx)))
-                        render_rect_edge(fb, stride, (s_cx + gx) * REEF_CELL, (s_cy + gy) * REEF_CELL,
-                                         REEF_CELL, REEF_CELL, WHITE);
+            reef_draw_shape(fb, stride, s_cx * REEF_CELL, s_cy * REEF_CELL, s_shape,
+                            (uint8_t)s_colour, ok ? pulse : 110, 1.0f);
+            /* the footprint, ringed in teal where it may go and red where it
+               may not: the rule is on the glass, not hidden in a refusal */
+            const reef_shape_t *sh = &REEF_SHAPES[s_shape];
+            for (int cy = 0; cy < sh->ch; cy++)
+                for (int cx = 0; cx < sh->cw; cx++)
+                    if (reef_shape_cell(s_shape, cx, cy))
+                        render_rect_edge(fb, stride, (s_cx + cx) * REEF_CELL, (s_cy + cy) * REEF_CELL,
+                                         REEF_CELL, REEF_CELL, ok ? TEAL : NO);
         }
-        /* the foot: what to do next */
-        render_rect_blend(fb, stride, 0, RUI_HINT_Y - 6, TANK_W, 28, INK, 190);
-        const char *hint = m ? "TAP TO PLACE  -  SWIPE UP FOR MORE" : "SWIPE UP FOR PIECES";
-        render_text(fb, stride, (TANK_W - render_text_w(hint, 2)) / 2, RUI_HINT_Y, 2, m ? TEAL : WHITE, hint);
-        if (m) {                                   /* turn it, or put it down */
-            render_button(fb, stride, 8, RUI_HINT_Y - 44, 74, RUI_FOOT_H, PANEL, TEAL, "TURN", 2);
-            render_button(fb, stride, TANK_W - 82, RUI_HINT_Y - 44, 74, RUI_FOOT_H, PANEL, TEAL, "DROP", 2);
-        }
+        render_rect_blend(fb, stride, 0, RUI_HINT_Y - 6, TANK_W, 28, INK, 200);
+        const char *hint = s_rub ? "TAP A CORAL TO TAKE IT OUT"
+                         : s_shape < 0 ? "SWIPE UP FOR CORAL"
+                         : s_settled ? "TAP TO PLANT IT"
+                         : "NO ROOM IN THIS COLUMN";
+        uint32_t hc = (s_shape >= 0 && !s_settled) ? NO : WHITE;
+        render_text(fb, stride, (TANK_W - render_text_w(hint, 2)) / 2, RUI_HINT_Y, 2, hc, hint);
+        if (s_shape >= 0)
+            render_button(fb, stride, TANK_W - 82, RUI_HINT_Y - 44, 74, RUI_BTN_H, PANEL, TEAL, "DROP", 2);
         return;
     }
-    /* ---- the menu ---- */
-    render_rect_blend(fb, stride, 0, 0, TANK_W, TANK_H, INK, 232);
-    render_text(fb, stride, RUI_CAT_X, 14, 3, WHITE, "BUILD");
+    /* ---- the catalogue ---- */
+    render_rect_blend(fb, stride, 0, 0, TANK_W, TANK_H, INK, 236);
+    render_text(fb, stride, RUI_CAT_X, 14, 3, WHITE, "CORAL");
     render_button(fb, stride, TANK_W - 96, 8, 88, 28, PANEL, TEAL, "DONE", 2);
-    /* the colour bar: circles down the left, the chosen one ringed */
     for (int i = 1; i <= REEF_COLOURS; i++) {
         int slot = i - 1;
         int cy = RUI_MENU_Y + (slot / RUI_BAR_COLS) * RUI_DOT_DY + RUI_DOT_R;
         int cx = 4 + (slot % RUI_BAR_COLS) * RUI_DOT_DX + RUI_DOT_R;
-        for (int dy = -RUI_DOT_R; dy <= RUI_DOT_R; dy++) {      /* a filled circle, cheaply */
-            int half = (int)(sqrtf((float)(RUI_DOT_R * RUI_DOT_R - dy * dy)));
+        for (int dy = -RUI_DOT_R; dy <= RUI_DOT_R; dy++) {
+            int half = (int)sqrtf((float)(RUI_DOT_R * RUI_DOT_R - dy * dy));
             render_rect(fb, stride, cx - half, cy + dy, half * 2 + 1, 1, REEF_PALETTE[i]);
         }
-        if (!s_erase && i == s_colour)
+        if (!s_rub && i == s_colour)
             render_rect_edge(fb, stride, cx - RUI_DOT_R - 3, cy - RUI_DOT_R - 3,
                              RUI_DOT_R * 2 + 7, RUI_DOT_R * 2 + 7, WHITE);
     }
-    /* and the rubber, at the foot of the bar */
     { int ey = RUI_MENU_Y + RUI_BAR_ROWS * RUI_DOT_DY + 6;
-      render_button(fb, stride, 4, ey, RUI_BAR_W - 8, 28, s_erase ? 0x3a1418 : PANEL, 0xf25b65, "RUB", 2); }
-    /* the catalogue, scrolled */
+      render_button(fb, stride, 4, ey, RUI_BAR_W - 8, 28, s_rub ? 0x3a1418 : PANEL, NO, "OUT", 2); }
     for (int i = 0; i < REEF_SHAPE_N; i++) {
         int col = i % RUI_CAT_COLS, row = i / RUI_CAT_COLS;
         int x = RUI_CAT_X + col * (RUI_TILE + RUI_TILE_PAD);
@@ -271,35 +799,24 @@ void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
         if (y + RUI_TILE < RUI_MENU_Y - 4 || y > RUI_FOOT_Y) continue;
         render_rect(fb, stride, x, y, RUI_TILE, RUI_TILE, PANEL);
         render_rect_edge(fb, stride, x, y, RUI_TILE, RUI_TILE, i == s_shape ? WHITE : FAINT);
-        uint16_t m = REEF_SHAPES[i].mask;
-        int x0, y0, w, h; reef_shape_bounds(m, &x0, &y0, &w, &h);
-        int cell = 14;
-        int ox = x + (RUI_TILE - w * cell) / 2 - x0 * cell;
-        int oy = y + (RUI_TILE - h * cell) / 2 - y0 * cell + 4;
-        rui_shape_tile(fb, stride, ox, oy, cell, m, REEF_PALETTE[s_erase ? 14 : s_colour], 255);
-        render_text(fb, stride, x + (RUI_TILE - render_text_w(REEF_SHAPES[i].name, 1)) / 2, y + RUI_TILE - 12,
-                    1, FAINT, REEF_SHAPES[i].name);
+        const reef_shape_t *sh = &REEF_SHAPES[i];
+        int aw = sh->cw * REEF_CELL, ah = sh->ch * REEF_CELL;
+        reef_draw_shape(fb, stride, x + (RUI_TILE - aw) / 2, y + (RUI_TILE - 16 - ah) / 2 + 2,
+                        i, (uint8_t)s_colour, 255, 1.0f);
+        render_text(fb, stride, x + (RUI_TILE - render_text_w(sh->name, 1)) / 2, y + RUI_TILE - 12,
+                    1, FAINT, sh->name);
     }
     render_rect(fb, stride, 0, RUI_FOOT_Y, TANK_W, TANK_H - RUI_FOOT_Y, INK);
-    render_text(fb, stride, RUI_CAT_X, RUI_FOOT_Y + 5, 2, FAINT, "DRAG TO SCROLL  -  TAP A SHAPE");
+    render_text(fb, stride, RUI_CAT_X, RUI_FOOT_Y + 5, 2, FAINT, "DRAG TO SCROLL  -  TAP A CORAL");
 }
 
-/* ---- the touches -------------------------------------------------------
- * The canvas and the menu want different things from the same three calls,
- * so each one asks which it is first. Coordinates are SCREEN space; the
- * builder owns the whole glass while it is up, so there is no camera to
- * undo here. */
 void reef_ui_press(tank_t *t, float x, float y) {
-    (void)t;
-    if (s_menu) { s_scroll0 = s_scroll; return; }        /* a drag will scroll the catalogue */
-    if (rui_mask()) { s_cx = (int)(x / REEF_CELL) - 1; s_cy = (int)(y / REEF_CELL) - 1; rui_clamp(); }
+    if (s_menu) { s_scroll0 = s_scroll; return; }
+    rui_to_cell(t, x, y);
 }
 void reef_ui_drag(tank_t *t, float x, float y) {
-    (void)t;
-    if (s_menu) return;                                   /* scrolling is done on the release's travel */
-    if (rui_mask()) { s_cx = (int)(x / REEF_CELL) - 1; s_cy = (int)(y / REEF_CELL) - 1; rui_clamp(); }
+    if (!s_menu) rui_to_cell(t, x, y);
 }
-/* the catalogue's scroll, clamped to what there is */
 static void rui_scroll_to(float v) {
     int rows = (REEF_SHAPE_N + RUI_CAT_COLS - 1) / RUI_CAT_COLS;
     float span = (float)(rows * (RUI_TILE + RUI_TILE_PAD)) - (float)(RUI_FOOT_Y - RUI_MENU_Y);
@@ -307,44 +824,47 @@ static void rui_scroll_to(float v) {
     s_scroll = v < 0 ? 0 : v > span ? span : v;
 }
 int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
-    bool swipe_up = dy < -40 && fabsf(dx) < fabsf(dy);
     if (!s_menu) {
-        if (swipe_up) { s_menu = true; return REEF_UI_KEPT; }        /* the whole interface */
-        uint16_t m = rui_mask();
-        if (m) {
-            if (y >= RUI_HINT_Y - 44 && y < RUI_HINT_Y - 44 + RUI_FOOT_H) {
-                if (x < 96)            { s_rot = (s_rot + 1) & 3; rui_clamp(); return REEF_UI_KEPT; }   /* TURN */
-                if (x >= TANK_W - 96)  { s_shape = -1; return REEF_UI_KEPT; }                            /* DROP */
-            }
-            if (y < RUI_HINT_Y - 6) {                                /* the canvas: stamp it */
-                s_cx = (int)(x / REEF_CELL) - 1; s_cy = (int)(y / REEF_CELL) - 1; rui_clamp();
-                reef_stamp(t, m, s_cx, s_cy, (uint8_t)(s_erase ? 0 : s_colour));
-                return REEF_UI_KEPT;
-            }
+        if (dy < -40 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }
+        if (s_shape >= 0 && y >= RUI_HINT_Y - 44 && y < RUI_HINT_Y - 44 + RUI_BTN_H && x >= TANK_W - 96) {
+            s_shape = -1; return REEF_UI_KEPT;                      /* DROP */
+        }
+        if (y >= RUI_HINT_Y - 6) return REEF_UI_NONE;
+        if (s_rub) {                                                /* take one back out */
+            int i = reef_at(t, (int)(x / REEF_CELL), (int)(y / REEF_CELL));
+            if (i >= 0) { reef_remove(t, i); return REEF_UI_KEPT; }
+            return REEF_UI_NONE;
+        }
+        if (s_shape >= 0) {
+            rui_to_cell(t, x, y);
+            if (s_settled && reef_place(t, s_shape, (uint8_t)s_colour, s_cx, s_cy)) return REEF_UI_KEPT;
+            return REEF_UI_NONE;                                    /* refused: the ghost said so */
         }
         return REEF_UI_NONE;
     }
-    /* ---- the menu ---- */
-    if (dy > 40 && fabsf(dx) < fabsf(dy)) { s_menu = false; return REEF_UI_KEPT; }   /* swipe back down */
-    if (fabsf(dy) > 24) { rui_scroll_to(s_scroll0 - dy); return REEF_UI_KEPT; }      /* a drag scrolls */
-    if (y < 40 && x >= TANK_W - 104) { s_menu = false; return REEF_UI_CLOSE; }       /* DONE */
-    if (x < RUI_BAR_W) {                                                             /* the colour bar */
+    if (dy > 40 && fabsf(dx) < fabsf(dy)) { s_menu = false; return REEF_UI_KEPT; }
+    if (fabsf(dy) > 24) { rui_scroll_to(s_scroll0 - dy); return REEF_UI_KEPT; }
+    if (y < 40 && x >= TANK_W - 104) { s_menu = false; return REEF_UI_CLOSE; }
+    if (x < RUI_BAR_W) {
         int ey = RUI_MENU_Y + RUI_BAR_ROWS * RUI_DOT_DY + 6;
-        if (y >= ey && y < ey + 32) { s_erase = !s_erase; return REEF_UI_KEPT; }     /* the rubber */
+        if (y >= ey && y < ey + 32) { s_rub = !s_rub; if (s_rub) s_shape = -1; s_menu = false; return REEF_UI_KEPT; }
         int row = (int)((y - RUI_MENU_Y) / RUI_DOT_DY);
         int col = (int)((x - 4) / RUI_DOT_DX);
-        if (col < 0) col = 0; if (col >= RUI_BAR_COLS) col = RUI_BAR_COLS - 1;
+        if (col < 0) col = 0;
+        if (col >= RUI_BAR_COLS) col = RUI_BAR_COLS - 1;
         int i = row * RUI_BAR_COLS + col + 1;
-        if (row >= 0 && i >= 1 && i <= REEF_COLOURS) { s_colour = i; s_erase = false; }
+        if (row >= 0 && i >= 1 && i <= REEF_COLOURS) { s_colour = i; s_rub = false; }
         return REEF_UI_KEPT;
     }
-    for (int i = 0; i < REEF_SHAPE_N; i++) {                                         /* a shape: take it */
+    for (int i = 0; i < REEF_SHAPE_N; i++) {
         int col = i % RUI_CAT_COLS, row = i / RUI_CAT_COLS;
         int tx = RUI_CAT_X + col * (RUI_TILE + RUI_TILE_PAD);
         int ty = RUI_MENU_Y + row * (RUI_TILE + RUI_TILE_PAD) - (int)s_scroll;
-        if (y > RUI_FOOT_Y) break;                                                   /* the footer is not a tile */
+        if (y > RUI_FOOT_Y) break;
         if (x >= tx && x < tx + RUI_TILE && y >= ty && y < ty + RUI_TILE) {
-            s_shape = i; s_rot = 0; s_menu = false; rui_clamp();
+            s_shape = i; s_rub = false; s_menu = false;
+            s_cy = REEF_ROWS - REEF_SHAPES[i].ch;                   /* start it on the floor */
+            s_settled = reef_settle(t, i, s_cx, s_cy) >= 0;
             return REEF_UI_KEPT;
         }
     }

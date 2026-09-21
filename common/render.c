@@ -1164,11 +1164,11 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
             fb[y * stride + x] = rgb565(col, dim);
         }
     }
-    reef_draw(t, fb, stride, dim);          /* the keeper's own reef: the backdrop (reef.c) */
     /* reef rock (the entity fish know); it widens as the tank earns milestones */
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     fill_ellipse(&c, t->reef_x, TANK_H - 16, 34 * grow, 10 + 2 * (grow - 1) * 10, 0x123028, 255);
     { int cx, z; bool placing; if (castle_state(t, &cx, &z, &placing)) draw_castle(&c, cx, 0, false); }   /* uncached: always drawn here */
+    reef_draw(t, fb, stride, dim);          /* the keeper's own reef, in front of the old rock (reef.c) */
 }
 
 
@@ -1215,10 +1215,6 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
     }
     /* reef rock (the entity fish know); widens as the tank earns milestones */
     ctx_t c = ctx_full(sc, TANK_W, dim);
-    /* the keeper's own reef (reef.c): the backdrop, so it goes on before the
-       rock, the pebbles and the castle - and it is STATIC, so it bakes into
-       the cached scene and costs nothing per frame */
-    reef_draw(t, sc, TANK_W, dim);
     src_t s = src_color(0x123028, dim);
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     float rx = 34 * grow, ry = 10 + 2 * (grow - 1) * 10, cy = TANK_H - 16;
@@ -1228,6 +1224,12 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
         span_final(&c, (int)(t->reef_x - rx * w), (int)(t->reef_x + rx * w), y, &s, 255);
     }
     if (g_scene_castle_x >= 0) draw_castle(&c, g_scene_castle_x, 0, true);   /* the castle, unless it is being dragged */
+    /* the keeper's own reef (reef.c) goes on LAST of the static things: it is
+       the backdrop the kelp and the fish swim in front of, but it sits in
+       front of the old rock - which is a near-black lump at a fixed spot and
+       was painting straight over anything built near it. Still static, so it
+       bakes into the cached scene and costs nothing per frame. */
+    reef_draw(t, sc, TANK_W, dim);
 }
 
 void render_tank(const tank_t *t, uint16_t *fb, int stride) {

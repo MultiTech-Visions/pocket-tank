@@ -401,7 +401,7 @@ typedef struct tank {
      * cells at two to a byte, drawn as the backdrop behind everything. Kept
      * here rather than in reef.c so progression.c saves it with the rest and
      * one tank is one struct. 28 x 23 at 4 bits is 322 bytes. */
-    uint8_t  reef[322];
+    uint8_t  reef[322];   /* REEF_SAVE_BYTES; reef.c static-asserts the two agree */
     uint8_t  fish_speed;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a

@@ -566,22 +566,35 @@ sociable or idle, the same way the totem parade does, and the model still owns
 every decision it makes.
 
 **The reef builder.** The tank's backdrop is yours. **BUILD**, at the foot of
-the overview page, opens a grid of 16 px cells — 28 across, 23 down — over the
-live tank. Swipe up and the catalogue comes in: fifteen colours as circles
-down the left, sixteen Tetris-ish shapes beside them, drag to scroll. Tap a
-colour, tap a shape, and the menu drops away with that piece under your
-finger. Move it, **TURN** it, tap to place it. **RUB** swaps the paint for an
-eraser. Everything else in the tank — the kelp, the sand, the shop's pieces,
-the fish — draws in front of it.
+the overview page, opens it over the live tank. Swipe up for the catalogue:
+fifteen colours as circles down the left, twelve corals beside them — staghorn,
+brain, fan, tube sponges, a table, an anemone, a whip, a mound. Tap a colour,
+tap a coral, and the catalogue drops away with that piece in hand. **OUT**
+turns it into a tool for taking pieces back out.
 
-It stores the *painted grid*, not a list of pieces: a fixed 322 bytes in the
-save however much you build, nothing to overflow, and stacking and overlap
-come free because a stamp is just paint. That is also how Lego behaves once
-it is together — nothing remembers where one brick ended.
+The coral is pixel art at the scale of the badge icons, drawn once and baked
+into the source (`tools/gen_coral.py` made it; nothing is generated at run
+time). None of the twelve is a rectangle. Each is drawn in three shades —
+deep, body, highlight — and your colour is applied to those, so one drawing
+works in any of the fifteen.
 
-Being static, it bakes into the cached scene rather than being redrawn each
-frame, so the cache's key carries the reef's edit count; without that a piece
-you placed would not appear until the next day/night change.
+**It stacks like a real thing.** A piece can only rest on the floor or on
+something already there; nothing floats in open water. You aim at a column and
+it *settles*, falling until it lands — asking somebody to line a sprite up with
+the sand by hand was the wrong job to give them. The ghost under your finger
+shows exactly where it will come to rest.
+
+**And it grows on a carrier.** Living coral builds on the dead skeleton of
+what grew before it, so every occupied cell gets rock behind it: solid where
+coral surrounds it on all sides, eaten away towards open water, and the erosion
+dithered against a hash of the pixel so the silhouette comes out ragged rather
+than square. Without it the pieces read as stamps on the water — because that
+is exactly what they were.
+
+The store is a list of pieces, not a painted grid: a sprite is not a grid of
+colours, and a list is what lets a piece be picked back up whole. Eighty
+pieces in a fixed 322 bytes. Being static it bakes into the cached scene, so
+the cache's key carries the reef's edit count.
 
 **The follow cam.** Tap a fish and the view eases in to 2x and keeps that
 fish with you, so you can see what it is actually doing. The scene is still
