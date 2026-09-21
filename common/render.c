@@ -457,9 +457,13 @@ void render_glow_carried(const tank_t *t, uint16_t *fb, int stride, float dim) {
 }
 /* the totem: a pole in the sand with a glowing alien head and two ribbons
  * that wave in the current - the thing you find your friends by */
-static void draw_totem(ctx_t *c, const tank_t *t) {
+static void draw_totem(ctx_t *c, const tank_t *t, bool carried_pass) {
     float px, py, lean = 0; bool carried = false;
     bool away = tank_totem_pose(t, &px, &py, &lean, &carried);
+    /* in a fish's mouth it is not decor any more: the decor pass skips it and
+       the carried pass, after the fish, draws it - the same deal as a stick in
+       a fin, so a big body never sits over the thing it is holding */
+    if (carried != carried_pass) return;
     /* three poses: in a fish's mouth, slammed into the sand at the party with
        a lean on it, or standing upright where the keeper put it */
     float footx, footy, topx, topy;
@@ -539,7 +543,7 @@ static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
         if (i == SD_IDX_LASER) draw_laser(c, t);
         else if (i == SD_IDX_BASS) draw_bass(c, t);
         else if (i == SD_IDX_GLOW) draw_glow(c, t);
-        else if (i == SD_IDX_TOTEM) draw_totem(c, t);
+        else if (i == SD_IDX_TOTEM) draw_totem(c, t, false);
         else draw_disco(c, t);
     }
 }
@@ -1344,6 +1348,13 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     if (tank_bit_live(t, SD_ITEM_GLOW)) {
         g_bb_on = true; g_bb_x0 = g_bb_y0 = 1 << 20; g_bb_x1 = g_bb_y1 = -1;
         draw_glow_set(&c, t, true);
+        g_bb_on = false;
+        if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1);
+    }
+    /* and the totem on parade, for the same reason */
+    if (tank_bit_live(t, SD_ITEM_TOTEM) && tank_totem_carry(t, NULL, NULL)) {
+        g_bb_on = true; g_bb_x0 = g_bb_y0 = 1 << 20; g_bb_x1 = g_bb_y1 = -1;
+        draw_totem(&c, t, true);
         g_bb_on = false;
         if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1);
     }
