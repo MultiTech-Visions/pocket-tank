@@ -411,7 +411,10 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / REMOVE */
-          if (r >= SHOP_TAP_STOW) {                                     /* REMOVE to the box, or PUT BACK */
+          if (r == SHOP_TAP_GRANT) {                                    /* the dev override: five taps on the balance coin */
+              progression_sd_grant(&tank, SD_DEV_GRANT); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+              ESP_LOGI(TAG, "shop: dev grant +%d sand dollars (%d)", SD_DEV_GRANT, (int)tank.sd_balance);
+          } else if (r >= SHOP_TAP_STOW) {                              /* REMOVE to the box, or PUT BACK */
               int item = r - SHOP_TAP_STOW;
               bool was_live = tank_item_live(&tank, item);
               if (progression_stow(&tank, item, was_live)) {

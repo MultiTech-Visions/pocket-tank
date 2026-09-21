@@ -210,7 +210,16 @@ milestones page's TANK row shows your balance, and it (or the UPGRADES
 button) opens the shop: a row per item with its price, UNLOCK when you can
 afford it, IN TANK once you own it, IN BOX if you have taken it out, and HOW
 TO EARN for the list. Eight things to buy, three rows to a shelf, and MORE
-turns the page. The first shelf holds the ones that change how the tank
+turns the page.
+
+*A way in, for a look.* Tapping the big sand dollar coin at the top of the
+shop **five times in a row** grants 1000 — the whole shelf costs 595, so one
+go buys everything with room to take a piece out and put it back while you
+look at it. Any other tap on the page resets the count, and so does leaving
+it, so nobody finds it by accident; a tank given away behaves exactly as it
+always did unless somebody taps that one coin five times running. On the
+simulator **D** still pays 50 a press, and over the serial console the
+director's `dollars 1000` does the same thing. The first shelf holds the ones that change how the tank
 lives: the sword plant, the snail, and the castle described further down.
 The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the

@@ -2269,6 +2269,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
 #define SHP_BTN2_R    (SHP_MODAL_X + SHP_MODAL_W / 2 + 8)
 static int  g_shp_modal = -1;        /* the item whose modal is up, or -1 */
 static bool g_shp_earn;              /* the HOW TO EARN modal is up */
+static int  g_shp_coin;              /* consecutive taps on the balance coin (the dev grant) */
 static int  g_shp_page;              /* the shelf on show */
 static const icon_t *shop_icon(int item) {
     static const icon_t *const ic[SD_ITEM_COUNT] = { &icon_shop_plant, &icon_shop_snail, &icon_shop_castle,
@@ -2386,6 +2387,17 @@ int render_shop_tap(const tank_t *t, float x, float y) {
         }
         return on_mid ? SHOP_TAP_STOW + item : SHOP_TAP_KEPT;                   /* REMOVE */
     }
+    /* the dev grant (2026-09-21): SHP_DEV_TAPS taps IN A ROW on the balance
+     * coin are worth SD_DEV_GRANT - enough to buy the whole shelf and look at
+     * everything without playing for it. Any other tap on the page resets the
+     * count, so nobody reaches it by accident; a tank in somebody else's hands
+     * behaves exactly as before unless they tap the same 64 px coin five times
+     * running. The platform does the granting: this page never writes. */
+    if (x >= SHP_COIN_X && x < SHP_COIN_X + 64 && y >= SHP_COIN_Y && y < SHP_COIN_Y + 64) {
+        if (++g_shp_coin < SHP_DEV_TAPS) return SHOP_TAP_KEPT;
+        g_shp_coin = 0; return SHOP_TAP_GRANT;
+    }
+    g_shp_coin = 0;
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SHOP_TAP_CLOSE;
     if (x < SHP_EARN_X + SHP_EARN_W + 8 && y >= MSP_CLOSE_Y - 4) { g_shp_earn = true; return SHOP_TAP_KEPT; }
     if (SHP_PAGES > 1 && y >= MSP_CLOSE_Y - 4) { g_shp_page = (g_shp_page + 1) % SHP_PAGES; return SHOP_TAP_KEPT; }   /* MORE: the next shelf */
@@ -2395,7 +2407,7 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     }
     return SHOP_TAP_NONE;
 }
-void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; }
+void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; g_shp_coin = 0; }
 
 /* the toast: "+N" by a coin, top centre, for TOAST_S on the tank clock */
 #define TOAST_S 2.5f

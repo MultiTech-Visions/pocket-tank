@@ -129,8 +129,14 @@ void render_milestones_leave(void);
  * HOW TO EARN and CLOSE turns it, and wraps) turned the page. Page state is
  * render-local; render_shop_leave clears it (back to the first shelf) when
  * the page closes. */
-enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2,
+enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_GRANT = 3,
        SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_STOW = 64 };   /* BUY / MOVE / STOW + item index */
+/* SHOP_TAP_GRANT (2026-09-21): the dev override. SHP_DEV_TAPS taps in a row on
+ * the balance coin at the top of the shop; the platform calls
+ * progression_sd_grant(t, SD_DEV_GRANT) and the balance redraws. Any other tap
+ * on the page resets the count. It is a plain code, not a base + item index,
+ * so a handler testing `r >= SHOP_TAP_BUY` can never mistake it for a sale. */
+#define SHP_DEV_TAPS 5
 /* SHOP_TAP_STOW (2026-09-20): the owned item's REMOVE or PUT IN TANK button.
  * The platform calls progression_stow to flip it, and when a piece comes back
  * out of the box and can be placed, opens the placement page for it. */

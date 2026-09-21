@@ -2215,6 +2215,10 @@ int main(int argc, char **argv) {
             else if (shop_view) {                       /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(&tank, (float)press_x, (float)press_y);
                 if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
+                else if (r == SHOP_TAP_GRANT) {             /* the dev override: five taps on the balance coin */
+                    progression_sd_grant(&tank, SD_DEV_GRANT); snd(SND_CONFIRM, AUDIO_PITCH_ONE);
+                    printf("shop: dev grant +%d sand dollars (%d)\n", SD_DEV_GRANT, tank.sd_balance);
+                }
                 else if (r >= SHOP_TAP_STOW) {              /* REMOVE to the box, or PUT BACK */
                     int item = r - SHOP_TAP_STOW;
                     bool was_live = tank_item_live(&tank, item);
