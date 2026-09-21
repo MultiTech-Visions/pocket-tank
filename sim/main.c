@@ -1035,6 +1035,9 @@ static int  fishpage_fish = -1;      /* a fish's own page (ui_fish_page), from e
 static float sim_bat = 0.87f;        /* no cell here: the B key steps it so every bolt colour can be seen */
 static bool confirm_view = false;    /* X: the reset prompt (YES wipes the save) */
 static bool settings_view = false;   /* the settings page (from the milestones page's SETTINGS button) */
+static bool dev_view = false;        /* the dev page (seven taps on the version line) */
+static char dev_status[48];          /* the last dev action's one line */
+static float dev_bat = -1.0f;        /* a faked charge for the bolt, or < 0 for the real one */
 static bool shop_view = false;       /* the shop (the sand dollar on the milestones page's TANK row; $ key) */
 static bool ms_back = false;         /* the settings page's CLOSE just brought the milestones page back (2026-09-16,
                                         Strato: a submenu's CLOSE returns to the menu, not the tank): this release is spent */
@@ -1098,7 +1101,7 @@ static void sound_init(void) {
 }
 /* per frame: the notice queue, the bubble loop, the card cue, night */
 static void sound_frame(uint32_t now, float dt) {
-    notice_tick(&tank, dt, setup_active() || confirm_view || milestones_view || settings_view || shop_view || fishpage_fish >= 0);
+    notice_tick(&tank, dt, setup_active() || confirm_view || milestones_view || settings_view || dev_view || shop_view || fishpage_fish >= 0);
     int cue = notice_take_cue();
     if (cue >= 0) snd(cue, AUDIO_PITCH_ONE);
     bool loop = setup_active() && !setup_is_birth() && setup_page() == SETUP_PG_BUBBLES;
@@ -1137,7 +1140,8 @@ static void frame_cb(lv_timer_t *timer) {
                        printf("a new fry, %s: the birth flow is up (announce / name / family; S drops it)\n", tank.fish[nb].name); }
     }
     sound_frame(now, dt);
-    if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
+    if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
+    else if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
     else if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
     else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume());
     else if (shop_view) render_shop(&tank, canvas_buf, TANK_W);
@@ -1149,7 +1153,7 @@ static void frame_cb(lv_timer_t *timer) {
             if (selected_fish >= 0)
                 render_stats_card(&tank, selected_fish, canvas_buf, TANK_W);
         }
-        ui_battery_bolt(canvas_buf, TANK_W, sim_bat, false, tank.clock);   /* the charge bolt, top right, always */
+        ui_battery_bolt(canvas_buf, TANK_W, dev_bat >= 0 ? dev_bat : sim_bat, false, tank.clock);   /* the charge bolt, top right, always */
         const notice_t *nt = notice_current();
         if (nt) render_notice(&tank, canvas_buf, TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
     }
@@ -2187,14 +2191,16 @@ int main(int argc, char **argv) {
             }
         } else if (settings_view && !confirm_view) {             /* the settings page: segments, the seconds wheel, CLOSE */
             int v = 0, r = render_settings_touch(&tank, (float)mx, (float)my, mpress, &v);
-            if (r == SET_TAP_CLOSE) { settings_view = false; milestones_view = true; ms_back = true; }   /* back to the milestones page */
+            if (r == SET_TAP_DEV) { settings_view = false; dev_view = true; dev_status[0] = 0;   /* seven taps on the version line */
+                                    printf("dev page: up (CLOSE leaves)\n"); }
+            else if (r == SET_TAP_CLOSE) { settings_view = false; milestones_view = true; ms_back = true; }   /* back to the milestones page */
             else if (r == SET_TAP_BRIGHT) sim_bright = v;
             else if (r == SET_TAP_VOLUME) { if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); } if (v) snd(SND_CONFIRM, AUDIO_PITCH_ONE);
                                             printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
         }
-        bool modal = confirm_view || setup_up || settings_view || shop_view || fishpage_fish >= 0;
+        bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || fishpage_fish >= 0;
         if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
         if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
         if (!mpress && mdown) {
@@ -2212,6 +2218,21 @@ int main(int argc, char **argv) {
             else if (notice_current()) notice_dismiss();      /* an announcement up: the tap closes it */
             else if (settings_view || ms_back) ms_back = false;   /* the page owns the glass: render_settings_touch took it
                                                                     (and its CLOSE already brought the milestones page back) */
+            else if (dev_view) {                        /* the dev page: eight buttons and CLOSE */
+                int a = ui_dev_page_tap((float)press_x, (float)press_y);
+                if (a == UI_DEV_CLOSE) { dev_view = false; settings_view = true; }
+                else if (a == UI_DEV_BATTERY) {
+                    dev_bat = ui_dev_battery_next(dev_bat);
+                    if (dev_bat < 0) snprintf(dev_status, sizeof dev_status, "BATTERY: THE REAL ONE AGAIN");
+                    else snprintf(dev_status, sizeof dev_status, "BATTERY: %d%% (%s)", (int)(dev_bat * 100 + 0.5f),
+                                  (const char *[]){ "RED", "ORANGE", "YELLOW", "GREEN" }[ui_battery_level(dev_bat)]);
+                    snd(SND_CONFIRM, AUDIO_PITCH_ONE); printf("dev: %s\n", dev_status);
+                }
+                else if (a > UI_DEV_CLOSE) {
+                    ui_dev_apply(&tank, a, dev_status, sizeof dev_status);
+                    snd(SND_CONFIRM, AUDIO_PITCH_ONE); printf("dev: %s\n", dev_status);
+                }
+            }
             else if (shop_view) {                       /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(&tank, (float)press_x, (float)press_y);
                 if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
@@ -2297,7 +2318,7 @@ int main(int argc, char **argv) {
         mdown = mpress;
         if (confirm_view && now_ms - confirm_ms > CONFIRM_MS) { confirm_view = false; printf("reset prompt: timed out, tank kept\n"); }
         if (k[SDL_SCANCODE_X] && !xdown && !confirm_view) {   /* the keeper's reset prompt (device: hold BOOT + tap) */
-            confirm_view = true; confirm_ms = now_ms; selected_fish = -1; milestones_view = false; settings_view = false; shop_view = false; render_shop_leave();
+            confirm_view = true; confirm_ms = now_ms; selected_fish = -1; milestones_view = false; settings_view = false; dev_view = false; shop_view = false; render_shop_leave();
             printf("reset prompt: click YES or NO (it gives up after %d s)\n", CONFIRM_MS / 1000);
         }
         xdown = k[SDL_SCANCODE_X];

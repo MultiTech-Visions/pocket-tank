@@ -191,7 +191,14 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_LIGHT (*value 1 = AUTO, the idle rule; 0 = MANUAL, the double-tap),
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
-enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5 };
+enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
+       SET_TAP_DEV = 6 };
+/* SET_TAP_DEV (2026-09-21): the phone trick. SET_DEV_TAPS taps in a row on the
+ * FW version line at the bottom left open ui_ext.c's dev page; from three taps
+ * on, the line itself counts down the ones still wanted. Any other tap on the
+ * settings page resets it, and so does leaving the page, so a keeper who never
+ * goes looking never sees it. */
+#define SET_DEV_TAPS 7
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);

@@ -2445,6 +2445,7 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
 #define SET_NOTE_Y    146            /* "FISH ARE QUIET AT NIGHT" */
 #define SET_ROW3_Y    176            /* LIGHTS OUT */
 #define SET_LABEL_X   32
+static int g_set_ver_taps;           /* consecutive taps on the version line (the dev page) */
 #define SET_SEG_X     190            /* first segment */
 #define SET_SEG_W     76
 #define SET_SEG_DX    82
@@ -2518,7 +2519,12 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
        fw version is something most people should not care about. minimize
        it", "make it 8px tall", "hug the bottom of the frame" (2026-09-16).
        The installer page shows the version it would write in the same words. */
-    char ver[40]; snprintf(ver, sizeof ver, "FW %s", version_port_string());
+    char ver[64]; snprintf(ver, sizeof ver, "FW %s", version_port_string());
+    /* three taps in and the line starts counting down, the way a phone does */
+    if (g_set_ver_taps >= 3) {
+        int left = SET_DEV_TAPS - g_set_ver_taps;
+        snprintf(ver + strlen(ver), sizeof ver - strlen(ver), "   %d MORE", left);
+    }
     draw_text_8px(&c, SET_LABEL_X, TANK_H - 8 - 6, MSP_DIM, ver);
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
 }
@@ -2530,7 +2536,7 @@ static int set_segment(float x, int n) {
 /* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent,
  * VOLUME 0..2, LIGHT 1 = AUTO / 0 = MANUAL; the number's own hits carry no
  * value (IDLE_UP / IDLE_DOWN the chevrons, IDLE_NUM the number itself). */
-enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN };
+enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN, SET_HIT_VERSION };
 int render_settings_tap(float x, float y, int *value) {
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SET_TAP_CLOSE;
     /* the row bands: from a little above each segment down to the next row
@@ -2546,6 +2552,8 @@ int render_settings_tap(float x, float y, int *value) {
         if (y < SET_NUM_Y + SET_NUM_H + 14) return SET_HIT_IDLE_NUM;      /* the number */
         return SET_HIT_IDLE_DOWN;                                          /* below, down to the bezel */
     }
+    /* the version line, bottom left: nothing else claims this corner */
+    if (y >= TANK_H - 34 && x < SET_LABEL_X + 170) { *value = 0; return SET_HIT_VERSION; }
     return SET_TAP_NONE;
 }
 static void set_step(tank_t *t, int dir) {
@@ -2578,7 +2586,10 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                 } else if ((h == SET_HIT_IDLE_UP || h == SET_HIT_IDLE_DOWN) && t->light_auto) {
                     set_step(t, h == SET_HIT_IDLE_UP ? +1 : -1); progression_settings_changed();
                     r = SET_TAP_IDLE; *value = t->light_idle_s;
+                } else if (h == SET_HIT_VERSION) {                  /* the phone trick: seven in a row */
+                    if (++g_set_ver_taps >= SET_DEV_TAPS) { g_set_ver_taps = 0; r = SET_TAP_DEV; }
                 } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME) { r = h; *value = v; }
+                if (h != SET_HIT_VERSION) g_set_ver_taps = 0;          /* any other tap starts the run over */
             }
         }
     }

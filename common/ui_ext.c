@@ -321,3 +321,117 @@ int ui_fish_page_tap(const tank_t *t, int fish, float x, float y) {
 }
 
 void ui_fish_page_leave(void) { g_fp_modal = -1; }
+
+/* ---- the dev page (2026-09-21) --------------------------------------
+ * Seven taps on the settings page's version line open this. The grid is two
+ * columns of four; the eighth cell is CLOSE, so the thumb always finds a way
+ * out in the same place the other pages put it. */
+#define DV_COLS   2
+#define DV_X0     24
+#define DV_DX     212
+#define DV_W      188
+#define DV_Y0     72
+#define DV_DY     54
+#define DV_H      44
+#define DV_ROWS   4
+/* the order on the glass, and what each one asks the platform for */
+static const struct { const char *label; int act; } DV_BTN[DV_COLS * DV_ROWS] = {
+    { "+1000 SAND",  UI_DEV_DOLLARS },    { "BROKE",      UI_DEV_BROKE },
+    { "BUY IT ALL",  UI_DEV_UNLOCK_ALL }, { "GROW A FISH", UI_DEV_GROW },
+    { "BASS PARTY",  UI_DEV_PARTY },      { "LIGHT",      UI_DEV_LIGHT },
+    { "ADD A FRY",   UI_DEV_FRY },        { "BATTERY",    UI_DEV_BATTERY },
+};
+static void dv_cell(int i, int *x, int *y) {
+    *x = DV_X0 + (i % DV_COLS) * DV_DX;
+    *y = DV_Y0 + (i / DV_COLS) * DV_DY;
+}
+void ui_dev_page(const tank_t *t, uint16_t *fb, int stride, const char *status) {
+    render_rect(fb, stride, 0, 0, TANK_W, TANK_H, INK);
+    render_text(fb, stride, DV_X0, 14, 3, WHITE, "DEV");
+    render_text(fb, stride, DV_X0 + 64, 20, 2, FAINT, "NOT FOR THE KEEPER");
+    /* what the tank is worth and holds right now, so a button's effect shows */
+    char line[48];
+    snprintf(line, sizeof line, "SAND %d    FISH %d", (int)t->sd_balance, t->n_fish);
+    render_text(fb, stride, DV_X0, 46, 2, TEAL, line);
+    for (int x = DV_X0; x < TANK_W - DV_X0; x++) render_rect_blend(fb, stride, x, 66, 1, 1, DIM, 200);
+    for (int i = 0; i < DV_COLS * DV_ROWS; i++) {
+        int bx, by; dv_cell(i, &bx, &by);
+        render_button(fb, stride, bx, by, DV_W, DV_H, INNER, TEAL, DV_BTN[i].label, 2);
+    }
+    /* the last action's line sits between the grid and CLOSE, never under it */
+    if (status && *status) render_text(fb, stride, DV_X0, 288, 2, FAINT, status);
+    render_button(fb, stride, FP_CLOSE_X, FP_CLOSE_Y, FP_CLOSE_W, FP_CLOSE_H, INNER, TEAL, "CLOSE", 2);
+}
+int ui_dev_page_tap(float x, float y) {
+    if (x >= FP_CLOSE_X - 12 && y >= FP_CLOSE_Y - 8) return UI_DEV_CLOSE;
+    for (int i = 0; i < DV_COLS * DV_ROWS; i++) {
+        int bx, by; dv_cell(i, &bx, &by);
+        if (x >= bx - 6 && x < bx + DV_W + 6 && y >= by - 6 && y < by + DV_H + 6) return DV_BTN[i].act;
+    }
+    return UI_DEV_NONE;
+}
+
+/* what each button actually does. One copy, called by both platforms. */
+bool ui_dev_apply(tank_t *t, int act, char *status, size_t n) {
+    switch (act) {
+    case UI_DEV_DOLLARS:
+        progression_sd_grant(t, SD_DEV_GRANT);
+        snprintf(status, n, "+%d - NOW %d SAND", SD_DEV_GRANT, (int)t->sd_balance);
+        return true;
+    case UI_DEV_BROKE:
+        progression_sd_grant(t, -t->sd_balance);
+        snprintf(status, n, "BROKE AGAIN - NOTHING LEFT");
+        return true;
+    case UI_DEV_UNLOCK_ALL: {
+        int bought = 0;
+        for (int i = 0; i < SD_ITEM_COUNT; i++) {
+            if (t->sd_unlocks & SD_ITEMS[i].bit) continue;
+            if (t->sd_balance < SD_ITEMS[i].price) progression_sd_grant(t, SD_ITEMS[i].price - t->sd_balance);
+            if (progression_buy(t, i)) bought++;
+        }
+        snprintf(status, n, bought ? "BOUGHT %d - ALL IN THE TANK" : "NOTHING LEFT TO BUY", bought);
+        return true;
+    }
+    case UI_DEV_GROW: {
+        /* the youngest fish takes the next step up, so repeated presses walk
+           the whole tank up a stage at a time */
+        int who = -1; float young = 0;
+        for (int i = 0; i < t->n_fish; i++) {
+            float a = progression_age_s(t, i);
+            if (who < 0 || a < young) { who = i; young = a; }
+        }
+        if (who < 0) { snprintf(status, n, "NO FISH TO GROW"); return true; }
+        float next = young < STAGE_JUV_AGE ? STAGE_JUV_AGE
+                   : young < STAGE_ADULT_AGE ? STAGE_ADULT_AGE
+                   : young < STAGE_ELDER_AGE ? STAGE_ELDER_AGE : young + STAGE_ELDER_AGE;
+        progression_set_age(t, who, next);
+        /* the schema's stage token is lowercase; this page shouts like the rest */
+        char stage[12]; snprintf(stage, sizeof stage, "%s", STAGE_NAMES[t->fish[who].stage]);
+        for (char *c = stage; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
+        snprintf(status, n, "%s IS %s NOW", t->fish[who].name, stage);
+        return true;
+    }
+    case UI_DEV_PARTY:
+        if (!tank_bit_live(t, SD_ITEM_TOTEM)) { snprintf(status, n, "NO TOTEM - BUY IT ALL FIRST"); return true; }
+        if (t->totem_phase != TOTEM_OFF)      { snprintf(status, n, "A PARADE IS ALREADY RUNNING"); return true; }
+        tank_totem_force(t);
+        snprintf(status, n, "%s HAS THE TOTEM - LIGHTS OUT", t->fish[t->totem_carrier].name);
+        return true;
+    case UI_DEV_LIGHT:
+        tank_toggle_light(t);
+        snprintf(status, n, t->night ? "LIGHTS OUT" : "LIGHTS ON");
+        return true;
+    case UI_DEV_FRY:
+        progression_stage_arrival(t);
+        snprintf(status, n, "A FRY IS ON ITS WAY");
+        return true;
+    default:
+        return false;                     /* UI_DEV_BATTERY: the platform's own */
+    }
+}
+float ui_dev_battery_next(float frac) {
+    const float STEPS[] = { 1.0f, 0.60f, 0.40f, 0.10f };   /* green, yellow, orange, red */
+    for (int i = 0; i < 4; i++)
+        if (fabsf(frac - STEPS[i]) < 0.005f) return i == 3 ? -1.0f : STEPS[i + 1];
+    return STEPS[0];                                        /* not on the walk: start at green */
+}

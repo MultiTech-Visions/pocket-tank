@@ -344,6 +344,8 @@ static void on_tank_event(int ev, int fish, void *ud) {
 #define CRIT_BATTERY_FRAC  0.02f
 #define CRIT_BATTERY_READS 3
 static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
+static float s_dev_bat = -1.0f;      /* the dev page's faked charge, or < 0 for the real one */
+static char  s_dev_status[48];       /* its last action's one line */
 static int   s_bat_crit;                    /* consecutive reads at or under CRIT_BATTERY_FRAC */
 static int s_bat_fake = -1;                 /* director `battery N`: a staged gauge, for the camera (-1 = the real one) */
 void device_fake_battery(int pct) { s_bat_fake = pct < 0 ? -1 : pct > 100 ? 100 : pct; if (pct < 0) s_bat_low = false; }
@@ -410,6 +412,16 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
+        { int a = touch_port_take_dev();                                /* the dev page's buttons */
+          if (a == UI_DEV_BATTERY) {                                    /* the faked charge: the bolt's four colours */
+              s_dev_bat = ui_dev_battery_next(s_dev_bat);
+              if (s_dev_bat < 0) snprintf(s_dev_status, sizeof s_dev_status, "BATTERY: THE REAL ONE AGAIN");
+              else snprintf(s_dev_status, sizeof s_dev_status, "BATTERY: %d%%", (int)(s_dev_bat * 100 + 0.5f));
+              audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); ESP_LOGI(TAG, "dev: %s", s_dev_status);
+          } else if (a > UI_DEV_CLOSE) {
+              ui_dev_apply(&tank, a, s_dev_status, sizeof s_dev_status);
+              audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); ESP_LOGI(TAG, "dev: %s", s_dev_status);
+          } }
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / REMOVE */
           if (r == SHOP_TAP_GRANT) {                                    /* the dev override: five taps on the balance coin */
               progression_sd_grant(&tank, SD_DEV_GRANT); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
@@ -483,16 +495,19 @@ static void tank_task(void *arg) {
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
                 render_shop(&tank, fb[cur], TANK_W);
                 sel = -1;
+            } else if (touch_port_dev()) {       /* the dev page: the hidden workbench */
+                ui_dev_page(&tank, fb[cur], TANK_W, s_dev_status);
+                sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (sel >= 0) {                      /* tapped fish: stats card + the exact pill */
                 render_stats_card(&tank, sel, fb[cur], TANK_W);
                 if (s_bat_ok) render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_chg);
-            } else if (s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop() && touch_port_fishpage() < 0)
+            } else if (s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop() && !touch_port_dev() && touch_port_fishpage() < 0)
                 /* the charge bolt (2026-09-20): always on over the live tank, green
                    through red by quartile, so the tank says it is getting low without
                    being asked. The precise pill is still a tap away, on the card. */
-                ui_battery_bolt(fb[cur], TANK_W, s_bat_frac, s_bat_chg, tank.clock);
-            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_shop()) {   /* an announcement over the live tank */
+                ui_battery_bolt(fb[cur], TANK_W, s_dev_bat >= 0 ? s_dev_bat : s_bat_frac, s_bat_chg, tank.clock);
+            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_shop() && !touch_port_dev()) {   /* an announcement over the live tank */
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }

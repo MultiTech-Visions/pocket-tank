@@ -215,11 +215,8 @@ turns the page.
 *A way in, for a look.* Tapping the big sand dollar coin at the top of the
 shop **five times in a row** grants 1000 — the whole shelf costs 595, so one
 go buys everything with room to take a piece out and put it back while you
-look at it. Any other tap on the page resets the count, and so does leaving
-it, so nobody finds it by accident; a tank given away behaves exactly as it
-always did unless somebody taps that one coin five times running. On the
-simulator **D** still pays 50 a press, and over the serial console the
-director's `dollars 1000` does the same thing. The first shelf holds the ones that change how the tank
+look at it. Any other tap on the page resets the count. There is more behind
+the **dev page** below. The first shelf holds the ones that change how the tank
 lives: the sword plant, the snail, and the castle described further down.
 The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
@@ -542,6 +539,34 @@ still here if you want to host it yourself — `tools/make_installer.py` turns
 a firmware build plus the shipped model into one static folder
 (`installer/dist/`) that any HTTPS host will serve;
 [installer/README.md](installer/README.md) has the details.
+
+**The dev page.** The phone trick: open **SETTINGS**, then tap the dim `FW ...`
+line in the bottom left corner **seven times in a row**. From the third tap the
+line counts down the ones still wanted, and the seventh opens a page that is not
+otherwise reachable from anywhere. Any other tap on the settings page resets the
+count, so a keeper who never goes looking never sees it.
+
+Eight buttons, for looking at things that otherwise take hours of play or a
+serial cable:
+
+| | |
+| --- | --- |
+| **+1000 SAND** | the shop's whole shelf costs 595 |
+| **BROKE** | back to nothing, to see a price you cannot meet |
+| **BUY IT ALL** | every item bought and placed where it defaults |
+| **GROW A FISH** | the youngest fish takes its next stage, so presses walk the tank up |
+| **BASS PARTY** | the most sociable fish lifts the totem now — parade, party, march home |
+| **LIGHT** | day or night, this instant |
+| **ADD A FRY** | a birth is staged |
+| **BATTERY** | fakes the charge through the bolt's four colours, then back to the real one |
+
+The page draws the balance and the fish count at the top and the last action's
+result under the buttons, so a press shows its own effect. It never writes to
+the tank itself: `ui_dev_page_tap` says what was asked for and `ui_dev_apply`
+does it, one copy shared by the simulator and the firmware.
+
+On the simulator **D** still pays 50 sand dollars a press, and over the serial
+console the director's `dollars 1000` does the same.
 
 ## Run it on real hardware
 

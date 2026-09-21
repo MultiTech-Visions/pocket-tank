@@ -31,6 +31,11 @@ bool touch_port_pressed_since(int64_t us);     /* a finger is down and landed af
  * with its value (one-shot), CLOSE ends the page */
 bool touch_port_settings(void);
 void touch_port_show_settings(bool on);
+/* the dev page (2026-09-21): seven taps on the settings page's version line.
+ * touch_port_take_dev hands main.c the UI_DEV_* its last button asked for,
+ * once - the page itself never touches the tank. */
+bool touch_port_dev(void);
+int  touch_port_take_dev(void);
 int  touch_port_take_setting(int *value);       /* SET_TAP_* or 0 */
 /* the shop page (2026-09-15): up / show it; an UNLOCK or MOVE tapped hands
  * the raw tap code (SHOP_TAP_BUY / SHOP_TAP_MOVE + item; 0 = none) to main

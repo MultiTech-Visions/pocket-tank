@@ -605,6 +605,10 @@ bool  tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *car
 /* the party at the speaker is on (the disco ball and anything else that wants
  * to join in reads this) */
 bool  tank_bass_party(const tank_t *t);
+/* dev page / director: the most sociable fish lifts the totem NOW - no social
+ * bar, no cooldown, no waiting for dark. Does nothing without the totem in the
+ * tank, or while a parade is already running. */
+void  tank_totem_force(tank_t *t);
 /* the disco ball: where it is right now (y travels as it lowers), how far
  * down it has come (0 parked .. 1 fully lowered) and its spin in turns */
 void  tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin);
