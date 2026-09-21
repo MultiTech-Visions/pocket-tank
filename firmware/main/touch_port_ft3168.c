@@ -109,12 +109,14 @@ void touch_port_poll(tank_t *t) {
         setup_touch(t, tx, ty, touched);                     /* taps and the letter wheel, classified in setup.c */
         if (!setup_active()) {
             if (birth) ESP_LOGI(TAG, "birth flow done: %s named and saved", who >= 0 && who < t->n_fish ? t->fish[who].name : "?");
-            else if (place >= 0) ESP_LOGI(TAG, "placed: %s at x %.0f, %s layer, saved", SD_ITEMS[place].name, tank_decor_x(t, place),
-                                          tank_decor_z(t, place) == DECOR_Z_BACK ? "BEHIND" : tank_decor_z(t, place) == DECOR_Z_FRONT ? "IN FRONT" : "AMONG");
+            else if (place >= 0) { tank_decor_noticed(t, place);   /* it is in: the fish come and look */
+                                   ESP_LOGI(TAG, "placed: %s at x %.0f, %s layer, saved", SD_ITEMS[place].name, tank_decor_x(t, place),
+                                          tank_decor_z(t, place) == DECOR_Z_BACK ? "BEHIND" : tank_decor_z(t, place) == DECOR_Z_FRONT ? "IN FRONT" : "AMONG"); }
             else ESP_LOGI(TAG, "setup done: %s + %s", t->fish[0].name, t->fish[1].name);
         }
     }
     bool modal = s_ms || s_set || s_dev || s_shop || s_cf || su || s_fp >= 0;  /* a page or a prompt owns the glass */
+    if (s_fp >= 0 && touched && s_down) ui_fish_page_swipe(tx - s_lx, t->clock);   /* the long lines scrub */
     bool on_card = s_sel >= 0 && RENDER_CARD_HIT(s_px, s_py);   /* the card is not glass */
     if (touched) { s_lx = tx; s_ly = ty; if (!modal && !on_card) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
     if (touched && !modal && !on_card && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, tx, ty);

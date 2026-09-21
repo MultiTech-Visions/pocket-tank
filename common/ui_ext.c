@@ -162,6 +162,53 @@ const icon_t *ui_local_ms(uint32_t bit, const char **name) {
         if (FP_MS[i].bit == bit) { if (name) *name = FP_MS[i].name; return FP_MS[i].icon; }
     return NULL;
 }
+/* ---- the long lines (2026-09-21) -------------------------------------
+ * DOING and LAST can both outrun the column - a long goal word with an
+ * urgency on the end, an event with "3 MINUTES AGO" after it. They scroll
+ * instead of being cut off: out, a pause, back, a pause, forever. The walk
+ * is a pure function of the tank clock, so nothing has to be remembered
+ * between frames; a swipe parks it and hands the line to the finger for
+ * FP_SCRUB_HOLD_S, then it picks the walk back up. */
+#define FP_SCROLL_PXS    22.0f          /* how fast it walks */
+#define FP_SCROLL_PAUSE  1.6f           /* and how long it rests at each end */
+static float g_fp_scrub[2];             /* where the finger left each line */
+static float g_fp_scrub_until;          /* ... on the tank clock */
+static float fp_marquee_off(float clock, float over, int slot) {
+    float travel = over / FP_SCROLL_PXS;
+    float period = 2 * (travel + FP_SCROLL_PAUSE);
+    float u = fmodf(clock + slot * 0.9f, period);
+    if (u < FP_SCROLL_PAUSE) return 0;                       /* resting at the start */
+    u -= FP_SCROLL_PAUSE;
+    if (u < travel) return over * (u / travel);              /* walking out */
+    u -= travel;
+    if (u < FP_SCROLL_PAUSE) return over;                    /* resting at the end */
+    return over * (1.0f - (u - FP_SCROLL_PAUSE) / travel);   /* walking back */
+}
+/* one line, clipped to `w`: drawn shifted, then the overflow painted out
+ * either side. The page's background is flat, so painting over is enough and
+ * render.h needs no clip rectangle it does not already have. */
+static void fp_line(uint16_t *fb, int stride, int x, int y, int w, const char *text, float clock, int slot) {
+    int tw = render_text_w(text, 2);
+    if (tw <= w) { render_text(fb, stride, x, y, 2, WHITE, text); return; }
+    float over = (float)(tw - w);
+    float off = clock < g_fp_scrub_until ? g_fp_scrub[slot] : fp_marquee_off(clock, over, slot);
+    if (off < 0) off = 0;
+    if (off > over) off = over;
+    render_text(fb, stride, x - (int)(off + 0.5f), y, 2, WHITE, text);
+    render_rect(fb, stride, x - 200, y - 2, 200, 18, INK);           /* what hangs off the left */
+    render_rect(fb, stride, x + w, y - 2, TANK_W - (x + w), 18, INK); /* ... and off the right */
+    /* a hint that there is more, on the side there is more of */
+    if (off < over - 0.5f) render_text(fb, stride, x + w - 6, y, 2, FAINT, ">");
+    if (off > 0.5f)        render_text(fb, stride, x - 10, y, 2, FAINT, "<");
+}
+void ui_fish_page_swipe(float dx, float clock) {
+    for (int i = 0; i < 2; i++) {
+        g_fp_scrub[i] -= dx;                                  /* drag left, the text comes left */
+        if (g_fp_scrub[i] < 0) g_fp_scrub[i] = 0;
+        if (g_fp_scrub[i] > 400) g_fp_scrub[i] = 400;
+    }
+    g_fp_scrub_until = clock + FP_SCRUB_HOLD_S;
+}
 static int g_fp_modal = -1;          /* the level (0..FP_N-1) or milestone (FP_N+) whose panel is up, or -1 */
 
 static float fp_value(const fish_t *f, int i) {      /* every level on one 0..10 scale */
@@ -211,6 +258,8 @@ static const char *fp_event_words(int ev) {
     case TEV_CONFIRM:     return "SETTLED IN";
     case TEV_GLOW_PLAY:   return "DROPPED A GLOW STICK";
     case TEV_TOTEM_LIFT:  return "LIFTED THE TOTEM";
+    case TEV_GLOW_CATCH:  return "CAUGHT A GLOW STICK";
+    case TEV_GLOW_RALLY:  return "A LONG GLOW STICK RALLY";
     default:              return "NOTHING YET";
     }
 }
@@ -267,18 +316,21 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
     }
 
     /* what it is doing, and what last happened to it */
-    { char goal[32], line[64];
+    { const int LX = FP_COL0 + 72, LW = TANK_W - 20 - (FP_COL0 + 72);
+      char goal[32], line[64];
       fp_goal_words(f, goal, sizeof goal);
       snprintf(line, sizeof line, "%s, URGENCY %d", goal, (int)(f->goal.urgency + 0.5f));
-      render_text(fb, stride, FP_COL0, 258, 2, FAINT, "DOING");
-      render_text(fb, stride, FP_COL0 + 72, 258, 2, WHITE, line); }
-    { int ev; float ago; char line[64], when[16];
-      render_text(fb, stride, FP_COL0, 282, 2, FAINT, "LAST");
+      int ev; float ago; char l2[64], when[16];
       if (tank_last_event(fish, &ev, &ago)) {
           fp_ago_words(ago, when, sizeof when);
-          snprintf(line, sizeof line, "%s, %s", fp_event_words(ev), when);
-      } else snprintf(line, sizeof line, "NOTHING YET");
-      render_text(fb, stride, FP_COL0 + 72, 282, 2, WHITE, line); }
+          snprintf(l2, sizeof l2, "%s, %s", fp_event_words(ev), when);
+      } else snprintf(l2, sizeof l2, "NOTHING YET");
+      fp_line(fb, stride, LX, 258, LW, line, clock, 0);
+      fp_line(fb, stride, LX, 282, LW, l2, clock, 1);
+      /* the labels go on AFTER: a scrolling line paints out everything left
+         of its column, and that is where the labels sit */
+      render_text(fb, stride, FP_COL0, 258, 2, FAINT, "DOING");
+      render_text(fb, stride, FP_COL0, 282, 2, FAINT, "LAST"); }
 
     render_text(fb, stride, FP_COL0, 306, 2, FAINT, "TAP A BAR TO LEARN MORE");   /* ends at x 298, clear of CLOSE */
     render_button(fb, stride, FP_CLOSE_X, FP_CLOSE_Y, FP_CLOSE_W, FP_CLOSE_H, INNER, TEAL, "CLOSE", 2);

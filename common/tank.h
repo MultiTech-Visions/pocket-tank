@@ -609,6 +609,38 @@ bool  tank_bass_party(const tank_t *t);
  * bar, no cooldown, no waiting for dark. Does nothing without the totem in the
  * tank, or while a parade is already running. */
 void  tank_totem_force(tank_t *t);
+
+/* ---- play (2026-09-21) ---------------------------------------------------
+ * Glow sticks used to be picked up only by a fish whose goal already WAS
+ * GOAL_DART_PLAY, which almost never lined up with lying beside one, so a
+ * pile could sit untouched all day. A fish now carries a "keen" timer the
+ * reflex layer sets - the model still owns every goal, this only steers a
+ * fish that is already sociable or idle, exactly as the totem event does.
+ *
+ * Four things set it: a tap on the pile, a slow roll against boredom and
+ * curiosity so sticks get used with nobody watching, a bass party (everyone
+ * dances holding one), and being thrown to. */
+#define GLOW_WANT_S        9.0f     /* how long a fish stays keen */
+#define GLOW_ROLL_S        4.0f     /* how often the idle roll is made */
+#define GLOW_ROLL_P        0.16f    /* ... and its best odds, for a bored, curious fish */
+#define GLOW_NUDGE_REACH   170.0f   /* how far a tap on the pile carries */
+#define GLOW_NUDGE_N       2        /* how many fish it calls over */
+#define GLOW_THROW_REACH   150.0f   /* a catch is worth trying inside this */
+#define GLOW_THROW_MIN_S   1.2f     /* ... after holding it at least this long */
+#define GLOW_THROW_P       0.55f    /* the odds a carrier passes rather than keeps it */
+#define GLOW_CATCH_S       3.0f     /* how long a pass stays catchable */
+#define GLOW_CATCH_REACH   26.0f    /* and how close counts as caught */
+#define GLOW_RALLY_GEM     3        /* passes in one rally that make it a rare one */
+#define DECOR_LOOK_S       22.0f    /* how long a new piece draws a crowd */
+/* a tap at (x,y): if a glow stick is lying near it, the nearest a fish or two
+ * become keen and go for it. Returns how many were called over, 0 for a tap
+ * that was not on the pile - so a caller can tell whether the tap was spent. */
+int   tank_glow_nudge(tank_t *t, float x, float y);
+/* something just went into the tank: the fish come and look it over */
+void  tank_decor_noticed(tank_t *t, int item);
+/* the rally in flight: how many passes, and who is waiting for the catch
+ * (-1 for none). For the announcement and the tests. */
+int   tank_glow_rally(const tank_t *t, int *catcher);
 /* the disco ball: where it is right now (y travels as it lowers), how far
  * down it has come (0 parked .. 1 fully lowered) and its spin in turns */
 void  tank_disco_state(const tank_t *t, float *x, float *y, float *drop, float *spin);

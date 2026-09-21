@@ -2185,6 +2185,7 @@ int main(int argc, char **argv) {
             bool birth = setup_is_birth(); int who = setup_fish(), place = setup_item();
             setup_touch(&tank, (float)mx, (float)my, mpress);   /* taps and the letter wheel, classified in setup.c */
             if (!setup_active()) {
+                if (place >= 0) tank_decor_noticed(&tank, place);   /* it is in: the fish come and look */
                 if (place >= 0) printf("placed: %s at x %.0f, %s layer, saved\n", SD_ITEMS[place].name, tank_decor_x(&tank, place),
                                        tank_decor_z(&tank, place) == DECOR_Z_BACK ? "BEHIND" : tank_decor_z(&tank, place) == DECOR_Z_FRONT ? "IN FRONT" : "AMONG");
                 else { printf(birth ? "birth flow done: %s named and saved\n" : "setup done\n", who >= 0 ? tank.fish[who].name : "?"); print_roster(&tank); }
@@ -2200,6 +2201,8 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
         }
+        { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
+          last_mx = mx; }                                                   /* scrub the long lines */
         bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || fishpage_fish >= 0;
         if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
         if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
