@@ -404,27 +404,40 @@ static void draw_bass(ctx_t *c, const tank_t *t) {
 }
 /* glow sticks: four cracked sticks fanned on the sand in kandi colours -
  * pastel plastic by day, lit with a halo after dark, each on its own slow pulse */
-static void draw_glow(ctx_t *c, const tank_t *t) {
+/* One stick. `carried_pass` picks which half of the set this call draws:
+ * false = the ones lying about and falling, on the piece's own depth layer;
+ * true = the ones a fish is holding, drawn AFTER the fish so a stick can
+ * never vanish inside a big one (2026-09-21). */
+static void draw_glow_set(ctx_t *c, const tank_t *t, bool carried_pass) {
     static const uint32_t COL[GLOW_N] = { 0xff3fa8, 0x5cff3a, 0xffa028, 0x38b8ff };
     ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
     for (int i = 0; i < GLOW_N; i++) {
         const glow_t *g = &t->glow[i];
         if (g->x <= 0 && g->y <= 0) continue;                 /* never placed */
+        if ((g->carrier >= 0) != carried_pass) continue;
         float cx = g->x, cy = g->y;
         float hx = cosf(g->ang) * 6.5f, hy = sinf(g->ang) * 6.5f;
         /* carried or falling it is lit whatever the hour - a stick in the water
            is the thing you are meant to be watching */
         bool live = g->carrier >= 0 || g->vy > 0;
-        float pulse = (t->night || live) ? 0.75f + 0.25f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.55f;
+        /* brighter all round (2026-09-21): one lying on the sand in daylight
+           used to sit at 0.55 and was easy to miss, and the halo is +2 px on
+           both rings so it reads as a light rather than a dash of colour */
+        float pulse = (t->night || live) ? 0.85f + 0.15f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.80f;
         ctx_t *dst = (t->night || live) ? &lit : c;
-        if (t->night || live) {                               /* the halo: enough to light the sand around it */
-            fill_ellipse(dst, cx, cy, 17, 11, COL[i], (int)(26 * pulse));
-            fill_ellipse(dst, cx, cy, 11, 7, COL[i], (int)(46 * pulse));
-        }
+        fill_ellipse(dst, cx, cy, 19, 13, COL[i], (int)((t->night || live ? 38 : 22) * pulse));
+        fill_ellipse(dst, cx, cy, 13, 9, COL[i], (int)((t->night || live ? 66 : 38) * pulse));
         src_t s = src_color(COL[i], dst->dim);
-        line_blend(dst, cx - hx, cy - hy, cx + hx, cy + hy, &s, (int)(255 * pulse), true);
-        line_blend(dst, cx - hx, cy - hy + 1, cx + hx, cy + hy + 1, &s, (int)(190 * pulse), false);
+        line_blend(dst, cx - hx, cy - hy, cx + hx, cy + hy, &s, 255, true);
+        line_blend(dst, cx - hx, cy - hy + 1, cx + hx, cy + hy + 1, &s, (int)(220 * pulse), false);
+        line_blend(dst, cx - hx, cy - hy - 1, cx + hx, cy + hy - 1, &s, (int)(120 * pulse), false);
     }
+}
+static void draw_glow(ctx_t *c, const tank_t *t) { draw_glow_set(c, t, false); }
+void render_glow_carried(const tank_t *t, uint16_t *fb, int stride, float dim) {
+    if (!tank_bit_live(t, SD_ITEM_GLOW)) return;
+    ctx_t c = ctx_full(fb, stride, dim);
+    draw_glow_set(&c, t, true);
 }
 /* the totem: a pole in the sand with a glowing alien head and two ribbons
  * that wave in the current - the thing you find your friends by */
@@ -457,8 +470,8 @@ static void draw_totem(ctx_t *c, const tank_t *t) {
     ctx_t lit = *c; if (live) lit.dim = 1.0f;           /* on parade, and all through a party, it is lit */
     float glow = live ? 0.8f + 0.2f * fast_sin(t->clock * (carried ? 3.0f : 1.4f)) : 1.0f;
     if (live) {                                          /* the head throws a little light of its own */
-        fill_ellipse(&lit, topx, topy + 9, 26, 26, 0x5cff3a, (int)(20 * glow));
-        fill_ellipse(&lit, topx, topy + 9, 16, 16, 0x5cff3a, (int)(40 * glow));
+        fill_ellipse(&lit, topx, topy + 9, 28, 28, 0x5cff3a, (int)(26 * glow));
+        fill_ellipse(&lit, topx, topy + 9, 18, 18, 0x5cff3a, (int)(50 * glow));
     }
     fill_ellipse(&lit, topx, topy + 9, 8, 10, 0x5cff3a, 255);                       /* the head */
     fill_ellipse(&lit, topx - 2, topy + 6, 4, 3, 0x8dff70, 160);                    /* its sheen */
@@ -1297,6 +1310,14 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     for (int i = 0; i < t->n_fish; i++) {
         g_bb_on = true; g_bb_x0 = g_bb_y0 = 1 << 20; g_bb_x1 = g_bb_y1 = -1;
         draw_fish(&c, t, &t->fish[i], i);
+        g_bb_on = false;
+        if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1);
+    }
+    /* a stick in a fin goes ON TOP of its fish: held at the mouth it used to
+       be drawn with the decor layer, which a big body could sit over */
+    if (tank_bit_live(t, SD_ITEM_GLOW)) {
+        g_bb_on = true; g_bb_x0 = g_bb_y0 = 1 << 20; g_bb_x1 = g_bb_y1 = -1;
+        draw_glow_set(&c, t, true);
         g_bb_on = false;
         if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1);
     }

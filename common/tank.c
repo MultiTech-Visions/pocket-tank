@@ -27,6 +27,8 @@ static int   s_catch_to = -1;           /* the fish a stick is in the air toward
 static int   s_catch_stick = -1;        /* which stick */
 static float s_catch_s;                 /* how long the pass stays catchable */
 static int   s_rally;                   /* passes landed in this rally */
+static float s_glow_watch[N_FISH_MAX];  /* seconds left following its own dropped stick down */
+static int   s_glow_watched[N_FISH_MAX];/* ... and which stick it is watching */
 static int   s_decor_new = -1;          /* a piece just placed: worth a look */
 static float s_decor_new_s;
 static float s_totem_cool;              /* the quiet after a totem parade (not saved) */
@@ -834,6 +836,7 @@ static void glow_tick(tank_t *t, float dt) {
     for (int i = 0; i < N_FISH_MAX; i++) {
         if (s_glow_cool[i] > 0) s_glow_cool[i] -= dt;
         if (s_glow_want[i] > 0) s_glow_want[i] -= dt;
+        if (s_glow_watch[i] > 0 && (s_glow_watch[i] -= dt) <= 0) s_glow_watched[i] = -1;
     }
     if (s_catch_s > 0 && (s_catch_s -= dt) <= 0) {          /* the pass went wide: the rally is over */
         s_catch_to = -1; s_catch_stick = -1; s_rally = 0;
@@ -871,7 +874,12 @@ static void glow_tick(tank_t *t, float dt) {
             /* a pass: someone keen and empty-finned nearby, and this fish
                feels like sharing. The stick is thrown AT them and stays
                catchable for a moment - miss it and it just sinks. */
-            if (s_catch_stick != g && s->held_s > GLOW_THROW_MIN_S && s_catch_to < 0) {
+            /* the trip up comes FIRST: a fish only looks for someone to pass
+               to once it has got the stick high, or has been carrying it long
+               enough to have given up on that. Passing early was ending half
+               the carries down in the weeds, and the long fall is the point. */
+            bool up_there = s->y <= GLOW_RELEASE_Y || s->held_s > GLOW_CARRY_MAX_S * 0.5f;
+            if (s_catch_stick != g && up_there && s->held_s > GLOW_THROW_MIN_S && s_catch_to < 0) {
                 int mate = -1; float best = GLOW_THROW_REACH;
                 for (int i = 0; i < t->n_fish; i++) {
                     if (i == s->carrier || glow_busy(t, i) || s_glow_cool[i] > 0) continue;
@@ -907,6 +915,7 @@ static void glow_tick(tank_t *t, float dt) {
                 s->spin = tank_randf(t, -1.4f, 1.4f);       /* it tumbles on the way down */
                 s_glow_cool[who] = t->night ? GLOW_PLAY_COOL_NIGHT_S : GLOW_PLAY_COOL_S;
                 if (high && !rattled) { t->fish[who].ms_bits |= MS_GLOW_TOSS; tank_emit(TEV_GLOW_PLAY, who); }
+                if (!rattled) { s_glow_watch[who] = GLOW_WATCH_S; s_glow_watched[who] = g; }   /* follow it down */
             }
             continue;
         }
@@ -931,6 +940,15 @@ static void glow_tick(tank_t *t, float dt) {
             s->vy += (GLOW_SINK_PX_S - s->vy) * (dt * 3.0f < 1.0f ? dt * 3.0f : 1.0f);
             s->y += s->vy * dt;
             s->x += s->vx * dt;
+            {   /* the glass: a stick still carrying speed comes back off it */
+                float lo = DECOR_MARGIN, hi = TANK_W - DECOR_MARGIN;
+                if (s->x < lo || s->x > hi) {
+                    s->x = s->x < lo ? lo : hi;
+                    s->vx = -s->vx * GLOW_BOUNCE;
+                    s->spin = -s->spin;
+                }
+                if (s->y < 12.0f && s->vy < 0) { s->y = 12.0f; s->vy = 0; }   /* and the surface */
+            }
             s->vx -= s->vx * (dt * 0.7f);                                /* the water takes the throw out of it */
             s->x += sinf(t->clock * 1.7f + g * 1.3f) * dt * 7.0f;        /* ... and it wanders as it sinks */
             s->ang += s->spin * dt;
@@ -1133,13 +1151,34 @@ void tank_totem_force(tank_t *t) {
 }
 
 /* ---- play: the keeper's nudge, and a new thing to look at (tank.h) ---- */
+/* one stick leaves the sand at `ang`, `speed` px/s. Lifting it a hair off
+ * whatever it was resting on is what puts it back in the falling branch. */
+static void glow_launch(tank_t *t, int g, float ang, float speed) {
+    glow_t *s = &t->glow[g];
+    s->carrier = -1; s->held_s = 0;
+    s->vx = cosf(ang) * speed;
+    s->vy = sinf(ang) * speed;
+    s->y -= 1.5f;
+    s->spin = tank_randf(t, -4.0f, 4.0f);
+}
 int tank_glow_nudge(tank_t *t, float x, float y) {
     if (!tank_bit_live(t, SD_ITEM_GLOW)) return 0;
-    bool pile = false;                                   /* is a stick actually lying about here? */
-    for (int g = 0; g < GLOW_N && !pile; g++)
-        if (t->glow[g].carrier < 0 && tank_dist(t->glow[g].x, t->glow[g].y, x, y) <= GLOW_NUDGE_REACH * 0.35f)
-            pile = true;
-    if (!pile) return 0;
+    int near[GLOW_N], n = 0;                             /* what is lying within reach of the tap */
+    for (int g = 0; g < GLOW_N; g++) {
+        const glow_t *s = &t->glow[g];
+        if (s->carrier < 0 && s->vy <= 0.01f && tank_dist(s->x, s->y, x, y) <= GLOW_PILE_R) near[n++] = g;
+    }
+    if (n == 0) return 0;
+    if (n > 1) {                                         /* a PILE: it goes everywhere */
+        for (int i = 0; i < n; i++) {
+            /* out and up, fanned so they do not all take the same line; the
+               water and the walls take it out of them on the way down */
+            float ang = -1.9f + (float)i / (float)(n - 1) * 1.4f + tank_randf(t, -0.25f, 0.25f);
+            glow_launch(t, near[i], ang, tank_randf(t, GLOW_POP_MIN, GLOW_POP_MAX));
+        }
+    } else {                                             /* one on its own: it hops */
+        glow_launch(t, near[0], tank_randf(t, -2.5f, -0.6f), tank_randf(t, GLOW_HOP_MIN, GLOW_HOP_MAX));
+    }
     int called = 0;
     for (int n = 0; n < GLOW_NUDGE_N; n++) {             /* the nearest calm, empty-finned fish */
         int best = -1; float bd = GLOW_NUDGE_REACH;
@@ -1485,7 +1524,18 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
        order, because a stick in the air beats anything else worth seeing. */
     if (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES) {
         float px = 0, py = 0; bool go = false;
-        if (s_catch_to == idx && s_catch_stick >= 0 && s_catch_stick < GLOW_N) {
+        int held = -1;
+        for (int g = 0; g < GLOW_N; g++) if (t->glow[g].carrier == idx) { held = g; break; }
+        if (held >= 0) {                                    /* carrying one: UP, that is the whole point */
+            px = f->x + cosf(f->wander * 0.6f) * 34;        /* a lazy weave, not a straight line */
+            py = GLOW_LIFT_Y;
+            go = true;
+        } else if (s_glow_watch[idx] > 0 && s_glow_watched[idx] >= 0 && s_glow_watched[idx] < GLOW_N) {
+            const glow_t *w = &t->glow[s_glow_watched[idx]];   /* just dropped it: follow it down, watching */
+            px = w->x + cosf(tm * 0.9f) * 16;
+            py = w->y - 12;
+            go = true;
+        } else if (s_catch_to == idx && s_catch_stick >= 0 && s_catch_stick < GLOW_N) {
             const glow_t *s2 = &t->glow[s_catch_stick];     /* one is on its way: meet it */
             px = s2->x; py = s2->y; go = true;
         } else if (s_glow_want[idx] > 0) {                  /* keen: the nearest stick lying about */

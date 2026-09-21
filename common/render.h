@@ -88,6 +88,10 @@ bool render_card_opens_page(int sel, float px, float py, float rx, float ry);
 /* Device battery pill (top-right), drawn with the stats card on hardware:
  * frac 0..1, charging tints the fill teal. */
 void render_battery(uint16_t *fb, int stride, float frac, bool charging);
+/* the glow sticks a fish is HOLDING, drawn after the fish so one can never
+ * disappear inside a big body (2026-09-21). render_tank calls it itself; it
+ * is exported so a test can reach it. `dim` is the night dim in force. */
+void render_glow_carried(const tank_t *t, uint16_t *fb, int stride, float dim);
 /* an announcement over the live tank (notice.h: a milestone the moment it
  * is earned, a stage reached, low battery), in the milestones page's modal
  * style; frac_left (1 -> 0) is its remaining time, drawn as a thin bar */

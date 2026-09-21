@@ -219,8 +219,21 @@ typedef struct { float x, y, vy, wobble; bool column; } bubble_t;
 #define GLOW_SINK_PX_S    17.0f              /* terminal speed of a dropped stick */
 #define GLOW_REACH        20.0f              /* a playing fish this close can take one */
 #define GLOW_CARRY_MIN_S  1.2f               /* ... and holds it at least this long */
-#define GLOW_CARRY_MAX_S  16.0f              /* ... and has let go by then, wherever it is */
-#define GLOW_RELEASE_Y    (TANK_H * 0.32f)   /* "up to the top": let go at or above this */
+#define GLOW_CARRY_MAX_S  22.0f              /* ... and has let go by then, wherever it is */
+#define GLOW_RELEASE_Y    (TANK_H * 0.30f)   /* "up to the top": let go at or above this */
+/* Carrying one is a trip to the surface (2026-09-21). Nothing used to tell a
+ * carrier to ASCEND - it just swam whatever its goal wanted, drifted about a
+ * quarter of the way up and timed out - so the drop was almost never the long
+ * fall it is meant to be. A carrier now aims for GLOW_LIFT_Y and, once it has
+ * let go, turns and follows the stick down watching it. */
+#define GLOW_LIFT_Y       (TANK_H * 0.20f)   /* where a carrier is heading */
+#define GLOW_WATCH_S      7.0f               /* how long it follows its own drop down */
+#define GLOW_BOUNCE       0.55f              /* how much of a throw a wall gives back */
+#define GLOW_PILE_R       34.0f              /* sticks this close to a tap are one pile */
+#define GLOW_POP_MIN      46.0f              /* how hard a scattered stick leaves */
+#define GLOW_POP_MAX      104.0f
+#define GLOW_HOP_MIN      28.0f              /* ... and a single one that is just nudged */
+#define GLOW_HOP_MAX      62.0f
 /* the quiet after a fish plays with a stick. Lights-out is the BEST time for
  * glow sticks, so the dark halves it: they come back to them twice as often. */
 #define GLOW_PLAY_COOL_S  20.0f              /* lights on */
