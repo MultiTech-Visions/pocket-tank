@@ -3,6 +3,7 @@
  * that grow with the tank's milestones. Everything is drawn
  * into a bare RGB565 buffer; night dims the palette. */
 #include "render.h"
+#include "reef.h"
 #include "ui_ext.h"   /* this fork's milestones, for the announcement */
 #include "icons.h"
 #include "progression.h"
@@ -1138,6 +1139,7 @@ static bool castle_state(const tank_t *t, int *cx, int *z, bool *placing) {
     return true;
 }
 static int g_scene_castle_x = -2, g_scene_castle_z = -1;   /* what the baked scene holds (-1 = no castle) */
+static unsigned g_scene_reef = 0;      /* ... and which edit of the built reef */
 
 static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     ctx_t c = ctx_full(fb, stride, dim);
@@ -1162,6 +1164,7 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
             fb[y * stride + x] = rgb565(col, dim);
         }
     }
+    reef_draw(t, fb, stride, dim);          /* the keeper's own reef: the backdrop (reef.c) */
     /* reef rock (the entity fish know); it widens as the tank earns milestones */
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     fill_ellipse(&c, t->reef_x, TANK_H - 16, 34 * grow, 10 + 2 * (grow - 1) * 10, 0x123028, 255);
@@ -1212,6 +1215,10 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
     }
     /* reef rock (the entity fish know); widens as the tank earns milestones */
     ctx_t c = ctx_full(sc, TANK_W, dim);
+    /* the keeper's own reef (reef.c): the backdrop, so it goes on before the
+       rock, the pebbles and the castle - and it is STATIC, so it bakes into
+       the cached scene and costs nothing per frame */
+    reef_draw(t, sc, TANK_W, dim);
     src_t s = src_color(0x123028, dim);
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     float rx = 34 * grow, ry = 10 + 2 * (grow - 1) * 10, cy = TANK_H - 16;
@@ -1242,8 +1249,9 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     int scene_cx = placing ? -1 : ccx;
     g_veg_mask_cx = ccx >= 0 && cz == DECOR_Z_FRONT ? ccx : -1;
     if (cached) {
-        if (g_scene_dim != dim || g_scene_ms != t->tank_ms_bits || g_scene_castle_x != scene_cx || g_scene_castle_z != cz) {
-            g_scene_castle_x = scene_cx; g_scene_castle_z = cz;
+        if (g_scene_dim != dim || g_scene_ms != t->tank_ms_bits || g_scene_castle_x != scene_cx || g_scene_castle_z != cz ||
+            g_scene_reef != reef_epoch(t)) {
+            g_scene_castle_x = scene_cx; g_scene_castle_z = cz; g_scene_reef = reef_epoch(t);
             /* rebuild the static scene with the vignette baked in (the
                per-frame pass then only re-darkens dynamic patches). The
                reef's lushness comes from the tank milestones, so a new

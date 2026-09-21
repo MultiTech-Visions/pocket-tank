@@ -397,6 +397,11 @@ typedef struct tank {
      * was, 2 faster. A keeper setting, saved. It scales the speed a fish has
      * decided it wants - never the decisions themselves - so a fast tank is
      * the same tank, just livelier. */
+    /* the reef the keeper built (reef.h, 2026-09-21): REEF_COLS x REEF_ROWS
+     * cells at two to a byte, drawn as the backdrop behind everything. Kept
+     * here rather than in reef.c so progression.c saves it with the rest and
+     * one tank is one struct. 28 x 23 at 4 bits is 322 bytes. */
+    uint8_t  reef[322];
     uint8_t  fish_speed;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
