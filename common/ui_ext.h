@@ -39,6 +39,11 @@ enum { UI_FP_NONE = 0, UI_FP_KEPT = 1, UI_FP_CLOSE = 2 };
 void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clock);
 int  ui_fish_page_tap(const tank_t *t, int fish, float x, float y);
 void ui_fish_page_leave(void);
+/* a horizontal drag across the page takes the long DOING / LAST lines over
+ * from the walk for a few seconds: `dx` is this frame's travel in px, `clock`
+ * is tank_t.clock. A line short enough to fit ignores it. */
+void ui_fish_page_swipe(float dx, float clock);
+#define FP_SCRUB_HOLD_S 4.0f   /* how long that swipe holds the walk off */
 
 /* ---- the dev page (2026-09-21) --------------------------------------
  * The phone trick: tap the FW version line at the bottom of the settings
@@ -63,9 +68,14 @@ enum { UI_DEV_NONE = 0, UI_DEV_KEPT, UI_DEV_CLOSE,
        UI_DEV_UNLOCK_ALL,   /* buy the whole shelf, placed where it defaults */
        UI_DEV_GROW,         /* push a fish to its next stage */
        UI_DEV_PARTY,        /* lift the totem now: parade, party, march home */
-       UI_DEV_LIGHT,        /* day / night, this instant */
        UI_DEV_FRY,          /* a fry arrives */
        UI_DEV_BATTERY };    /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
+/* this fork's own milestone bits (MS_LOCAL_BIT0 and up), for the announcement
+ * render.c puts over the live tank: its tables only reach the upstream ones.
+ * Returns the badge icon and, through `name`, what to call it - NULL for a bit
+ * that is not one of ours. */
+#include "icons.h"
+const icon_t *ui_local_ms(uint32_t bit, const char **name);
 void ui_dev_page(const tank_t *t, uint16_t *fb, int stride, const char *status);
 int  ui_dev_page_tap(float x, float y);
 bool ui_dev_apply(tank_t *t, int act, char *status, size_t n);

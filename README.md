@@ -540,6 +540,31 @@ a firmware build plus the shipped model into one static folder
 (`installer/dist/`) that any HTTPS host will serve;
 [installer/README.md](installer/README.md) has the details.
 
+**Play.** Glow sticks used to be picked up only by a fish whose goal already
+*was* play, which almost never lined up with being beside one — a pile could
+sit untouched all day. A fish now carries a short *keen* timer that the reflex
+layer sets, and four things set it. **Tap the pile** and the nearest one or two
+fish come over. A slow roll against boredom, curiosity and sociability means
+sticks get used with nobody watching — temperament leans it rather than
+deciding it, so a quiet roster still plays, just less. A **bass party** puts one
+in every fin: a fish fetches a stick first, then takes it to the dance floor.
+
+And they pass them. A fish holding one, with somebody keen and empty-finned
+nearby, will throw it at them; the stick stays catchable for three seconds and
+the catch is real — miss it and it just sinks. Three passes in one rally is the
+rare one, and it has its own event. Across four rosters that runs between one
+pass every three minutes and a couple a minute; a sociable tank plays more,
+which is the point.
+
+**Curiosity.** The disco ball's hand-started show draws the fish in around it,
+and anything newly placed — bought, put back from the box, or dragged to a new
+spot — is worth swimming around for twenty seconds, so you can see what you
+just did.
+
+None of this adds a goal or a model input. It steers a fish that is *already*
+sociable or idle, the same way the totem parade does, and the model still owns
+every decision it makes.
+
 **The dev page.** The phone trick: open **SETTINGS**, then tap the dim `FW ...`
 line in the bottom left corner **seven times in a row**. From the third tap the
 line counts down the ones still wanted, and the seventh opens a page that is not
@@ -556,7 +581,6 @@ serial cable:
 | **BUY IT ALL** | every item bought and placed where it defaults |
 | **GROW A FISH** | the youngest fish takes its next stage, so presses walk the tank up |
 | **BASS PARTY** | the most sociable fish lifts the totem now — parade, party, march home |
-| **LIGHT** | day or night, this instant |
 | **ADD A FRY** | a birth is staged |
 | **BATTERY** | fakes the charge through the bolt's four colours, then back to the real one |
 

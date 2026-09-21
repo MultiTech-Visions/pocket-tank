@@ -216,6 +216,7 @@ bool progression_buy(tank_t *t, int item) {
     if (it->bit == SD_ITEM_CASTLE) tank_castle_place(t);
     /* the festival pieces land at their default spot (tank_decor_x) and
        the placement page opens over them; nothing else to set up */
+    tank_decor_noticed(t, item);   /* the fish come and look it over */
     progression_save(t);                                   /* a purchase sticks at once */
     return true;
 }
@@ -251,6 +252,7 @@ bool progression_stow(tank_t *t, int item, bool stow) {
         }
     } else {
         t->sd_stowed &= ~bit;                         /* back in, and laid out fresh */
+        tank_decor_noticed(t, item);                  /* ... and worth a look, like anything new */
         if (item == SD_IDX_PLANT)  tank_plant_place(t);
         if (item == SD_IDX_SNAIL)  tank_snail_place(t);
         if (item == SD_IDX_CASTLE) tank_castle_place(t);

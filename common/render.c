@@ -3,6 +3,7 @@
  * that grow with the tank's milestones. Everything is drawn
  * into a bare RGB565 buffer; night dims the palette. */
 #include "render.h"
+#include "ui_ext.h"   /* this fork's milestones, for the announcement */
 #include "icons.h"
 #include "progression.h"
 #include "tank_events.h"
@@ -344,25 +345,62 @@ static void draw_laser(ctx_t *c, const tank_t *t) {
  * cabinet blinks the beat; at night the ripples are lit. */
 static void draw_bass(ctx_t *c, const tank_t *t) {
     float bx = tank_decor_x(t, SD_IDX_BASS);
-    const int x0 = (int)bx - BASS_HALF_W, x1 = (int)bx + BASS_HALF_W, top = FLOOR_Y - 30;
-    src_t body = src_color(0x181820, c->dim), edge = src_color(0x34343f, c->dim), grille = src_color(0x24242e, c->dim);
-    for (int y = top; y <= FLOOR_Y; y++) span(c, x0, x1, y, (y == top || y == FLOOR_Y) ? &edge : &body, 255);
-    px_blend_s(c, x0, top, &body, 255); px_blend_s(c, x1, top, &body, 255);          /* rounded corners */
-    for (int y = top + 2; y < FLOOR_Y - 1; y += 2) span(c, x0 + 2, x1 - 2, y, &grille, 120);   /* the cloth */
-    float beat = fmodf(t->clock, BASS_BEAT_S) / BASS_BEAT_S;                          /* 0 on the kick, 1 before the next */
+    float beat = fmodf(t->clock, BASS_BEAT_S) / BASS_BEAT_S;      /* 0 on the kick, 1 before the next */
     float kick = (1 - beat) * (1 - beat);
-    float cx = bx, cy = FLOOR_Y - 15, r = 9 + 2.2f * kick;
-    fill_ellipse(c, cx, cy, r + 1.5f, r + 1.5f, 0x3a3a48, 255);                        /* the surround */
-    fill_ellipse(c, cx, cy, r, r, 0x0c0c12, 255);                                      /* the cone */
-    fill_ellipse(c, cx, cy, 3 + kick, 3 + kick, 0x585868, 255);                        /* the dust cap */
-    bool drop = t->bass_drop_at - t->clock > BASS_DROP_BEATS * BASS_BEAT_S - 1.2f;    /* just dropped */
+    bool drop = t->bass_drop_at - t->clock > BASS_DROP_BEATS * BASS_BEAT_S - 1.2f;
+    src_t body = src_color(0x181820, c->dim), edge = src_color(0x34343f, c->dim), grille = src_color(0x24242e, c->dim);
+    /* the neon burns at its own brightness, night or day - it is a light */
     ctx_t lit = *c; if (t->night) lit.dim = 1.0f;
-    src_t rip = src_color(t->night ? 0xff3ad6 : 0x9fd8e2, lit.dim);
-    { float rx = 12 + 34 * beat, ry = 8 + 22 * beat; int a = (int)((drop ? 220 : 150) * (1 - beat));
+    uint32_t neon_rgb = t->night ? 0xff3ad6 : 0x9fd8e2;
+    src_t neon = src_color(neon_rgb, lit.dim);
+    int glowa = (int)(120 + 90 * kick);                            /* the tube pulses on the kick */
+
+    /* one cabinet, with its driver; `sub` = the big cone of a bottom box */
+    int rows[2] = { BASS_BOTTOM_N, BASS_TOP_N };
+    for (int row = 0; row < 2; row++) {
+        int n = rows[row];
+        int cab_bottom = FLOOR_Y - row * BASS_CAB_H;               /* row 0 sits on the sand */
+        int cab_top = cab_bottom - BASS_CAB_H;
+        float left = bx - n * BASS_CAB_W * 0.5f;
+        for (int i = 0; i < n; i++) {
+            int x0 = (int)(left + i * BASS_CAB_W), x1 = x0 + BASS_CAB_W - 1;
+            for (int y = cab_top; y <= cab_bottom; y++)
+                span(c, x0, x1, y, (y == cab_top || y == cab_bottom) ? &edge : &body, 255);
+            for (int y = cab_top + 3; y < cab_bottom - 2; y += 2)  /* the cloth */
+                span(c, x0 + 2, x1 - 2, y, &grille, 120);
+            float ccx = (x0 + x1) * 0.5f, ccy = (cab_top + cab_bottom) * 0.5f;
+            float r = (row == 0 ? 7.0f : 5.0f) + (row == 0 ? 1.8f : 1.2f) * kick;
+            fill_ellipse(c, ccx, ccy, r + 1.5f, r + 1.5f, 0x3a3a48, 255);   /* surround */
+            fill_ellipse(c, ccx, ccy, r, r, 0x0c0c12, 255);                 /* cone */
+            fill_ellipse(c, ccx, ccy, 2.2f + kick, 2.2f + kick, 0x585868, 255);   /* dust cap */
+        }
+        /* the neon tube round this row: a line along the top and the two sides,
+           so the stack reads as one lit box rather than five outlined ones */
+        int rx0 = (int)(left), rx1 = (int)(left + n * BASS_CAB_W) - 1;
+        span(&lit, rx0, rx1, cab_top - 1, &neon, glowa);
+        for (int y = cab_top; y <= cab_bottom; y++) {
+            px_blend_s(&lit, rx0 - 1, y, &neon, glowa);
+            px_blend_s(&lit, rx1 + 1, y, &neon, glowa);
+        }
+        /* the soft bloom either side of the tube, only worth it in the dark */
+        if (t->night) {
+            span(&lit, rx0, rx1, cab_top - 2, &neon, glowa / 3);
+            for (int y = cab_top; y <= cab_bottom; y += 1) {
+                px_blend_s(&lit, rx0 - 2, y, &neon, glowa / 3);
+                px_blend_s(&lit, rx1 + 2, y, &neon, glowa / 3);
+            }
+        }
+    }
+    /* the air moving: rings off the middle sub, where the thump comes from */
+    float cx = bx, cy = FLOOR_Y - BASS_CAB_H * 0.5f;
+    src_t rip = src_color(neon_rgb, lit.dim);
+    { float rx = 14 + 38 * beat, ry = 9 + 24 * beat; int a = (int)((drop ? 220 : 150) * (1 - beat));
       ring_blend(&lit, cx, cy, rx, ry, &rip, a); ring_blend(&lit, cx, cy, rx + 1, ry + 0.7f, &rip, a / 2);
       if (drop) { ring_blend(&lit, cx, cy, rx + 9, ry + 6, &rip, a * 2 / 3); ring_blend(&lit, cx, cy, rx + 10, ry + 6.7f, &rip, a / 3); } }
+    /* the amp light, top right of the stack */
     src_t led = src_color(beat < 0.25f ? 0xff2a2a : 0x401010, beat < 0.25f ? 1.0f : c->dim);
-    px_blend_s(c, x1 - 3, top + 3, &led, 255); px_blend_s(c, x1 - 4, top + 3, &led, 255);
+    int tx1 = (int)(bx + BASS_TOP_N * BASS_CAB_W * 0.5f) - 3, ty = FLOOR_Y - BASS_STACK_H + 3;
+    px_blend_s(c, tx1, ty, &led, 255); px_blend_s(c, tx1 - 1, ty, &led, 255);
 }
 /* glow sticks: four cracked sticks fanned on the sand in kandi colours -
  * pastel plastic by day, lit with a halo after dark, each on its own slow pulse */
@@ -1532,6 +1570,10 @@ static void card_draw(ctx_t c, const tank_t *t, int fish_idx) {
  * into the frame otherwise. The selection ring follows the fish per frame. */
 static uint16_t *g_card = NULL;
 static int g_card_fish = -1; static float g_card_t = -1; static unsigned g_card_epoch;
+bool render_card_opens_page(int sel, float px, float py, float rx, float ry) {
+    if (sel < 0 || sel == RENDER_CARD_SNAIL) return false;
+    return RENDER_CARD_HIT(px, py) && RENDER_CARD_HIT(rx, ry);
+}
 void render_set_card_cache(uint16_t *buf) { g_card = buf; g_card_fish = -1; }
 
 /* the snail's card (2026-09-16, Strato: "tapping the snail show a simple
@@ -2223,6 +2265,12 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
         int bi = 0; while (bi < 31 && !(bit & (1u << bi))) bi++;
         if (f) snprintf(title, sizeof title, "%s", f->name);
         snprintf(caption, sizeof caption, "%s", bi < MS_FISH_COUNT ? MS_NAMES[bi] : "");
+        if (!ic) {                                            /* one of this fork's own (MS_LOCAL_BIT0 up):
+                                                                 FISH_BADGES and MS_NAMES both stop short of
+                                                                 it, so ui_ext.c keeps the icon and the name */
+            const char *nm = NULL; const icon_t *li = ui_local_ms(bit, &nm);
+            if (li) { ic = li; snprintf(caption, sizeof caption, "%s", nm); }
+        }
         if (!ic && f) render_fish_preview(fb, stride, X + W / 2, Y + 48, f->size * 1.6f, f->color, f->fin, f->accent, t->clock);
     }
     if (ic) blit_icon_scaled(&c, X + (W - ic->w * 2) / 2, Y + 16 + (32 - ic->w), ic, 2, true);

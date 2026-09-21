@@ -72,6 +72,18 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #define RENDER_CARD_HIT(x, y) ((x) >= RENDER_CARD_X - RENDER_CARD_HIT_SIDE && (x) < RENDER_CARD_X + RENDER_CARD_W + RENDER_CARD_HIT_SIDE && \
                                (y) >= RENDER_CARD_Y && (y) < RENDER_CARD_Y + RENDER_CARD_H + RENDER_CARD_HIT_BELOW)
 void render_set_card_cache(uint16_t *buf);
+/* Did this press-and-release open the card's fish page? (2026-09-21)
+ *
+ * The card is a big, soft target on the left edge and a thumb on it rolls.
+ * Both platforms used to route it through their strict tap test - under
+ * 350 ms and under 24 px of travel - so a normal press on the card was
+ * classified as a stroke across the glass instead, and the else-chain that
+ * would have opened the page never ran: the card just sat there. This says
+ * yes for any press AND release that both land on the card, however long it
+ * took and however far the finger slid inside it, which is what a finger on
+ * a 124 px slab actually does. `sel` is the selected fish (RENDER_CARD_SNAIL
+ * and -1 both say no - the snail has no page). */
+bool render_card_opens_page(int sel, float px, float py, float rx, float ry);
 
 /* Device battery pill (top-right), drawn with the stats card on hardware:
  * frac 0..1, charging tints the fill teal. */
