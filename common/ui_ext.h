@@ -39,6 +39,21 @@ enum { UI_FP_NONE = 0, UI_FP_KEPT = 1, UI_FP_CLOSE = 2 };
 void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clock);
 int  ui_fish_page_tap(const tank_t *t, int fish, float x, float y);
 void ui_fish_page_leave(void);
+/* The page's boxes live here rather than in the .c so a caller - or a test
+ * aiming at the panel's arrows - is never working from a second copy that
+ * can drift. The panel walks the earned milestones, or the levels; any tap
+ * that is not on an arrow closes it. */
+#define FP_MODAL_X 48
+#define FP_MODAL_Y 96
+#define FP_MODAL_W 352
+#define FP_MODAL_H 168
+#define FP_MS_X    268
+#define FP_MS_Y    12
+#define FP_MS_DX   38
+#define FP_CLOSE_X 324
+#define FP_CLOSE_Y 312
+#define FP_CLOSE_W 92
+#define FP_CLOSE_H 30
 /* a horizontal drag across the page takes the long DOING / LAST lines over
  * from the walk for a few seconds: `dx` is this frame's travel in px, `clock`
  * is tank_t.clock. A line short enough to fit ignores it. */

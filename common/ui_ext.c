@@ -97,15 +97,6 @@ void ui_battery_bolt(uint16_t *fb, int stride, float frac, bool charging, float 
 #define FP_ROW0   84
 #define FP_ROWDY  42     /* a 24 px icon band plus a gap */
 #define FP_BAR_H  8
-#define FP_CLOSE_X 324
-#define FP_CLOSE_Y 312
-#define FP_CLOSE_W 92
-#define FP_CLOSE_H 30
-#define FP_MODAL_X 48
-#define FP_MODAL_Y 96
-#define FP_MODAL_W 352
-#define FP_MODAL_H 168
-
 /* the eight levels, in the order they are drawn: two columns of four */
 enum { FP_HUNGER, FP_ENERGY, FP_STRESS, FP_CURIOUS, FP_TRUST, FP_BOLD, FP_SOCIAL, FP_BORED, FP_N };
 /* Each level carries the stats card's OWN art, so the two screens read as one
@@ -133,9 +124,6 @@ static const struct {
  * the overview page because that page's badge row is hard-capped at six
  * across the full width. Tapping one says what earned it. */
 #define FP_MS_N 4
-#define FP_MS_X 268           /* clear of the longest stage line, e.g. ELDER - 24H 30M */
-#define FP_MS_Y 12
-#define FP_MS_DX 38
 static const struct { uint32_t bit; const icon_t *icon; const char *name; const char *d[3]; } FP_MS[FP_MS_N] = {
     { MS_CASTLE_GATE, &icon_ms_castle_gate, "THROUGH THE GATE",
       { "IT SWAM THROUGH THE CASTLE'S", "ARCH. NOTHING IN THIS TANK",  "IS SOLID - THEY GO ANYWHERE." } },
@@ -169,6 +157,17 @@ const icon_t *ui_local_ms(uint32_t bit, const char **name) {
  * is a pure function of the tank clock, so nothing has to be remembered
  * between frames; a swipe parks it and hands the line to the finger for
  * FP_SCRUB_HOLD_S, then it picks the walk back up. */
+/* The pixel font has no '<' or '>' (nor '$', '^', '(' ...), so a chevron
+ * drawn as text is drawn as nothing at all - which is what happened the
+ * first time. render.c's settings page has the same problem and solves it
+ * the same way: draw the triangle. `dir` -1 points left, +1 right. */
+static void fp_chevron(uint16_t *fb, int stride, int cx, int cy, int dir, int h, uint32_t rgb) {
+    for (int i = 0; i < h; i++) {
+        int run = i < h / 2 ? i : h - 1 - i;              /* a wedge, thickest in the middle */
+        for (int k = 0; k <= run; k++)
+            render_rect(fb, stride, cx + dir * (run - k) - (dir < 0 ? 1 : 0), cy + i, 2, 1, rgb);
+    }
+}
 #define FP_SCROLL_PXS    22.0f          /* how fast it walks */
 #define FP_SCROLL_PAUSE  1.6f           /* and how long it rests at each end */
 static float g_fp_scrub[2];             /* where the finger left each line */
@@ -198,8 +197,8 @@ static void fp_line(uint16_t *fb, int stride, int x, int y, int w, const char *t
     render_rect(fb, stride, x - 200, y - 2, 200, 18, INK);           /* what hangs off the left */
     render_rect(fb, stride, x + w, y - 2, TANK_W - (x + w), 18, INK); /* ... and off the right */
     /* a hint that there is more, on the side there is more of */
-    if (off < over - 0.5f) render_text(fb, stride, x + w - 6, y, 2, FAINT, ">");
-    if (off > 0.5f)        render_text(fb, stride, x - 10, y, 2, FAINT, "<");
+    if (off < over - 0.5f) fp_chevron(fb, stride, x + w - 2, y + 2, +1, 11, FAINT);
+    if (off > 0.5f)        fp_chevron(fb, stride, x - 6, y + 2, -1, 11, FAINT);
 }
 void ui_fish_page_swipe(float dx, float clock) {
     for (int i = 0; i < 2; i++) {
@@ -208,6 +207,25 @@ void ui_fish_page_swipe(float dx, float clock) {
         if (g_fp_scrub[i] > 400) g_fp_scrub[i] = 400;
     }
     g_fp_scrub_until = clock + FP_SCRUB_HOLD_S;
+}
+/* the panel's arrows (2026-09-21): every other page that opens a detail
+ * panel lets you walk along it, so this one does too. A milestone panel
+ * walks the ones this fish has EARNED; a level's panel walks the levels.
+ * Both wrap, and neither shows an arrow when there is only one thing. */
+#define FP_ARROW_W 44
+static int fp_ms_count(const fish_t *f) {
+    int n = 0;
+    for (int i = 0; i < FP_MS_N; i++) if (f->ms_bits & FP_MS[i].bit) n++;
+    return n;
+}
+static int fp_ms_slot_of(const fish_t *f, int m) {          /* which earned slot `m` occupies */
+    int n = 0;
+    for (int i = 0; i < FP_MS_N; i++) {
+        if (!(f->ms_bits & FP_MS[i].bit)) continue;
+        if (i == m) return n;
+        n++;
+    }
+    return -1;
 }
 static int g_fp_modal = -1;          /* the level (0..FP_N-1) or milestone (FP_N+) whose panel is up, or -1 */
 
@@ -352,6 +370,12 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
             char n[32]; snprintf(n, sizeof n, "%d SO FAR", f->parties);
             render_text(fb, stride, X + (W - render_text_w(n, 2)) / 2, Y + 134, 2, WHITE, n);
         }
+        /* on the TAP TO CLOSE line, where the sides are clear - centred
+           vertically they landed in the middle of the description */
+        if (fp_ms_count(f) > 1) {
+            fp_chevron(fb, stride, X + 22, Y + H - 26, -1, 16, TEAL);
+            fp_chevron(fb, stride, X + W - 22, Y + H - 26, +1, 16, TEAL);
+        }
         render_text(fb, stride, X + (W - render_text_w("TAP TO CLOSE", 2)) / 2, Y + H - 20, 2, FAINT, "TAP TO CLOSE");
         return;
     }
@@ -361,11 +385,33 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
         const char *d = FP_STAT[g_fp_modal].d[i];
         render_text(fb, stride, X + (W - render_text_w(d, 2)) / 2, Y + 58 + i * 24, 2, TEAL, d);
     }
+    fp_chevron(fb, stride, X + 22, Y + H - 32, -1, 16, TEAL);
+    fp_chevron(fb, stride, X + W - 22, Y + H - 32, +1, 16, TEAL);
     render_text(fb, stride, X + (W - render_text_w("TAP TO CLOSE", 2)) / 2, Y + H - 26, 2, FAINT, "TAP TO CLOSE");
 }
 
 int ui_fish_page_tap(const tank_t *t, int fish, float x, float y) {
-    if (g_fp_modal >= 0) { g_fp_modal = -1; return UI_FP_KEPT; }     /* any tap dismisses the explanation */
+    if (g_fp_modal >= 0) {
+        const int X = FP_MODAL_X, W = FP_MODAL_W, Y = FP_MODAL_Y, H = FP_MODAL_H;
+        int dir = 0;                                                  /* the arrows walk it along */
+        if (y >= Y + 20 && y < Y + H - 20) {
+            if (x >= X && x < X + FP_ARROW_W) dir = -1;
+            else if (x >= X + W - FP_ARROW_W && x < X + W) dir = 1;
+        }
+        if (dir && g_fp_modal >= FP_N && fish >= 0 && fish < t->n_fish) {
+            const fish_t *f = &t->fish[fish];
+            int n = fp_ms_count(f);
+            if (n > 1) {
+                int slot = fp_ms_slot_of(f, g_fp_modal - FP_N);
+                int m = fp_ms_at(f, ((slot + dir) % n + n) % n);
+                if (m >= 0) { g_fp_modal = FP_N + m; return UI_FP_KEPT; }
+            }
+        } else if (dir) {
+            g_fp_modal = (g_fp_modal + dir + FP_N) % FP_N;
+            return UI_FP_KEPT;
+        }
+        g_fp_modal = -1; return UI_FP_KEPT;                          /* anywhere else closes it */
+    }
     if (x >= FP_CLOSE_X - 12 && y >= FP_CLOSE_Y - 8) return UI_FP_CLOSE;
     if (fish >= 0 && fish < t->n_fish && y >= FP_MS_Y - 8 && y < FP_MS_Y + 40 && x >= FP_MS_X - 8) {
         int slot = (int)((x - (FP_MS_X - 8)) / FP_MS_DX);            /* an earned milestone's badge */
