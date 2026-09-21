@@ -1147,6 +1147,10 @@ static void frame_cb(lv_timer_t *timer) {
     else if (shop_view) render_shop(&tank, canvas_buf, TANK_W);
     else {
         render_tank(&tank, canvas_buf, TANK_W);
+        { static uint16_t cam_scratch[TANK_W * TANK_H];   /* the follow cam's working room */
+          int who = (selected_fish >= 0 && selected_fish != RENDER_CARD_SNAIL) ? selected_fish : -1;
+          render_camera_tick(&tank, who, CAM_ZOOM, dt);
+          render_camera_apply(canvas_buf, TANK_W, cam_scratch, TANK_W * TANK_H); }
         render_sd_toast(&tank, canvas_buf, TANK_W);      /* "+N" sand dollars, as they are earned */
         if (ui_visible) {
             draw_brain_dot();
@@ -2205,8 +2209,9 @@ int main(int argc, char **argv) {
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */
         bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || fishpage_fish >= 0;
-        if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
-        if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
+        { float wmx, wmy; render_camera_unmap((float)mx, (float)my, &wmx, &wmy);
+          if (mpress && !modal) tank_touch_drag(&tank, wmx, wmy);   /* stroke -> wipe/slash */
+          if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, wmx, wmy); }
         if (!mpress && mdown) {
             int dx = mx - press_x, dy = my - press_y;
             if (confirm_view) {                    /* the prompt owns the glass: press AND release on one button */
@@ -2290,10 +2295,11 @@ int main(int argc, char **argv) {
             else if (now_ms - press_ms < 350 && dx * dx + dy * dy < 24 * 24) {
                 /* same hit test as the device: 38 px against the press-time
                    fish snapshot AND the current position, whichever is closer */
+                float wpx, wpy; render_camera_unmap((float)press_x, (float)press_y, &wpx, &wpy);
                 int best = -1; float bd = 38 * 38;
                 for (int i = 0; i < tank.n_fish; i++) {
-                    float ax = press_fx[i] - press_x, ay = press_fy[i] - press_y;
-                    float bx = tank.fish[i].x - press_x, by = tank.fish[i].y - press_y;
+                    float ax = press_fx[i] - wpx, ay = press_fy[i] - wpy;
+                    float bx = tank.fish[i].x - wpx, by = tank.fish[i].y - wpy;
                     float d2a = ax * ax + ay * ay, d2b = bx * bx + by * by;
                     float d2 = d2a < d2b ? d2a : d2b;
                     if (d2 < bd) { bd = d2; best = i; }
@@ -2305,14 +2311,14 @@ int main(int argc, char **argv) {
                     printf("fish page: %s, from the card\n", tank.fish[fishpage_fish].name);
                 }
                 else if (best >= 0) selected_fish = (best == selected_fish) ? -1 : best;
-                else if (tank_disco_hit(&tank, (float)press_x, (float)press_y)) {   /* the ball: run the show by hand */
+                else if (tank_disco_hit(&tank, wpx, wpy)) {   /* the ball: run the show by hand */
                     tank_disco_toggle(&tank);
                     printf("disco ball: %s\n", tank.disco_show_s > 0 ? "lowering, show on (30 s)" : "show off, winding back up");
                 }
-                else if (tank_snail_hit(&tank, (float)press_x, (float)press_y))   /* the snail: its card (2026-09-16) */
+                else if (tank_snail_hit(&tank, wpx, wpy))   /* the snail: its card (2026-09-16) */
                     selected_fish = selected_fish == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL;
                 else if (selected_fish >= 0) selected_fish = -1;   /* card up: empty-glass tap dismisses, nothing else */
-                else tank_touch_tap(&tank, (float)press_x, (float)press_y);
+                else tank_touch_tap(&tank, wpx, wpy);
             } else if (press_y < 60 && dy >= 40) tank_feed(&tank, (float)mx, 3);
             else if (press_y > TANK_H - 70 && dy <= -40) {   /* swipe up from the bottom: the overview */
                 milestones_view = true; selected_fish = -1;

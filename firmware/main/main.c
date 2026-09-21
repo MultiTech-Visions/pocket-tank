@@ -344,6 +344,7 @@ static void on_tank_event(int ev, int fish, void *ud) {
 #define CRIT_BATTERY_FRAC  0.02f
 #define CRIT_BATTERY_READS 3
 static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
+static uint16_t *s_cam_scratch;      /* the follow cam's working room (PSRAM); NULL = no camera */
 static float s_dev_bat = -1.0f;      /* the dev page's faked charge, or < 0 for the real one */
 static char  s_dev_status[48];       /* its last action's one line */
 static int   s_bat_crit;                    /* consecutive reads at or under CRIT_BATTERY_FRAC */
@@ -483,6 +484,14 @@ static void tank_task(void *arg) {
                                                 keep quick finger taps from slipping
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
+            /* the follow cam: only over the live tank, and only for a fish -
+               not the snail's card, and never under a page */
+            { bool page = touch_port_milestones() || touch_port_settings() || touch_port_shop() ||
+                          touch_port_dev() || touch_port_fishpage() >= 0 || setup_active() || touch_port_confirm_up();
+              int who = (!page && sel >= 0 && sel != RENDER_CARD_SNAIL) ? sel : -1;
+              render_camera_tick(&tank, who, CAM_ZOOM, dt);
+              if (!page) render_camera_apply(fb[cur], TANK_W, s_cam_scratch, PLAN_FB_BYTES / sizeof(uint16_t));
+              else render_camera_reset(); }
             int64_t tc = esp_timer_get_time();
             if (touch_port_fishpage() >= 0) {    /* a fish's own page: its levels, what it is doing, what last happened */
                 ui_fish_page(&tank, touch_port_fishpage(), fb[cur], TANK_W, tank.clock);
@@ -594,6 +603,10 @@ void app_main(void) {
     /* static-scene cache: gradient/pebbles/reef drawn once per lighting state */
     uint16_t *scene = heap_caps_aligned_alloc(64, PLAN_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (scene) render_set_scene_cache(scene); else ESP_LOGW(TAG, "no scene cache RAM: full redraw per frame");
+    /* the follow cam's working room. It is the LAST thing asked for, and the
+       only one that may quietly go without: no buffer simply means no zoom. */
+    s_cam_scratch = heap_caps_aligned_alloc(64, PLAN_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_cam_scratch) ESP_LOGW(TAG, "no follow-cam RAM: the view stays at 1x");
     uint8_t *vig = heap_caps_malloc(TANK_W * TANK_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (vig) render_set_vignette_cache(vig);
     /* dirty mask (20 KB): internal SRAM if it fits - it is cleared and read

@@ -30,6 +30,12 @@ static const char *TAG = "touch";
 static esp_lcd_touch_handle_t s_tp;
 static bool s_down; static int64_t s_press_us; static float s_px, s_py;
 static float s_lx, s_ly;                          /* LAST touched position (release classification) */
+/* With the follow cam live the glass and the water no longer agree: the
+ * pages and the card are drawn in SCREEN space, everything in the tank is in
+ * TANK space. Both are kept - w* is the same point put back through the
+ * camera - and each hit test uses the one it belongs to. At 1x they are
+ * identical and this costs nothing. */
+static float s_wpx, s_wpy, s_wlx, s_wly;
 static float s_fx[N_FISH_MAX], s_fy[N_FISH_MAX];  /* fish positions at press time */
 static int s_sel = -1; static int64_t s_sel_us;   /* tapped fish -> stats card */
 static bool s_ms;                                 /* milestones page up (its CLOSE button ends it) */
@@ -87,9 +93,12 @@ void touch_port_poll(tank_t *t) {
     float tx = touched ? (s_inverted ? (float)y[0] : (float)(TANK_W - 1 - y[0])) : s_lx;
     float ty = touched ? (s_inverted ? (float)(TANK_H - 1 - x[0]) : (float)x[0]) - s_bias_y : s_ly;
     if (touched && ty < 0) ty = 0;
+    float wx = tx, wy = ty;
+    render_camera_unmap(tx, ty, &wx, &wy);      /* where in the WATER the finger is */
+    if (touched) { s_wlx = wx; s_wly = wy; }
     if (touched && !s_down) {
         audio_port_prewarm();                   /* the release's cue plays warm */
-        s_press_us = now; s_px = tx; s_py = ty;
+        s_press_us = now; s_px = tx; s_py = ty; s_wpx = wx; s_wpy = wy;
         /* snapshot the school: the user aims at where a fish WAS - by release
            a darting fish has moved and the finger hid it the whole time */
         for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
@@ -119,8 +128,8 @@ void touch_port_poll(tank_t *t) {
     bool modal = s_ms || s_set || s_dev || s_shop || s_cf || su || s_fp >= 0;  /* a page or a prompt owns the glass */
     if (s_fp >= 0 && touched && s_down) ui_fish_page_swipe(tx - s_lx, t->clock);   /* the long lines scrub */
     bool on_card = s_sel >= 0 && RENDER_CARD_HIT(s_px, s_py);   /* the card is not glass */
-    if (touched) { s_lx = tx; s_ly = ty; if (!modal && !on_card) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
-    if (touched && !modal && !on_card && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, tx, ty);
+    if (touched) { s_lx = tx; s_ly = ty; if (!modal && !on_card) tank_touch_drag(t, wx, wy); }  /* stroke = wipe/slash */
+    if (touched && !modal && !on_card && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, wx, wy);
     if (!touched && s_down) {
         /* release: classify with the LAST touched position (the old code fell
            back to the PRESS position here, so dx/dy were always 0 - every
@@ -195,26 +204,26 @@ void touch_port_poll(tank_t *t) {
                closer - so a fish that moved mid-tap still registers. */
             int best = -1; float bd = 38 * 38;
             for (int i = 0; i < t->n_fish; i++) {
-                float ax = s_fx[i] - s_px, ay = s_fy[i] - s_py;
-                float bx = t->fish[i].x - s_px, by = t->fish[i].y - s_py;
+                float ax = s_fx[i] - s_wpx, ay = s_fy[i] - s_wpy;
+                float bx = t->fish[i].x - s_wpx, by = t->fish[i].y - s_wpy;
                 float d2a = ax * ax + ay * ay, d2b = bx * bx + by * by;
                 float d2 = d2a < d2b ? d2a : d2b;
                 if (d2 < bd) { bd = d2; best = i; }
             }
             if (best >= 0) { s_sel = (best == s_sel) ? -1 : best; s_sel_us = now; }
-            else if (tank_disco_hit(t, s_px, s_py)) {   /* the ball: the keeper's own show */
+            else if (tank_disco_hit(t, s_wpx, s_wpy)) {   /* the ball: the keeper's own show */
                 tank_disco_toggle(t);
                 ESP_LOGI(TAG, "disco ball: %s", t->disco_show_s > 0 ? "lowering, show on" : "show off");
             }
-            else if (tank_snail_hit(t, s_px, s_py)) {   /* the snail: its card (2026-09-16), the fish first */
+            else if (tank_snail_hit(t, s_wpx, s_wpy)) {   /* the snail: its card (2026-09-16), the fish first */
                 s_sel = s_sel == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL; s_sel_us = now;
                 ESP_LOGI(TAG, "snail tapped: card %s (%d spots grazed)", s_sel >= 0 ? "up" : "down", (int)t->snail_grazed); }
             else if (s_sel >= 0) s_sel = -1;   /* card up: a tap on empty glass just
                                                   dismisses it - it is NOT a tank tap
                                                   (no feed, no light-toggle burst) */
-            else tank_touch_tap(t, s_px, s_py);
+            else tank_touch_tap(t, s_wpx, s_wpy);
         }
-        else if (!s_ms && s_fp < 0 && s_py < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
+        else if (!s_ms && s_fp < 0 && s_py < 60 && dy >= 40) tank_feed(t, s_wlx, 3);  /* drag down from the top = feed */
         else if (!s_ms && !s_set && !s_shop && s_fp < 0 && s_py > TANK_H - 70 && dy <= -40) {
             s_ms = true; s_sel = -1;                                      /* swipe up from the bottom = the overview */
             ESP_LOGI(TAG, "swipe up from %.0f,%.0f -> the overview page", s_px, s_py);

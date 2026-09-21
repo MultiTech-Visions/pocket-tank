@@ -2675,3 +2675,102 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
     s_down = down;
     return r;
 }
+
+/* ---- the follow cam (2026-09-21) --------------------------------------
+ * A tap on a fish brings its card up; while that card is up the view eases
+ * in on that fish and keeps it centred, so you can actually see what it is
+ * doing. The scene is still drawn 1:1 - the renderer has no transform and
+ * threading one through every primitive would touch all of it - and the
+ * finished frame is then resampled: the region around the fish is copied
+ * out and written back magnified. Overlays (the card, the bolt, a notice)
+ * are drawn AFTER, so they stay crisp and full size.
+ *
+ * The camera itself is view state, not tank state: it lives here, it is
+ * never saved, and a tank with no camera behaves exactly as before.
+ *
+ * Cost is one copy of the region plus one full-frame write per frame. The
+ * region shrinks as the zoom rises (at 2x it is a quarter of the screen),
+ * and passing a NULL scratch turns the whole thing off, so a platform that
+ * cannot afford it simply does not pass one. */
+static float cam_clamp(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
+static float g_cam_z = 1.0f;        /* where the ease has got to */
+static float g_cam_x, g_cam_y;      /* what it is centred on, in tank space */
+static bool  g_cam_on;              /* is it easing in, or back out */
+static float g_cam_ox, g_cam_oy;    /* the region's top-left, after clamping */
+
+void render_camera_tick(const tank_t *t, int fish, float zoom, float dt) {
+    bool want = fish >= 0 && fish < t->n_fish && zoom > 1.01f;
+    g_cam_on = want;
+    if (want) {
+        const fish_t *f = &t->fish[fish];
+        if (g_cam_z <= 1.01f) { g_cam_x = f->x; g_cam_y = f->y; }   /* first frame: no swoop from nowhere */
+        /* the fish leads, the camera follows a little behind - a hard lock
+           makes the tank slide about underneath and reads as seasickness */
+        float k = cam_clamp(dt * CAM_FOLLOW_HZ, 0, 1);
+        g_cam_x += (f->x - g_cam_x) * k;
+        g_cam_y += (f->y - g_cam_y) * k;
+    }
+    float target = want ? zoom : 1.0f;
+    float e = cam_clamp(dt * CAM_EASE_HZ, 0, 1);
+    g_cam_z += (target - g_cam_z) * e;
+    if (g_cam_z < 1.004f) g_cam_z = 1.0f;                            /* settle exactly, so 1x costs nothing */
+}
+void render_camera_reset(void) { g_cam_z = 1.0f; g_cam_on = false; }
+bool render_camera_live(void) { return g_cam_z > 1.0f; }
+float render_camera_zoom(void) { return g_cam_z; }
+/* the region that will be magnified, clamped so the view never leaves the
+ * glass - the same maths the mapping below has to agree with */
+static void cam_region(float *ox, float *oy, float *w, float *h) {
+    float rw = TANK_W / g_cam_z, rh = TANK_H / g_cam_z;
+    /* The card owns the left of the glass, so dead centre puts the fish
+       behind it. Aim instead at the middle of what the card leaves, which
+       on a 448 px tank moves the fish about 75 screen px right. */
+    float bias = (RENDER_CARD_X + RENDER_CARD_W) * 0.5f / g_cam_z;
+    float x = cam_clamp(g_cam_x - rw * 0.5f - bias, 0, TANK_W - rw);
+    float y = cam_clamp(g_cam_y - rh * 0.5f, 0, TANK_H - rh);
+    *ox = x; *oy = y; *w = rw; *h = rh;
+}
+void render_camera_map(float x, float y, float *sx, float *sy) {
+    if (g_cam_z <= 1.0f) { *sx = x; *sy = y; return; }
+    *sx = (x - g_cam_ox) * g_cam_z;
+    *sy = (y - g_cam_oy) * g_cam_z;
+}
+void render_camera_unmap(float sx, float sy, float *x, float *y) {
+    if (g_cam_z <= 1.0f) { *x = sx; *y = sy; return; }
+    *x = g_cam_ox + sx / g_cam_z;
+    *y = g_cam_oy + sy / g_cam_z;
+}
+void render_camera_apply(uint16_t *fb, int stride, uint16_t *scratch, size_t scratch_px) {
+    if (g_cam_z <= 1.0f || !scratch) return;
+    float ox, oy, rw, rh; cam_region(&ox, &oy, &rw, &rh);
+    g_cam_ox = ox; g_cam_oy = oy;                 /* what the mapping must use */
+    int x0 = (int)ox, y0 = (int)oy;
+    int w = (int)(rw + 1.5f), h = (int)(rh + 1.5f);
+    if (x0 + w > TANK_W) w = TANK_W - x0;
+    if (y0 + h > TANK_H) h = TANK_H - y0;
+    if (w <= 0 || h <= 0 || (size_t)(w * h) > scratch_px) return;    /* no room: leave the frame alone */
+    /* every pixel is about to change, so the dirty mask must say so: the
+       panel push only sends what the mask marks, and a magnified frame with
+       a scene-sized mask would go up in torn strips */
+    if (g_dirty) memset(g_dirty, 0xff, (size_t)RENDER_DIRTY_WORDS * sizeof *g_dirty);
+    /* and this buffer no longer holds a clean 1:1 scene, so the prefetch must
+       not be allowed to claim it does - the next frame would be built on top
+       of a magnified background */
+    if (g_primed_fb == fb) g_primed_fb = NULL;
+    for (int y = 0; y < h; y++)                                       /* the region, out of harm's way */
+        memcpy(scratch + (size_t)y * w, fb + (size_t)(y0 + y) * stride + x0, (size_t)w * sizeof(uint16_t));
+    /* and back, magnified. Nearest neighbour on purpose: this is pixel art
+       and a filter would turn it to mush. */
+    float inv = 1.0f / g_cam_z;
+    for (int dy = 0; dy < TANK_H; dy++) {
+        float syf = (oy + dy * inv) - y0;
+        int sy = (int)syf; if (sy < 0) sy = 0; if (sy >= h) sy = h - 1;
+        const uint16_t *srow = scratch + (size_t)sy * w;
+        uint16_t *drow = fb + (size_t)dy * stride;
+        for (int dx = 0; dx < TANK_W; dx++) {
+            float sxf = (ox + dx * inv) - x0;
+            int sx = (int)sxf; if (sx < 0) sx = 0; if (sx >= w) sx = w - 1;
+            drow[dx] = srow[sx];
+        }
+    }
+}

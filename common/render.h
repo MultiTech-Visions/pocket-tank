@@ -4,6 +4,7 @@
 #ifndef RENDER_H
 #define RENDER_H
 
+#include <stddef.h>
 #include "tank.h"
 #include "icons.h"   /* icon_t, for render_icon below */
 
@@ -72,6 +73,31 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #define RENDER_CARD_HIT(x, y) ((x) >= RENDER_CARD_X - RENDER_CARD_HIT_SIDE && (x) < RENDER_CARD_X + RENDER_CARD_W + RENDER_CARD_HIT_SIDE && \
                                (y) >= RENDER_CARD_Y && (y) < RENDER_CARD_Y + RENDER_CARD_H + RENDER_CARD_HIT_BELOW)
 void render_set_card_cache(uint16_t *buf);
+
+/* ---- the follow cam (2026-09-21) --------------------------------------
+ * While a fish's card is up the view eases in on that fish and keeps it
+ * centred. The scene is drawn 1:1 as always and the finished frame is then
+ * resampled, so no primitive needs a transform; draw the card and any other
+ * overlay AFTER render_camera_apply and they stay full size and crisp.
+ *
+ * Per frame: render_tank, then render_camera_tick(t, selected, CAM_ZOOM, dt),
+ * then render_camera_apply(fb, stride, scratch, scratch_px), then the card.
+ * `scratch` holds the region about to be magnified - TANK_W*TANK_H is always
+ * enough, and a quarter of that covers CAM_ZOOM 2. Pass NULL and the camera
+ * does nothing at all, which is the way out if a platform cannot afford it.
+ *
+ * A tap arrives in SCREEN space while this is live: put it through
+ * render_camera_unmap before hit-testing anything in the tank. */
+#define CAM_ZOOM       2.0f      /* 3 was tried and is too much on a 448 px glass */
+#define CAM_EASE_HZ    6.0f      /* how briskly the zoom itself moves */
+#define CAM_FOLLOW_HZ  3.2f      /* ... and how closely the centre chases the fish */
+void  render_camera_tick(const tank_t *t, int fish, float zoom, float dt);
+void  render_camera_apply(uint16_t *fb, int stride, uint16_t *scratch, size_t scratch_px);
+void  render_camera_reset(void);
+bool  render_camera_live(void);
+float render_camera_zoom(void);
+void  render_camera_map(float x, float y, float *sx, float *sy);
+void  render_camera_unmap(float sx, float sy, float *x, float *y);
 /* Did this press-and-release open the card's fish page? (2026-09-21)
  *
  * The card is a big, soft target on the left edge and a thumb on it rolls.

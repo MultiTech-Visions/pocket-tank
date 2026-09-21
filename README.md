@@ -565,6 +565,27 @@ None of this adds a goal or a model input. It steers a fish that is *already*
 sociable or idle, the same way the totem parade does, and the model still owns
 every decision it makes.
 
+**The follow cam.** Tap a fish and the view eases in to 2x and keeps that
+fish with you, so you can see what it is actually doing. The scene is still
+drawn 1:1 — the renderer has no transform and threading one through every
+primitive would touch all of it — and the finished frame is resampled: the
+region around the fish is copied out and written back magnified, nearest
+neighbour, because this is pixel art and a filter would turn it to mush. The
+card, the bolt and any announcement are drawn *after*, so they stay crisp and
+full size, and the camera aims at the middle of what the card leaves rather
+than dead centre, so the fish is never behind it.
+
+It is view state: it lives in `render.c`, it is never saved, and a platform
+that passes no scratch buffer simply gets no zoom. The mask of changed pixels
+is marked whole and the scene prefetch is dropped for that buffer, since a
+magnified frame is no longer a clean background for the next one.
+
+Taps arrive in screen space while it is live, so everything that hit-tests in
+the water — the fish, the snail, the ball, a stroke across the glass — puts
+the point back through `render_camera_unmap` first. Without it a tap on the
+fish you are following lands on a different fish entirely, which is exactly
+what the test asserts.
+
 **Speed.** SETTINGS has a **SPEED** row: *slower*, *normal*, *faster*. It
 scales the speed a fish has already decided it wants — never the decision
 itself — so a fast tank is the same tank, livelier. Measured over a minute:
