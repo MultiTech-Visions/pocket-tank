@@ -73,9 +73,36 @@ def pause():
         input("\n  Press Enter to close this window. ")
 
 
+def selfcheck(spec):
+    """prove this bundle is complete, with no board anywhere near it.
+
+    The payload is easy: bundled() already raises for a missing file. The one
+    that bit us shipped instead - esptool keeps its stub flashers as package
+    DATA (esptool/targets/stub_flasher/*/<chip>.json), which PyInstaller does
+    not collect unless the build says --collect-data esptool. Without them the
+    exe connects to the tank, says hello, and only THEN dies with "Stub
+    flasher JSON file for esp32s3 not found". Building the StubFlasher here
+    reads and decodes the same file the upgrade will need, so a bundle that
+    would fail on somebody's desk fails in CI instead."""
+    for part in spec["parts"]:
+        bundled(part["file"])
+    from esptool.loader import StubFlasher
+    try:
+        stub = StubFlasher(spec["chip"])
+    except FileNotFoundError as e:
+        raise SystemExit(f"this build is incomplete: {e}\n"
+                         f"(the bundler needs --collect-data esptool)")
+    if not stub.text:
+        raise SystemExit(f"this build is incomplete: the {spec['chip']} stub flasher is empty")
+    print(f"OK: payload complete, {spec['chip']} stub flasher loaded ({len(stub.text)} bytes)")
+    return 0
+
+
 def main():
     p = platform()
     spec = json.load(open(bundled("flash.json")))
+    if len(sys.argv) > 1 and sys.argv[1] == "--selfcheck":   # CI, never a person
+        return selfcheck(spec)
     rule = "=" * 62
     print(rule)
     print("   POCKET TANK - upgrade the app")
@@ -100,6 +127,20 @@ def main():
     import esptool
     try:
         esptool.main(argv)
+    except FileNotFoundError as e:              # a file the BUNDLE should carry, not anything
+                                                # about the tank: say so instead of sending
+                                                # somebody off to change their cable
+        print()
+        print(rule)
+        print("   THIS DOWNLOAD IS INCOMPLETE")
+        print(rule)
+        print(f"   {e}")
+        print()
+        print("   Nothing is wrong with your tank or your cable - the file you")
+        print("   downloaded was built wrong. Download it again; if it still")
+        print("   does this, the build itself needs fixing.")
+        pause()
+        return 1
     except (esptool.FatalError, OSError) as e:  # FatalError, or a serial error opening the port
                                                # (SerialException is an OSError); the real reason
                                                # is printed, never swallowed
