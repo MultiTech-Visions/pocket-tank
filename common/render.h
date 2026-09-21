@@ -208,7 +208,10 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
 enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
-       SET_TAP_DEV = 6 };
+       SET_TAP_DEV = 6, SET_TAP_SPEED = 7 };
+/* SET_TAP_SPEED (2026-09-21): the SPEED row, *value = tank_t.fish_speed as it
+ * now stands (0 slower, 1 normal, 2 faster). render_settings_touch has already
+ * written it to the tank and asked for a save; the platform only logs it. */
 /* SET_TAP_DEV (2026-09-21): the phone trick. SET_DEV_TAPS taps in a row on the
  * FW version line at the bottom left open ui_ext.c's dev page; from three taps
  * on, the line itself counts down the ones still wanted. Any other tap on the

@@ -115,6 +115,9 @@ typedef struct {
     float    glow_x[GLOW_N], glow_y[GLOW_N], glow_ang[GLOW_N];
     uint32_t sd_stowed;      /* owned but out of the tank (2026-09-20) */
     int16_t  fish_parties[N_FISH_MAX];   /* bass parties attended, per fish (2026-09-20) */
+    uint8_t  fish_speed;                 /* the keeper's pace: 0 slower, 1 normal, 2 faster (2026-09-21).
+                                            0 in an older save would read as SLOWER, so it is stored
+                                            biased by one and a zero means "never set" = NORMAL. */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -226,7 +229,7 @@ bool progression_save_tail_is_last(void) {
        8-byte aligned (it carries an int64), so an exact == would fail purely
        on padding. What this really asserts is that no upstream sync has
        appended a named field after this fork's tail. */
-    size_t end = offsetof(save_t, fish_parties) + sizeof(((save_t *)0)->fish_parties);
+    size_t end = offsetof(save_t, fish_speed) + sizeof(((save_t *)0)->fish_speed);
     return end <= sizeof(save_t) && sizeof(save_t) - end < _Alignof(save_t);
 }
 bool progression_stow(tank_t *t, int item, bool stow) {
@@ -615,6 +618,8 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     }
     t->sd_stowed = sv.sd_stowed & t->sd_unlocks;     /* an older save reads 0: everything owned is in the tank */
     for (int i = 0; i < t->n_fish; i++) t->fish[i].parties = sv.fish_parties[i];
+    /* stored biased by one: 0 is "this save predates the setting" = NORMAL */
+    t->fish_speed = sv.fish_speed ? (uint8_t)((sv.fish_speed - 1) % FISH_SPEED_N) : 1;
     if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
         if (sv.glow_x[0] > 0) {
             for (int i = 0; i < GLOW_N; i++) {
@@ -810,6 +815,7 @@ void progression_save(tank_t *t) {
     }
     sv.sd_stowed = t->sd_stowed;
     for (int i = 0; i < N_FISH_MAX; i++) sv.fish_parties[i] = i < t->n_fish ? t->fish[i].parties : 0;
+    sv.fish_speed = (uint8_t)((t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1) + 1);
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);
     sv.bubble_x = t->bubble_x;

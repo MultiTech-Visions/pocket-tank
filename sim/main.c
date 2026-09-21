@@ -2200,6 +2200,7 @@ int main(int argc, char **argv) {
                                             printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
+            else if (r == SET_TAP_SPEED) printf("fish speed: %s\n", FISH_SPEED_NAMES[v < FISH_SPEED_N ? v : 1]);
         }
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */

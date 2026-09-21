@@ -565,6 +565,12 @@ None of this adds a goal or a model input. It steers a fish that is *already*
 sociable or idle, the same way the totem parade does, and the model still owns
 every decision it makes.
 
+**Speed.** SETTINGS has a **SPEED** row: *slower*, *normal*, *faster*. It
+scales the speed a fish has already decided it wants — never the decision
+itself — so a fast tank is the same tank, livelier. Measured over a minute:
+608, 1051 and 1588 px travelled per fish. It saves with the rest, and a save
+written before the setting existed reads as *normal* rather than *slower*.
+
 **The dev page.** The phone trick: open **SETTINGS**, then tap the dim `FW ...`
 line in the bottom left corner **seven times in a row**. From the third tap the
 line counts down the ones still wanted, and the seventh opens a page that is not

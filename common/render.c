@@ -2509,10 +2509,13 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
  * the keeper's opt-in) with the idle time under it as one number: swipe it
  * up or down, or tap the chevrons; the default is LIGHT_IDLE_S. */
 #define SET_TITLE_Y   14
-#define SET_ROW1_Y    58             /* BRIGHTNESS */
-#define SET_ROW2_Y    108            /* VOLUME */
-#define SET_NOTE_Y    146            /* "FISH ARE QUIET AT NIGHT" */
-#define SET_ROW3_Y    176            /* LIGHTS OUT */
+/* four rows now (2026-09-21: SPEED joined them), so they moved up and
+   closed ranks; the seconds number came up with them */
+#define SET_ROW1_Y    46             /* BRIGHTNESS */
+#define SET_ROW2_Y    92             /* VOLUME */
+#define SET_ROWS_Y    138            /* SPEED */
+#define SET_NOTE_Y    174            /* "FISH ARE QUIET AT NIGHT" */
+#define SET_ROW3_Y    204            /* LIGHTS OUT */
 #define SET_LABEL_X   32
 static int g_set_ver_taps;           /* consecutive taps on the version line (the dev page) */
 #define SET_SEG_X     190            /* first segment */
@@ -2530,8 +2533,8 @@ static int g_set_ver_taps;           /* consecutive taps on the version line (th
 #define SET_NUM_H     (7 * SET_NUM_SCALE)
 #define SET_NUM_X     SET_SEG_X       /* the number's left edge (right-aligned in a 3-digit box) */
 #define SET_NUM_BOX_W (3 * 6 * SET_NUM_SCALE - SET_NUM_SCALE)
-#define SET_NUM_Y     266
-#define SET_NUM_GAP   30              /* chevron tip to the number */
+#define SET_NUM_Y     280
+#define SET_NUM_GAP   24              /* chevron tip to the number */
 #define SET_AFTER_Y   (SET_NUM_Y + (SET_NUM_H - 14) / 2)
 #define SET_STEP_PX   15              /* drag travel per step */
 #define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H + 8)   /* the segments' band stops just under them */
@@ -2539,6 +2542,7 @@ static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
 static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
 static const char *const SET_LIGHT[2]  = { "MANUAL", "AUTO" };   /* the default first */
+static const char *const SET_SPEED[FISH_SPEED_N] = { "SLOWER", "NORMAL", "FASTER" };
 
 static void set_row(ctx_t *c, int row_y, const char *label, const char *const names[], int n, int chosen) {
     draw_text(c, SET_LABEL_X, row_y, 2, MSP_TEAL, label);
@@ -2564,6 +2568,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
+    set_row(&c, SET_ROWS_Y, "SPEED", SET_SPEED, FISH_SPEED_N, t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1);
     draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
     set_row(&c, SET_ROW3_Y, "LIGHTS OUT", SET_LIGHT, 2, t->light_auto ? 1 : 0);
     if (t->light_auto) {
@@ -2613,7 +2618,8 @@ int render_settings_tap(float x, float y, int *value) {
        segments so the number's up chevron below is its own */
     int seg = set_segment(x, 3);
     if (y >= SET_SEG_Y(SET_ROW1_Y) - 12 && y < SET_SEG_Y(SET_ROW2_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = SET_BRIGHT_PCT[seg]; return SET_TAP_BRIGHT; }
-    if (y >= SET_SEG_Y(SET_ROW2_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
+    if (y >= SET_SEG_Y(SET_ROW2_Y) - 12 && y < SET_SEG_Y(SET_ROWS_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
+    if (y >= SET_SEG_Y(SET_ROWS_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_SPEED; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_LIGHT_BAND_END)          { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg == 1; return SET_TAP_LIGHT; }
     if (y >= SET_LIGHT_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
         *value = 0;
@@ -2657,6 +2663,10 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                     r = SET_TAP_IDLE; *value = t->light_idle_s;
                 } else if (h == SET_HIT_VERSION) {                  /* the phone trick: seven in a row */
                     if (++g_set_ver_taps >= SET_DEV_TAPS) { g_set_ver_taps = 0; r = SET_TAP_DEV; }
+                } else if (h == SET_TAP_SPEED) {                    /* the keeper's pace, saved with the rest */
+                    t->fish_speed = (uint8_t)(v < 0 ? 0 : v >= FISH_SPEED_N ? FISH_SPEED_N - 1 : v);
+                    progression_settings_changed();
+                    r = SET_TAP_SPEED; *value = t->fish_speed;
                 } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME) { r = h; *value = v; }
                 if (h != SET_HIT_VERSION) g_set_ver_taps = 0;          /* any other tap starts the run over */
             }

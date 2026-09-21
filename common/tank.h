@@ -393,6 +393,11 @@ typedef struct tank {
                                     * page leaves for it, so it is never behind the UI
                                     * (2026-09-13). -1 = nobody. Not saved. */
     float    stage_x, stage_y;
+    /* how fast the whole school moves (2026-09-21): 0 slower, 1 as it always
+     * was, 2 faster. A keeper setting, saved. It scales the speed a fish has
+     * decided it wants - never the decisions themselves - so a fast tank is
+     * the same tank, just livelier. */
+    uint8_t  fish_speed;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
                                     * shot). Not saved. */
@@ -470,6 +475,9 @@ void  tank_tick_sleep(tank_t *t, float seconds);
 #define LIGHT_IDLE_MAX_S 999       /* three digits on the settings wheel */
 void  tank_handled(tank_t *t);
 void  tank_toggle_light(tank_t *t);
+#define FISH_SPEED_N 3
+extern const float FISH_SPEED_MUL[FISH_SPEED_N];   /* 0 slower .. 2 faster */
+extern const char *const FISH_SPEED_NAMES[FISH_SPEED_N];
 void  tank_light_auto(tank_t *t);
 
 /* Touch input (platform feeds these; sim = mouse, device = FT3168):

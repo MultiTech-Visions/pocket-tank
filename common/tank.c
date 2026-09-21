@@ -19,6 +19,8 @@ const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
     "welcome", "wheel_tick", "confirm", "glow_play", "totem_lift", "glow_catch", "glow_rally",
 };
+const float FISH_SPEED_MUL[FISH_SPEED_N] = { 0.65f, 1.0f, 1.65f };
+const char *const FISH_SPEED_NAMES[FISH_SPEED_N] = { "SLOWER", "NORMAL", "FASTER" };
 static float s_glow_cool[N_FISH_MAX];   /* glow sticks: seconds until this fish may take one again (not saved) */
 /* ---- play (tank.h): all of it transient, none of it saved ---- */
 static float s_glow_want[N_FISH_MAX];   /* seconds this fish stays keen for a stick */
@@ -263,6 +265,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->reef_x   = TANK_W * 0.15f; t->reef_y   = TANK_H * 0.85f;
     t->clock = 0; t->night = false; t->idle_s = 0;
     t->light_idle_s = LIGHT_IDLE_S; t->light_auto = false; t->light_manual_off = false;
+    t->fish_speed = 1;                                   /* as it always was */
     t->light_override = false; t->light_on = true;
     t->hold_active = false; t->hold_time = 0; t->hold_approached = false;
     t->tap_count = 0; t->tap_burst_t = 99; t->startled = false;
@@ -1918,6 +1921,9 @@ static void update_fish(tank_t *t, int idx, float dt) {
     f->heading = norm_ang(f->heading + turn);
     float want = touch_speed >= 0 ? touch_speed : hes_speed >= 0 ? hes_speed : tg.speed * ugain;
     f->target_speed = want * (f->energy < 1.2f ? 0.45f : 1);
+    /* the keeper's pace, applied to what the fish already wants rather than
+       to any decision it made: the same tank, livelier or calmer */
+    f->target_speed *= FISH_SPEED_MUL[t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1];
     /* swimming through a canopy is slow going (a fleeing fish crashes through) */
     if (f->goal.id != GOAL_FLEE_SHADOW)
         for (int b = 0; b < tank_veg_beds(t); b++)

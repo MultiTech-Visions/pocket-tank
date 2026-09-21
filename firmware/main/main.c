@@ -411,7 +411,8 @@ static void tank_task(void *arg) {
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
-          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
+          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
+          else if (w == SET_TAP_SPEED) ESP_LOGI(TAG, "settings: fish speed %s", FISH_SPEED_NAMES[v < FISH_SPEED_N ? v : 1]); }
         { int a = touch_port_take_dev();                                /* the dev page's buttons */
           if (a == UI_DEV_BATTERY) {                                    /* the faked charge: the bolt's four colours */
               s_dev_bat = ui_dev_battery_next(s_dev_bat);
