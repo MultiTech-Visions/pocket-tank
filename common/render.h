@@ -4,6 +4,7 @@
 #ifndef RENDER_H
 #define RENDER_H
 
+#include <stddef.h>
 #include "tank.h"
 #include "icons.h"   /* icon_t, for render_icon below */
 
@@ -72,6 +73,31 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #define RENDER_CARD_HIT(x, y) ((x) >= RENDER_CARD_X - RENDER_CARD_HIT_SIDE && (x) < RENDER_CARD_X + RENDER_CARD_W + RENDER_CARD_HIT_SIDE && \
                                (y) >= RENDER_CARD_Y && (y) < RENDER_CARD_Y + RENDER_CARD_H + RENDER_CARD_HIT_BELOW)
 void render_set_card_cache(uint16_t *buf);
+
+/* ---- the follow cam (2026-09-21) --------------------------------------
+ * While a fish's card is up the view eases in on that fish and keeps it
+ * centred. The scene is drawn 1:1 as always and the finished frame is then
+ * resampled, so no primitive needs a transform; draw the card and any other
+ * overlay AFTER render_camera_apply and they stay full size and crisp.
+ *
+ * Per frame: render_tank, then render_camera_tick(t, selected, CAM_ZOOM, dt),
+ * then render_camera_apply(fb, stride, scratch, scratch_px), then the card.
+ * `scratch` holds the region about to be magnified - TANK_W*TANK_H is always
+ * enough, and a quarter of that covers CAM_ZOOM 2. Pass NULL and the camera
+ * does nothing at all, which is the way out if a platform cannot afford it.
+ *
+ * A tap arrives in SCREEN space while this is live: put it through
+ * render_camera_unmap before hit-testing anything in the tank. */
+#define CAM_ZOOM       2.0f      /* 3 was tried and is too much on a 448 px glass */
+#define CAM_EASE_HZ    6.0f      /* how briskly the zoom itself moves */
+#define CAM_FOLLOW_HZ  3.2f      /* ... and how closely the centre chases the fish */
+void  render_camera_tick(const tank_t *t, int fish, float zoom, float dt);
+void  render_camera_apply(uint16_t *fb, int stride, uint16_t *scratch, size_t scratch_px);
+void  render_camera_reset(void);
+bool  render_camera_live(void);
+float render_camera_zoom(void);
+void  render_camera_map(float x, float y, float *sx, float *sy);
+void  render_camera_unmap(float sx, float sy, float *x, float *y);
 /* Did this press-and-release open the card's fish page? (2026-09-21)
  *
  * The card is a big, soft target on the left edge and a thumb on it rolls.
@@ -87,7 +113,19 @@ bool render_card_opens_page(int sel, float px, float py, float rx, float ry);
 
 /* Device battery pill (top-right), drawn with the stats card on hardware:
  * frac 0..1, charging tints the fill teal. */
+/* The detail panel's previous / next arrows (2026-09-16, exported 2026-09-21).
+ * Every page that opens a panel draws them with this and hit-tests them with
+ * render_panel_arrow_hit, so they are in one dress, in one place, with one
+ * hit box - a second set drawn by hand looked nothing like these.
+ * `x`, `y`, `w` are the panel's own box. The hit test returns -1 for the
+ * previous, +1 for the next, and 0 for anywhere else. */
+void render_panel_arrows(uint16_t *fb, int stride, int x, int y, int w);
+int  render_panel_arrow_hit(int x, int y, int w, float px, float py);
 void render_battery(uint16_t *fb, int stride, float frac, bool charging);
+/* the glow sticks a fish is HOLDING, drawn after the fish so one can never
+ * disappear inside a big body (2026-09-21). render_tank calls it itself; it
+ * is exported so a test can reach it. `dim` is the night dim in force. */
+void render_glow_carried(const tank_t *t, uint16_t *fb, int stride, float dim);
 /* an announcement over the live tank (notice.h: a milestone the moment it
  * is earned, a stage reached, low battery), in the milestones page's modal
  * style; frac_left (1 -> 0) is its remaining time, drawn as a thin bar */
@@ -124,8 +162,13 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride);
  * brightness row). */
 enum { MS_TAP_NONE = 0, MS_TAP_KEPT = 1, MS_TAP_CLOSE = 2, MS_TAP_SETTINGS = 3,   /* SETTINGS: the button bottom left (2026-09-15) opens the settings page */
        MS_TAP_SHOP = 4,                                                           /* the sand dollar left of the TANK row opens the shop */
-       MS_TAP_FISH = 16 };          /* + the fish index (2026-09-20): its popup's MORE button was
-                                     * tapped - the platform closes this page and opens ui_fish_page */
+/* the foot row's x positions, so a test aims at the buttons rather than at
+ * numbers copied out of render.c that then move (2026-09-21) */
+#define MSP_SET_X_T   32
+#define MSP_UPG_X_T   178
+#define MSP_CLOSE_X_T 324
+       MS_TAP_FISH = 16 };                                                        /* + the fish index (2026-09-20): its popup's MORE button was
+                                                                                   * tapped - the platform closes this page and opens ui_fish_page */
 int  render_milestones_tap(const tank_t *t, float x, float y);
 void render_milestones_leave(void);
 
@@ -142,6 +185,7 @@ void render_milestones_leave(void);
  * render-local; render_shop_leave clears it (back to the first shelf) when
  * the page closes. */
 enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_GRANT = 3,
+       SHOP_TAP_REEF = 4,     /* the coral in the top right corner: the builder (reef.h) */
        SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_STOW = 64 };   /* BUY / MOVE / STOW + item index */
 /* SHOP_TAP_GRANT (2026-09-21): the dev override. SHP_DEV_TAPS taps in a row on
  * the balance coin at the top of the shop; the platform calls
@@ -204,7 +248,10 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
 enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
-       SET_TAP_DEV = 6 };
+       SET_TAP_DEV = 6, SET_TAP_SPEED = 7 };
+/* SET_TAP_SPEED (2026-09-21): the SPEED row, *value = tank_t.fish_speed as it
+ * now stands (0 slower, 1 normal, 2 faster). render_settings_touch has already
+ * written it to the tank and asked for a save; the platform only logs it. */
 /* SET_TAP_DEV (2026-09-21): the phone trick. SET_DEV_TAPS taps in a row on the
  * FW version line at the bottom left open ui_ext.c's dev page; from three taps
  * on, the line itself counts down the ones still wanted. Any other tap on the

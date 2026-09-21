@@ -219,8 +219,21 @@ typedef struct { float x, y, vy, wobble; bool column; } bubble_t;
 #define GLOW_SINK_PX_S    17.0f              /* terminal speed of a dropped stick */
 #define GLOW_REACH        20.0f              /* a playing fish this close can take one */
 #define GLOW_CARRY_MIN_S  1.2f               /* ... and holds it at least this long */
-#define GLOW_CARRY_MAX_S  16.0f              /* ... and has let go by then, wherever it is */
-#define GLOW_RELEASE_Y    (TANK_H * 0.32f)   /* "up to the top": let go at or above this */
+#define GLOW_CARRY_MAX_S  22.0f              /* ... and has let go by then, wherever it is */
+#define GLOW_RELEASE_Y    (TANK_H * 0.30f)   /* "up to the top": let go at or above this */
+/* Carrying one is a trip to the surface (2026-09-21). Nothing used to tell a
+ * carrier to ASCEND - it just swam whatever its goal wanted, drifted about a
+ * quarter of the way up and timed out - so the drop was almost never the long
+ * fall it is meant to be. A carrier now aims for GLOW_LIFT_Y and, once it has
+ * let go, turns and follows the stick down watching it. */
+#define GLOW_LIFT_Y       (TANK_H * 0.20f)   /* where a carrier is heading */
+#define GLOW_WATCH_S      7.0f               /* how long it follows its own drop down */
+#define GLOW_BOUNCE       0.55f              /* how much of a throw a wall gives back */
+#define GLOW_PILE_R       34.0f              /* sticks this close to a tap are one pile */
+#define GLOW_POP_MIN      46.0f              /* how hard a scattered stick leaves */
+#define GLOW_POP_MAX      104.0f
+#define GLOW_HOP_MIN      28.0f              /* ... and a single one that is just nudged */
+#define GLOW_HOP_MAX      62.0f
 /* the quiet after a fish plays with a stick. Lights-out is the BEST time for
  * glow sticks, so the dark halves it: they come back to them twice as often. */
 #define GLOW_PLAY_COOL_S  20.0f              /* lights on */
@@ -380,6 +393,19 @@ typedef struct tank {
                                     * page leaves for it, so it is never behind the UI
                                     * (2026-09-13). -1 = nobody. Not saved. */
     float    stage_x, stage_y;
+    /* how fast the whole school moves (2026-09-21): 0 slower, 1 as it always
+     * was, 2 faster. A keeper setting, saved. It scales the speed a fish has
+     * decided it wants - never the decisions themselves - so a fast tank is
+     * the same tank, just livelier. */
+    /* the reef the keeper built (reef.h, 2026-09-21): REEF_COLS x REEF_ROWS
+     * cells at two to a byte, drawn as the backdrop behind everything. Kept
+     * here rather than in reef.c so progression.c saves it with the rest and
+     * one tank is one struct. 28 x 23 at 4 bits is 322 bytes. */
+    uint8_t  reef[322];   /* REEF_SAVE_BYTES; reef.c static-asserts the two agree */
+    uint8_t  fish_speed;
+    /* the reef builder is not on by default: it is found (reef.h's combo) or
+     * switched on from the dev page, and then it stays found. */
+    uint8_t  reef_open;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
                                     * shot). Not saved. */
@@ -457,6 +483,9 @@ void  tank_tick_sleep(tank_t *t, float seconds);
 #define LIGHT_IDLE_MAX_S 999       /* three digits on the settings wheel */
 void  tank_handled(tank_t *t);
 void  tank_toggle_light(tank_t *t);
+#define FISH_SPEED_N 3
+extern const float FISH_SPEED_MUL[FISH_SPEED_N];   /* 0 slower .. 2 faster */
+extern const char *const FISH_SPEED_NAMES[FISH_SPEED_N];
 void  tank_light_auto(tank_t *t);
 
 /* Touch input (platform feeds these; sim = mouse, device = FT3168):
@@ -636,6 +665,22 @@ void  tank_totem_force(tank_t *t);
  * become keen and go for it. Returns how many were called over, 0 for a tap
  * that was not on the pile - so a caller can tell whether the tap was spent. */
 int   tank_glow_nudge(tank_t *t, float x, float y);
+/* a tap on the TOTEM: somebody goes and gets it. Nobody was ever picking it
+ * up on their own - it wants a really sociable fish to wander within reach
+ * of it in daylight with the cooldown clear, which almost never lines up -
+ * so a tap invites the nearest calm fish and, for TOTEM_INVITE_S, that fish
+ * ignores the social bar, the cooldown and the hour. Returns false for a tap
+ * that was not on the totem, so the caller knows the tap is unspent. */
+/* Lights out with any of the festival gear in the tank and the fish are not
+ * ready for bed: for AFTERHOURS_S they keep playing with the glowy things
+ * instead. The model still chooses REST if it wants to - this only steers a
+ * resting fish towards the sticks rather than to the reef, and keeps it
+ * looking awake while it does. */
+#define AFTERHOURS_S     300.0f
+bool  tank_afterhours(const tank_t *t);
+#define TOTEM_INVITE_S   26.0f   /* long enough to actually swim there from the far side */
+#define TOTEM_TAP_REACH  34.0f
+bool  tank_totem_nudge(tank_t *t, float x, float y);
 /* something just went into the tank: the fish come and look it over */
 void  tank_decor_noticed(tank_t *t, int item);
 /* the rally in flight: how many passes, and who is waiting for the catch

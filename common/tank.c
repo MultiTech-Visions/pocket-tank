@@ -19,6 +19,8 @@ const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
     "welcome", "wheel_tick", "confirm", "glow_play", "totem_lift", "glow_catch", "glow_rally",
 };
+const float FISH_SPEED_MUL[FISH_SPEED_N] = { 0.65f, 1.0f, 1.65f };
+const char *const FISH_SPEED_NAMES[FISH_SPEED_N] = { "SLOWER", "NORMAL", "FASTER" };
 static float s_glow_cool[N_FISH_MAX];   /* glow sticks: seconds until this fish may take one again (not saved) */
 /* ---- play (tank.h): all of it transient, none of it saved ---- */
 static float s_glow_want[N_FISH_MAX];   /* seconds this fish stays keen for a stick */
@@ -27,6 +29,11 @@ static int   s_catch_to = -1;           /* the fish a stick is in the air toward
 static int   s_catch_stick = -1;        /* which stick */
 static float s_catch_s;                 /* how long the pass stays catchable */
 static int   s_rally;                   /* passes landed in this rally */
+static float s_glow_watch[N_FISH_MAX];  /* seconds left following its own dropped stick down */
+static int   s_glow_watched[N_FISH_MAX];/* ... and which stick it is watching */
+static float s_after_s;                 /* the after-hours window, seconds left */
+static int   s_totem_invited = -1;      /* a fish asked to go and get the totem */
+static float s_totem_invite_s;
 static int   s_decor_new = -1;          /* a piece just placed: worth a look */
 static float s_decor_new_s;
 static float s_totem_cool;              /* the quiet after a totem parade (not saved) */
@@ -261,6 +268,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->reef_x   = TANK_W * 0.15f; t->reef_y   = TANK_H * 0.85f;
     t->clock = 0; t->night = false; t->idle_s = 0;
     t->light_idle_s = LIGHT_IDLE_S; t->light_auto = false; t->light_manual_off = false;
+    t->fish_speed = 1;                                   /* as it always was */
     t->light_override = false; t->light_on = true;
     t->hold_active = false; t->hold_time = 0; t->hold_approached = false;
     t->tap_count = 0; t->tap_burst_t = 99; t->startled = false;
@@ -834,6 +842,7 @@ static void glow_tick(tank_t *t, float dt) {
     for (int i = 0; i < N_FISH_MAX; i++) {
         if (s_glow_cool[i] > 0) s_glow_cool[i] -= dt;
         if (s_glow_want[i] > 0) s_glow_want[i] -= dt;
+        if (s_glow_watch[i] > 0 && (s_glow_watch[i] -= dt) <= 0) s_glow_watched[i] = -1;
     }
     if (s_catch_s > 0 && (s_catch_s -= dt) <= 0) {          /* the pass went wide: the rally is over */
         s_catch_to = -1; s_catch_stick = -1; s_rally = 0;
@@ -851,7 +860,7 @@ static void glow_tick(tank_t *t, float dt) {
                incurious fish still plays, just less. Without the floor one
                roster in four never touched a stick in twenty minutes. */
             float keen = 0.40f + 0.60f * ((f->bored / 10.0f) * 0.5f + f->curiosity / 10.0f * 0.3f + f->sociable * 0.2f);
-            if (tank_randf(t, 0, 1) < GLOW_ROLL_P * keen * (t->night ? 2.0f : 1.0f))
+            if (tank_randf(t, 0, 1) < GLOW_ROLL_P * keen * (tank_afterhours(t) ? 3.2f : t->night ? 2.0f : 1.0f))
                 s_glow_want[i] = GLOW_WANT_S;
         }
     }
@@ -871,7 +880,12 @@ static void glow_tick(tank_t *t, float dt) {
             /* a pass: someone keen and empty-finned nearby, and this fish
                feels like sharing. The stick is thrown AT them and stays
                catchable for a moment - miss it and it just sinks. */
-            if (s_catch_stick != g && s->held_s > GLOW_THROW_MIN_S && s_catch_to < 0) {
+            /* the trip up comes FIRST: a fish only looks for someone to pass
+               to once it has got the stick high, or has been carrying it long
+               enough to have given up on that. Passing early was ending half
+               the carries down in the weeds, and the long fall is the point. */
+            bool up_there = s->y <= GLOW_RELEASE_Y || s->held_s > GLOW_CARRY_MAX_S * 0.5f;
+            if (s_catch_stick != g && up_there && s->held_s > GLOW_THROW_MIN_S && s_catch_to < 0) {
                 int mate = -1; float best = GLOW_THROW_REACH;
                 for (int i = 0; i < t->n_fish; i++) {
                     if (i == s->carrier || glow_busy(t, i) || s_glow_cool[i] > 0) continue;
@@ -907,6 +921,7 @@ static void glow_tick(tank_t *t, float dt) {
                 s->spin = tank_randf(t, -1.4f, 1.4f);       /* it tumbles on the way down */
                 s_glow_cool[who] = t->night ? GLOW_PLAY_COOL_NIGHT_S : GLOW_PLAY_COOL_S;
                 if (high && !rattled) { t->fish[who].ms_bits |= MS_GLOW_TOSS; tank_emit(TEV_GLOW_PLAY, who); }
+                if (!rattled) { s_glow_watch[who] = GLOW_WATCH_S; s_glow_watched[who] = g; }   /* follow it down */
             }
             continue;
         }
@@ -931,6 +946,15 @@ static void glow_tick(tank_t *t, float dt) {
             s->vy += (GLOW_SINK_PX_S - s->vy) * (dt * 3.0f < 1.0f ? dt * 3.0f : 1.0f);
             s->y += s->vy * dt;
             s->x += s->vx * dt;
+            {   /* the glass: a stick still carrying speed comes back off it */
+                float lo = DECOR_MARGIN, hi = TANK_W - DECOR_MARGIN;
+                if (s->x < lo || s->x > hi) {
+                    s->x = s->x < lo ? lo : hi;
+                    s->vx = -s->vx * GLOW_BOUNCE;
+                    s->spin = -s->spin;
+                }
+                if (s->y < 12.0f && s->vy < 0) { s->y = 12.0f; s->vy = 0; }   /* and the surface */
+            }
             s->vx -= s->vx * (dt * 0.7f);                                /* the water takes the throw out of it */
             s->x += sinf(t->clock * 1.7f + g * 1.3f) * dt * 7.0f;        /* ... and it wanders as it sinks */
             s->ang += s->spin * dt;
@@ -1109,6 +1133,20 @@ static void totem_tick(tank_t *t, float dt) {
         }
         return;
     }
+    if (s_totem_invited >= 0 && s_totem_invited < t->n_fish && s_totem_invite_s > 0) {
+        /* somebody was ASKED to get it: the bar, the cooldown and the hour
+           all stand aside, but it still has to swim over and reach it */
+        int i = s_totem_invited;
+        const fish_t *f = &t->fish[i];
+        float tx2 = tank_decor_x(t, SD_IDX_TOTEM), ty2 = TANK_H - 16 - TOTEM_H * 0.5f;
+        /* an invited fish is AIMING at it, so it does not have to brush the
+           pole the way a passer-by would - it reaches from further out */
+        if (f->stress < 7.0f && tank_dist(f->x, f->y, tx2, ty2) <= TOTEM_REACH * 1.9f) {
+            s_totem_cool = 0; s_totem_invited = -1; s_totem_invite_s = 0;
+            totem_lift(t, i);
+            return;
+        }
+    }
     if (s_totem_cool > 0 || t->night) return;            /* it is lifted by day; the party may run into the dark */
     float tx = tank_decor_x(t, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
     for (int i = 0; i < t->n_fish; i++) {
@@ -1133,13 +1171,34 @@ void tank_totem_force(tank_t *t) {
 }
 
 /* ---- play: the keeper's nudge, and a new thing to look at (tank.h) ---- */
+/* one stick leaves the sand at `ang`, `speed` px/s. Lifting it a hair off
+ * whatever it was resting on is what puts it back in the falling branch. */
+static void glow_launch(tank_t *t, int g, float ang, float speed) {
+    glow_t *s = &t->glow[g];
+    s->carrier = -1; s->held_s = 0;
+    s->vx = cosf(ang) * speed;
+    s->vy = sinf(ang) * speed;
+    s->y -= 1.5f;
+    s->spin = tank_randf(t, -4.0f, 4.0f);
+}
 int tank_glow_nudge(tank_t *t, float x, float y) {
     if (!tank_bit_live(t, SD_ITEM_GLOW)) return 0;
-    bool pile = false;                                   /* is a stick actually lying about here? */
-    for (int g = 0; g < GLOW_N && !pile; g++)
-        if (t->glow[g].carrier < 0 && tank_dist(t->glow[g].x, t->glow[g].y, x, y) <= GLOW_NUDGE_REACH * 0.35f)
-            pile = true;
-    if (!pile) return 0;
+    int near[GLOW_N], n = 0;                             /* what is lying within reach of the tap */
+    for (int g = 0; g < GLOW_N; g++) {
+        const glow_t *s = &t->glow[g];
+        if (s->carrier < 0 && s->vy <= 0.01f && tank_dist(s->x, s->y, x, y) <= GLOW_PILE_R) near[n++] = g;
+    }
+    if (n == 0) return 0;
+    if (n > 1) {                                         /* a PILE: it goes everywhere */
+        for (int i = 0; i < n; i++) {
+            /* out and up, fanned so they do not all take the same line; the
+               water and the walls take it out of them on the way down */
+            float ang = -1.9f + (float)i / (float)(n - 1) * 1.4f + tank_randf(t, -0.25f, 0.25f);
+            glow_launch(t, near[i], ang, tank_randf(t, GLOW_POP_MIN, GLOW_POP_MAX));
+        }
+    } else {                                             /* one on its own: it hops */
+        glow_launch(t, near[0], tank_randf(t, -2.5f, -0.6f), tank_randf(t, GLOW_HOP_MIN, GLOW_HOP_MAX));
+    }
     int called = 0;
     for (int n = 0; n < GLOW_NUDGE_N; n++) {             /* the nearest calm, empty-finned fish */
         int best = -1; float bd = GLOW_NUDGE_REACH;
@@ -1154,6 +1213,21 @@ int tank_glow_nudge(tank_t *t, float x, float y) {
         called++;
     }
     return called;
+}
+bool tank_afterhours(const tank_t *t) { return t->night && s_after_s > 0; }
+bool tank_totem_nudge(tank_t *t, float x, float y) {
+    if (!tank_bit_live(t, SD_ITEM_TOTEM) || t->totem_phase != TOTEM_OFF) return false;
+    float tx = tank_decor_x(t, SD_IDX_TOTEM), ty = TANK_H - 16 - TOTEM_H * 0.5f;
+    if (tank_dist(x, y, tx, ty) > TOTEM_H * 0.5f + TOTEM_TAP_REACH) return false;
+    int best = -1; float bd = 1e9f;
+    for (int i = 0; i < t->n_fish; i++) {
+        if (t->fish[i].stress > 6.0f) continue;
+        float d = tank_dist(t->fish[i].x, t->fish[i].y, tx, ty);
+        if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) return true;                     /* the tap WAS on the totem; nobody is up for it */
+    s_totem_invited = best; s_totem_invite_s = TOTEM_INVITE_S;
+    return true;
 }
 void tank_decor_noticed(tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return;
@@ -1258,6 +1332,7 @@ void tank_touch_tap(tank_t *t, float x, float y) {
     /* the pile: a tap on it calls somebody over to play, and is spent doing
        that - it is an object, like the ball, not a knock on the glass, so it
        neither counts toward the startle nor flips the light */
+    if (tank_totem_nudge(t, x, y)) { tank_emit(TEV_TAP, -1); return; }   /* the totem: somebody fetches it */
     if (tank_glow_nudge(t, x, y)) { tank_emit(TEV_TAP, -1); return; }
     if (t->tap_burst_t > TAP_WINDOW) t->tap_count = 0;
     t->tap_count++; t->tap_burst_t = 0; t->tap_x = x; t->tap_y = y;
@@ -1483,13 +1558,29 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
        the totem event above: only a goal that is already sociable or idle is
        steered, and the model still owns every goal it sets. In priority
        order, because a stick in the air beats anything else worth seeing. */
-    if (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES) {
+    if (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES ||
+        (goal == GOAL_REST && tank_afterhours(t))) {
         float px = 0, py = 0; bool go = false;
-        if (s_catch_to == idx && s_catch_stick >= 0 && s_catch_stick < GLOW_N) {
+        int held = -1;
+        for (int g = 0; g < GLOW_N; g++) if (t->glow[g].carrier == idx) { held = g; break; }
+        if (held >= 0) {                                    /* carrying one: UP, that is the whole point */
+            px = f->x + cosf(f->wander * 0.6f) * 34;        /* a lazy weave, not a straight line */
+            py = GLOW_LIFT_Y;
+            go = true;
+        } else if (s_glow_watch[idx] > 0 && s_glow_watched[idx] >= 0 && s_glow_watched[idx] < GLOW_N) {
+            const glow_t *w = &t->glow[s_glow_watched[idx]];   /* just dropped it: follow it down, watching */
+            px = w->x + cosf(tm * 0.9f) * 16;
+            py = w->y - 12;
+            go = true;
+        } else if (s_catch_to == idx && s_catch_stick >= 0 && s_catch_stick < GLOW_N) {
             const glow_t *s2 = &t->glow[s_catch_stick];     /* one is on its way: meet it */
             px = s2->x; py = s2->y; go = true;
         } else if (s_glow_want[idx] > 0) {                  /* keen: the nearest stick lying about */
             go = nearest_free_glow(t, f->x, f->y, &px, &py) >= 0;
+        } else if (s_totem_invited == idx && s_totem_invite_s > 0) {   /* asked to fetch the totem */
+            px = tank_decor_x(t, SD_IDX_TOTEM);
+            py = TANK_H - 16 - TOTEM_H * 0.5f;
+            go = true;
         } else if (t->disco_show_s > 0) {                   /* the keeper started the ball: come and look */
             float dx, dy, dr, sp; tank_disco_state(t, &dx, &dy, &dr, &sp);
             if (dr > 0.25f) {                               /* once it is actually on its way down */
@@ -1868,6 +1959,9 @@ static void update_fish(tank_t *t, int idx, float dt) {
     f->heading = norm_ang(f->heading + turn);
     float want = touch_speed >= 0 ? touch_speed : hes_speed >= 0 ? hes_speed : tg.speed * ugain;
     f->target_speed = want * (f->energy < 1.2f ? 0.45f : 1);
+    /* the keeper's pace, applied to what the fish already wants rather than
+       to any decision it made: the same tank, livelier or calmer */
+    f->target_speed *= FISH_SPEED_MUL[t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1];
     /* swimming through a canopy is slow going (a fleeing fish crashes through) */
     if (f->goal.id != GOAL_FLEE_SHADOW)
         for (int b = 0; b < tank_veg_beds(t); b++)
@@ -1926,7 +2020,17 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
              : t->hold_light ? false
              : !t->light_auto ? t->light_manual_off              /* MANUAL (default): the double-tap's state */
              : t->idle_s > (float)t->light_idle_s;                      /* AUTO: the idle rule */
-    if (t->night != was_night) tank_emit(t->night ? TEV_LIGHT_OFF : TEV_LIGHT_ON, -1);
+    if (t->night != was_night) {
+        tank_emit(t->night ? TEV_LIGHT_OFF : TEV_LIGHT_ON, -1);
+        if (t->night) {                                  /* the rig is in: nobody is going to bed yet */
+            bool rig = tank_bit_live(t, SD_ITEM_GLOW) || tank_bit_live(t, SD_ITEM_TOTEM) ||
+                       tank_bit_live(t, SD_ITEM_BASS) || tank_bit_live(t, SD_ITEM_LASER) ||
+                       tank_bit_live(t, SD_ITEM_DISCO);
+            s_after_s = rig ? AFTERHOURS_S : 0;
+        } else s_after_s = 0;
+    }
+    if (s_after_s > 0 && t->night) s_after_s -= dt;
+    else if (!t->night) s_after_s = 0;
 
     touch_tick(t, dt);
 
@@ -1971,6 +2075,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     snail_tick(t, dt);
     bass_tick(t);
     glow_tick(t, dt);
+    if (s_totem_invite_s > 0 && (s_totem_invite_s -= dt) <= 0) s_totem_invited = -1;
     if (s_decor_new_s > 0 && (s_decor_new_s -= dt) <= 0) s_decor_new = -1;
     totem_tick(t, dt);
     disco_tick(t, dt);

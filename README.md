@@ -540,6 +540,15 @@ a firmware build plus the shipped model into one static folder
 (`installer/dist/`) that any HTTPS host will serve;
 [installer/README.md](installer/README.md) has the details.
 
+**After hours.** Turn the lights out with any of the festival gear in the
+tank and nobody is ready for bed: for five minutes the fish keep playing with
+the glowy things instead of settling at the reef, and they keep their eyes
+open while they do it. A **tap on the totem** also sends somebody to fetch it
+— left alone, none of three test tanks saw a parade in twenty minutes, because
+lifting it wants a very sociable fish to drift within reach in daylight with
+the cooldown clear, which almost never lines up. After a tap, all three
+started one inside twenty seconds.
+
 **Play.** Glow sticks used to be picked up only by a fish whose goal already
 *was* play, which almost never lined up with being beside one — a pile could
 sit untouched all day. A fish now carries a short *keen* timer that the reflex
@@ -564,6 +573,70 @@ just did.
 None of this adds a goal or a model input. It steers a fish that is *already*
 sociable or idle, the same way the totem parade does, and the model still owns
 every decision it makes.
+
+**The reef builder — if you find it.** It is not on by default, and there is
+no button for it. It is found by a sequence on the glass that nobody does by
+accident: **swipe left, swipe right, swipe up, swipe down, tap the right
+third, tap the left third, tap the middle.** The tank is never disturbed on
+the way — once a run is under way each gesture is consumed, so the taps raise
+no fright and the swipe up does not open the overview half way through, and a
+run that stalls for three seconds forgets itself. Four thousand random
+gestures opened it zero times in test.
+
+Then it shows you the way back rather than telling you: the overview opens
+with **UPGRADES** flashing three times, then the shop opens with a small
+coral in its top right corner flashing three times. That corner is the way in
+from then on. The dev page has a switch for it too.
+
+Inside: swipe up for the catalogue — fifteen colours as circles down the
+left, twelve corals beside them, staghorn through whip. Tap a colour, tap a
+coral, and the catalogue drops away with that piece in hand. **OUT** turns it
+into a tool for taking pieces back out.
+
+The coral is pixel art at the scale of the badge icons, drawn once and baked
+into the source (`tools/gen_coral.py` made it; nothing is generated at run
+time). None of the twelve is a rectangle. Each is drawn in three shades and
+your colour is applied to those, so one drawing works in any of the fifteen.
+
+**It stacks like a real thing.** A piece can only rest on the floor or on
+something already there; nothing floats. You aim at a column and it *settles*,
+falling until it lands, and the ghost under your finger shows where. **And it
+grows on a carrier**: living coral builds on the dead skeleton of what grew
+before it, so every occupied cell gets rock behind it — solid where coral
+surrounds it, eaten away towards open water, the erosion dithered against a
+hash of the pixel so the silhouette is ragged rather than square.
+
+In the tank it is muted — pulled towards the water it sits in and knocked
+down in brightness — and fish and glow sticks get a soft dark pool drawn under
+them, so the things that move stay readable over the things that do not. The
+catalogue draws at full strength, because there you are choosing a colour.
+
+**The follow cam.** Tap a fish and the view eases in to 2x and keeps that
+fish with you, so you can see what it is actually doing. The scene is still
+drawn 1:1 — the renderer has no transform and threading one through every
+primitive would touch all of it — and the finished frame is resampled: the
+region around the fish is copied out and written back magnified, nearest
+neighbour, because this is pixel art and a filter would turn it to mush. The
+card, the bolt and any announcement are drawn *after*, so they stay crisp and
+full size, and the camera aims at the middle of what the card leaves rather
+than dead centre, so the fish is never behind it.
+
+It is view state: it lives in `render.c`, it is never saved, and a platform
+that passes no scratch buffer simply gets no zoom. The mask of changed pixels
+is marked whole and the scene prefetch is dropped for that buffer, since a
+magnified frame is no longer a clean background for the next one.
+
+Taps arrive in screen space while it is live, so everything that hit-tests in
+the water — the fish, the snail, the ball, a stroke across the glass — puts
+the point back through `render_camera_unmap` first. Without it a tap on the
+fish you are following lands on a different fish entirely, which is exactly
+what the test asserts.
+
+**Speed.** SETTINGS has a **SPEED** row: *slower*, *normal*, *faster*. It
+scales the speed a fish has already decided it wants — never the decision
+itself — so a fast tank is the same tank, livelier. Measured over a minute:
+608, 1051 and 1588 px travelled per fish. It saves with the rest, and a save
+written before the setting existed reads as *normal* rather than *slower*.
 
 **The dev page.** The phone trick: open **SETTINGS**, then tap the dim `FW ...`
 line in the bottom left corner **seven times in a row**. From the third tap the

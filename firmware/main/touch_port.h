@@ -35,6 +35,7 @@ void touch_port_show_settings(bool on);
  * touch_port_take_dev hands main.c the UI_DEV_* its last button asked for,
  * once - the page itself never touches the tank. */
 bool touch_port_dev(void);
+bool touch_port_reef(void);                    /* the reef builder is up */
 int  touch_port_take_dev(void);
 int  touch_port_take_setting(int *value);       /* SET_TAP_* or 0 */
 /* the shop page (2026-09-15): up / show it; an UNLOCK or MOVE tapped hands

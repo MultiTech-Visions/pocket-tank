@@ -22,6 +22,7 @@
 #include "advisor_llm_esp.h"
 #include "touch_port.h"
 #include "ui_ext.h"
+#include "reef.h"
 #include "battery_port.h"
 #include "imu_port.h"
 #include "director.h"
@@ -344,6 +345,7 @@ static void on_tank_event(int ev, int fish, void *ud) {
 #define CRIT_BATTERY_FRAC  0.02f
 #define CRIT_BATTERY_READS 3
 static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
+static uint16_t *s_cam_scratch;      /* the follow cam's working room (PSRAM); NULL = no camera */
 static float s_dev_bat = -1.0f;      /* the dev page's faked charge, or < 0 for the real one */
 static char  s_dev_status[48];       /* its last action's one line */
 static int   s_bat_crit;                    /* consecutive reads at or under CRIT_BATTERY_FRAC */
@@ -411,7 +413,8 @@ static void tank_task(void *arg) {
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
-          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
+          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
+          else if (w == SET_TAP_SPEED) ESP_LOGI(TAG, "settings: fish speed %s", FISH_SPEED_NAMES[v < FISH_SPEED_N ? v : 1]); }
         { int a = touch_port_take_dev();                                /* the dev page's buttons */
           if (a == UI_DEV_BATTERY) {                                    /* the faked charge: the bolt's four colours */
               s_dev_bat = ui_dev_battery_next(s_dev_bat);
@@ -447,6 +450,17 @@ static void tank_task(void *arg) {
                       touch_port_show_shop(false); setup_begin_place(&tank, item);
                       ESP_LOGI(TAG, "shop: placement page up for the %s", SD_ITEMS[item].name); } }
               else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", SD_ITEMS[item].name, (int)tank.sd_balance, SD_ITEMS[item].price); } }
+        /* the tour (reef.h): three flashes round UPGRADES, then the shop with
+           three round the coral in its corner, so the way back in is shown
+           rather than described */
+        if (reef_tour_stage()) {
+            reef_tour_tick(dt);
+            if (reef_tour_stage_done()) {
+                if (reef_tour_stage() == REEF_TOUR_OVERVIEW) { touch_port_show_milestones(false); touch_port_show_shop(true); }
+                reef_tour_next();
+                if (!reef_tour_stage()) ESP_LOGI(TAG, "reef: the tour is done");
+            }
+        }
         brightness_apply(tank.night);
         { static int64_t last_bat; if (now - last_bat > 5LL * 60 * 1000000) {   /* battery log: awake sample every 5 min */
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
@@ -482,6 +496,14 @@ static void tank_task(void *arg) {
                                                 keep quick finger taps from slipping
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
+            /* the follow cam: only over the live tank, and only for a fish -
+               not the snail's card, and never under a page */
+            { bool page = touch_port_milestones() || touch_port_settings() || touch_port_shop() ||
+                          touch_port_dev() || touch_port_reef() || touch_port_fishpage() >= 0 || setup_active() || touch_port_confirm_up();
+              int who = (!page && sel >= 0 && sel != RENDER_CARD_SNAIL) ? sel : -1;
+              render_camera_tick(&tank, who, CAM_ZOOM, dt);
+              if (!page) render_camera_apply(fb[cur], TANK_W, s_cam_scratch, PLAN_FB_BYTES / sizeof(uint16_t));
+              else render_camera_reset(); }
             int64_t tc = esp_timer_get_time();
             if (touch_port_fishpage() >= 0) {    /* a fish's own page: its levels, what it is doing, what last happened */
                 ui_fish_page(&tank, touch_port_fishpage(), fb[cur], TANK_W, tank.clock);
@@ -497,6 +519,9 @@ static void tank_task(void *arg) {
                 sel = -1;
             } else if (touch_port_dev()) {       /* the dev page: the hidden workbench */
                 ui_dev_page(&tank, fb[cur], TANK_W, s_dev_status);
+                sel = -1;
+            } else if (touch_port_reef()) {      /* the reef builder, over the live tank */
+                reef_ui_draw(&tank, fb[cur], TANK_W, tank.clock);
                 sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (sel >= 0) {                      /* tapped fish: stats card + the exact pill */
@@ -593,6 +618,10 @@ void app_main(void) {
     /* static-scene cache: gradient/pebbles/reef drawn once per lighting state */
     uint16_t *scene = heap_caps_aligned_alloc(64, PLAN_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (scene) render_set_scene_cache(scene); else ESP_LOGW(TAG, "no scene cache RAM: full redraw per frame");
+    /* the follow cam's working room. It is the LAST thing asked for, and the
+       only one that may quietly go without: no buffer simply means no zoom. */
+    s_cam_scratch = heap_caps_aligned_alloc(64, PLAN_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_cam_scratch) ESP_LOGW(TAG, "no follow-cam RAM: the view stays at 1x");
     uint8_t *vig = heap_caps_malloc(TANK_W * TANK_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (vig) render_set_vignette_cache(vig);
     /* dirty mask (20 KB): internal SRAM if it fits - it is cleared and read

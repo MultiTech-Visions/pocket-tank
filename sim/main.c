@@ -1036,6 +1036,7 @@ static float sim_bat = 0.87f;        /* no cell here: the B key steps it so ever
 static bool confirm_view = false;    /* X: the reset prompt (YES wipes the save) */
 static bool settings_view = false;   /* the settings page (from the milestones page's SETTINGS button) */
 static bool dev_view = false;        /* the dev page (seven taps on the version line) */
+static bool reef_view = false;       /* the reef builder (BUILD on the overview) */
 static char dev_status[48];          /* the last dev action's one line */
 static float dev_bat = -1.0f;        /* a faked charge for the bolt, or < 0 for the real one */
 static bool shop_view = false;       /* the shop (the sand dollar on the milestones page's TANK row; $ key) */
@@ -1139,14 +1140,26 @@ static void frame_cb(lv_timer_t *timer) {
         if (nb >= 0) { selected_fish = -1; milestones_view = false; snd(SND_ARRIVAL, AUDIO_PITCH_ONE);
                        printf("a new fry, %s: the birth flow is up (announce / name / family; S drops it)\n", tank.fish[nb].name); }
     }
+    if (reef_tour_stage()) {                       /* the tour walks the way back in */
+        reef_tour_tick(dt);
+        if (reef_tour_stage_done()) {
+            if (reef_tour_stage() == REEF_TOUR_OVERVIEW) { milestones_view = false; shop_view = true; }
+            reef_tour_next();
+        }
+    }
     sound_frame(now, dt);
-    if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
+    if (reef_view) { render_tank(&tank, canvas_buf, TANK_W); reef_ui_draw(&tank, canvas_buf, TANK_W, tank.clock); }
+    else if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
     else if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
     else if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
     else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume());
     else if (shop_view) render_shop(&tank, canvas_buf, TANK_W);
     else {
         render_tank(&tank, canvas_buf, TANK_W);
+        { static uint16_t cam_scratch[TANK_W * TANK_H];   /* the follow cam's working room */
+          int who = (selected_fish >= 0 && selected_fish != RENDER_CARD_SNAIL) ? selected_fish : -1;
+          render_camera_tick(&tank, who, CAM_ZOOM, dt);
+          render_camera_apply(canvas_buf, TANK_W, cam_scratch, TANK_W * TANK_H); }
         render_sd_toast(&tank, canvas_buf, TANK_W);      /* "+N" sand dollars, as they are earned */
         if (ui_visible) {
             draw_brain_dot();
@@ -1651,8 +1664,8 @@ static int selftest_shop(void) {
         static uint16_t fb[TANK_W * TANK_H];
         render_milestones(&tank, fb, TANK_W);
         if (render_milestones_tap(&tank, 52, 254 + 20) != MS_TAP_SHOP) { printf("FAIL: the sand dollar did not open the shop\n"); return 1; }
-        if (render_milestones_tap(&tank, 178 + 58, 312 + 10) != MS_TAP_SHOP) { printf("FAIL: UPGRADES did not open the shop\n"); return 1; }
-        if (render_milestones_tap(&tank, 32 + 58, 312 + 10) != MS_TAP_SETTINGS || render_milestones_tap(&tank, 324 + 46, 312 + 10) != MS_TAP_CLOSE) { printf("FAIL: SETTINGS / CLOSE moved\n"); return 1; }
+        if (render_milestones_tap(&tank, MSP_UPG_X_T + 52, 312 + 10) != MS_TAP_SHOP) { printf("FAIL: UPGRADES did not open the shop\n"); return 1; }
+        if (render_milestones_tap(&tank, MSP_SET_X_T + 52, 312 + 10) != MS_TAP_SETTINGS || render_milestones_tap(&tank, MSP_CLOSE_X_T + 48, 312 + 10) != MS_TAP_CLOSE) { printf("FAIL: SETTINGS / CLOSE moved\n"); return 1; }
         render_milestones_leave();
         tank.sd_unlocks = 0; tank.sd_balance = SD_PRICE_PLANT + 5; want = tank.sd_balance;
         render_shop(&tank, fb, TANK_W);
@@ -2200,13 +2213,28 @@ int main(int argc, char **argv) {
                                             printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
+            else if (r == SET_TAP_SPEED) printf("fish speed: %s\n", FISH_SPEED_NAMES[v < FISH_SPEED_N ? v : 1]);
         }
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */
-        bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || fishpage_fish >= 0;
-        if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
-        if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
-        if (!mpress && mdown) {
+        bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || reef_view || fishpage_fish >= 0;
+        bool combo_ate_it = false;                       /* the hidden way in (reef.h) */
+        if (!mpress && mdown && !modal && !confirm_view) {
+            float wpx2, wpy2; render_camera_unmap((float)press_x, (float)press_y, &wpx2, &wpy2);
+            bool was = reef_combo_busy();
+            int g = reef_gesture_of(wpx2, wpy2, (float)(mx - press_x), (float)(my - press_y));
+            if (reef_combo(g, tank.clock)) {
+                tank.reef_open = 1; progression_save(&tank);
+                selected_fish = -1; milestones_view = true; reef_tour_begin();
+                printf("the reef builder has been found\n");
+                combo_ate_it = true;
+            } else if (was) combo_ate_it = true;         /* mid-run: leave the tank alone */
+        }
+        if (reef_view && mpress) { if (mdown) reef_ui_drag(&tank, (float)mx, (float)my); else reef_ui_press(&tank, (float)mx, (float)my); }
+        { float wmx, wmy; render_camera_unmap((float)mx, (float)my, &wmx, &wmy);
+          if (mpress && !modal) tank_touch_drag(&tank, wmx, wmy);   /* stroke -> wipe/slash */
+          if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, wmx, wmy); }
+        if (!mpress && mdown && !combo_ate_it) {
             int dx = mx - press_x, dy = my - press_y;
             if (confirm_view) {                    /* the prompt owns the glass: press AND release on one button */
                 int h = press_ms > confirm_ms ? render_confirm_hit((float)press_x, (float)press_y) : 0;
@@ -2221,6 +2249,11 @@ int main(int argc, char **argv) {
             else if (notice_current()) notice_dismiss();      /* an announcement up: the tap closes it */
             else if (settings_view || ms_back) ms_back = false;   /* the page owns the glass: render_settings_touch took it
                                                                     (and its CLOSE already brought the milestones page back) */
+            else if (reef_view) {                       /* the builder: swipe up for pieces, tap to place */
+                int r = reef_ui_tap(&tank, (float)press_x, (float)press_y, (float)(mx - press_x), (float)(my - press_y));
+                if (r == REEF_UI_CLOSE) { reef_view = false; milestones_view = true; progression_save(&tank); printf("reef: done, saved\n"); }
+                else if (r == REEF_UI_KEPT) progression_save(&tank);
+            }
             else if (dev_view) {                        /* the dev page: eight buttons and CLOSE */
                 int a = ui_dev_page_tap((float)press_x, (float)press_y);
                 if (a == UI_DEV_CLOSE) { dev_view = false; settings_view = true; }
@@ -2238,7 +2271,11 @@ int main(int argc, char **argv) {
             }
             else if (shop_view) {                       /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(&tank, (float)press_x, (float)press_y);
-                if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
+                if (r == SHOP_TAP_REEF) {                   /* the coral in the corner: the builder */
+                    shop_view = false; render_shop_leave(); reef_view = true; reef_ui_open(&tank); reef_tour_end();
+                    printf("reef builder up (swipe up for coral, DONE leaves)\n");
+                }
+                else if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
                 else if (r == SHOP_TAP_GRANT) {             /* the dev override: five taps on the balance coin */
                     progression_sd_grant(&tank, SD_DEV_GRANT); snd(SND_CONFIRM, AUDIO_PITCH_ONE);
                     printf("shop: dev grant +%d sand dollars (%d)\n", SD_DEV_GRANT, tank.sd_balance);
@@ -2289,10 +2326,11 @@ int main(int argc, char **argv) {
             else if (now_ms - press_ms < 350 && dx * dx + dy * dy < 24 * 24) {
                 /* same hit test as the device: 38 px against the press-time
                    fish snapshot AND the current position, whichever is closer */
+                float wpx, wpy; render_camera_unmap((float)press_x, (float)press_y, &wpx, &wpy);
                 int best = -1; float bd = 38 * 38;
                 for (int i = 0; i < tank.n_fish; i++) {
-                    float ax = press_fx[i] - press_x, ay = press_fy[i] - press_y;
-                    float bx = tank.fish[i].x - press_x, by = tank.fish[i].y - press_y;
+                    float ax = press_fx[i] - wpx, ay = press_fy[i] - wpy;
+                    float bx = tank.fish[i].x - wpx, by = tank.fish[i].y - wpy;
                     float d2a = ax * ax + ay * ay, d2b = bx * bx + by * by;
                     float d2 = d2a < d2b ? d2a : d2b;
                     if (d2 < bd) { bd = d2; best = i; }
@@ -2304,14 +2342,14 @@ int main(int argc, char **argv) {
                     printf("fish page: %s, from the card\n", tank.fish[fishpage_fish].name);
                 }
                 else if (best >= 0) selected_fish = (best == selected_fish) ? -1 : best;
-                else if (tank_disco_hit(&tank, (float)press_x, (float)press_y)) {   /* the ball: run the show by hand */
+                else if (tank_disco_hit(&tank, wpx, wpy)) {   /* the ball: run the show by hand */
                     tank_disco_toggle(&tank);
                     printf("disco ball: %s\n", tank.disco_show_s > 0 ? "lowering, show on (30 s)" : "show off, winding back up");
                 }
-                else if (tank_snail_hit(&tank, (float)press_x, (float)press_y))   /* the snail: its card (2026-09-16) */
+                else if (tank_snail_hit(&tank, wpx, wpy))   /* the snail: its card (2026-09-16) */
                     selected_fish = selected_fish == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL;
                 else if (selected_fish >= 0) selected_fish = -1;   /* card up: empty-glass tap dismisses, nothing else */
-                else tank_touch_tap(&tank, (float)press_x, (float)press_y);
+                else tank_touch_tap(&tank, wpx, wpy);
             } else if (press_y < 60 && dy >= 40) tank_feed(&tank, (float)mx, 3);
             else if (press_y > TANK_H - 70 && dy <= -40) {   /* swipe up from the bottom: the overview */
                 milestones_view = true; selected_fish = -1;

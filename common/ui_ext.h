@@ -39,6 +39,21 @@ enum { UI_FP_NONE = 0, UI_FP_KEPT = 1, UI_FP_CLOSE = 2 };
 void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clock);
 int  ui_fish_page_tap(const tank_t *t, int fish, float x, float y);
 void ui_fish_page_leave(void);
+/* The page's boxes live here rather than in the .c so a caller - or a test
+ * aiming at the panel's arrows - is never working from a second copy that
+ * can drift. The panel walks the earned milestones, or the levels; any tap
+ * that is not on an arrow closes it. */
+#define FP_MODAL_X 48
+#define FP_MODAL_Y 96
+#define FP_MODAL_W 352
+#define FP_MODAL_H 168
+#define FP_MS_X    268
+#define FP_MS_Y    12
+#define FP_MS_DX   38
+#define FP_CLOSE_X 324
+#define FP_CLOSE_Y 312
+#define FP_CLOSE_W 92
+#define FP_CLOSE_H 30
 /* a horizontal drag across the page takes the long DOING / LAST lines over
  * from the walk for a few seconds: `dx` is this frame's travel in px, `clock`
  * is tank_t.clock. A line short enough to fit ignores it. */
@@ -69,7 +84,8 @@ enum { UI_DEV_NONE = 0, UI_DEV_KEPT, UI_DEV_CLOSE,
        UI_DEV_GROW,         /* push a fish to its next stage */
        UI_DEV_PARTY,        /* lift the totem now: parade, party, march home */
        UI_DEV_FRY,          /* a fry arrives */
-       UI_DEV_BATTERY };    /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
+       UI_DEV_BATTERY,      /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
+       UI_DEV_REEF };       /* the reef builder found / forgotten, without the combo */    /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
 /* this fork's own milestone bits (MS_LOCAL_BIT0 and up), for the announcement
  * render.c puts over the live tank: its tables only reach the upstream ones.
  * Returns the badge icon and, through `name`, what to call it - NULL for a bit
