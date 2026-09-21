@@ -115,13 +115,23 @@ void touch_port_poll(tank_t *t) {
         }
     }
     bool modal = s_ms || s_set || s_dev || s_shop || s_cf || su || s_fp >= 0;  /* a page or a prompt owns the glass */
-    if (touched) { s_lx = tx; s_ly = ty; if (!modal) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
-    if (touched && !modal && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, tx, ty);
+    bool on_card = s_sel >= 0 && RENDER_CARD_HIT(s_px, s_py);   /* the card is not glass */
+    if (touched) { s_lx = tx; s_ly = ty; if (!modal && !on_card) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
+    if (touched && !modal && !on_card && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, tx, ty);
     if (!touched && s_down) {
         /* release: classify with the LAST touched position (the old code fell
            back to the PRESS position here, so dx/dy were always 0 - every
            quick swipe read as a tap and the drag-feed could never fire) */
         float dx = s_lx - s_px, dy = s_ly - s_py;
+        /* the card first, and NOT through the tap test below: a thumb on a
+           124 px slab on the left edge rolls further than 24 px and takes
+           longer than 350 ms, so this used to be read as a stroke and the
+           card just sat there (2026-09-21) */
+        if (!modal && !s_cf && render_card_opens_page(s_sel, s_px, s_py, s_lx, s_ly)) {
+            s_fp = s_sel; s_sel = -1;
+            ESP_LOGI(TAG, "card press %.0f,%.0f release %.0f,%.0f -> the %s page", s_px, s_py, s_lx, s_ly, t->fish[s_fp].name);
+            goto released;
+        }
         if (s_cf) {                     /* the prompt owns the glass: a press AND release on the
                                            same button answers it, nothing else counts - not
                                            even the tap that opened it (it began before) */
@@ -174,11 +184,6 @@ void touch_port_poll(tank_t *t) {
                 if (r != MS_TAP_CLOSE && r != MS_TAP_SETTINGS && r != MS_TAP_SHOP) goto released;   /* only a button leaves the page */
                 s_ms = false; s_sel = -1; s_set = r == MS_TAP_SETTINGS; s_shop = r == MS_TAP_SHOP;
                 progression_ack_milestones(t); render_milestones_leave();   /* everything shown is now "seen" */
-                goto released;
-            }
-            if (s_sel >= 0 && s_sel != RENDER_CARD_SNAIL && RENDER_CARD_HIT(s_px, s_py)) {   /* a tap ON the card (or the slop
-                s_fp = s_sel; s_sel = -1;                                                 under its MORE button) = that fish's page */
-                ESP_LOGI(TAG, "card tap at %.0f,%.0f -> the %s page", s_px, s_py, t->fish[s_fp].name);
                 goto released;
             }
             /* fish first; only an empty tap reaches the water. 38 px radius

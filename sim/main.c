@@ -2296,7 +2296,7 @@ int main(int argc, char **argv) {
                 }
                 /* a click ON the open card (its MORE button, or any of it): the
                    milestones page, as the device's touch port does (2026-09-16) */
-                if (selected_fish >= 0 && selected_fish != RENDER_CARD_SNAIL && RENDER_CARD_HIT(press_x, press_y)) {
+                if (render_card_opens_page(selected_fish, (float)press_x, (float)press_y, (float)mx, (float)my)) {
                     fishpage_fish = selected_fish; selected_fish = -1;   /* the card's MORE is now the fish's own page */
                     printf("fish page: %s, from the card\n", tank.fish[fishpage_fish].name);
                 }

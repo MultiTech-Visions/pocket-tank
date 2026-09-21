@@ -646,8 +646,19 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
 #define CASTLE_X_DEFAULT 300.0f
 #define LASER_HALF_W    18                 /* the bar under the surface: three emitters at a 14 px pitch */
 #define LASER_X_DEFAULT (TANK_W * 0.5f)
-#define BASS_HALF_W     14                 /* the cabinet: 28 x 30 on the sand */
-#define BASS_X_DEFAULT  404.0f             /* the right-hand floor, clear of the castle's default span */
+/* the stack (2026-09-21): three cabinets across the sand and two more
+ * centred on top of them, neon tube round the outside. One item, one bit,
+ * one position - the stack IS the speaker, so nothing about the save, the
+ * shop or the party changes. */
+#define BASS_CAB_W      22                 /* one cabinet */
+#define BASS_CAB_H      24
+#define BASS_BOTTOM_N   3                  /* across the sand */
+#define BASS_TOP_N      2                  /* centred on top of them */
+#define BASS_HALF_W     (BASS_CAB_W * BASS_BOTTOM_N / 2)
+#define BASS_STACK_H    (BASS_CAB_H * 2)   /* sand to the top of the upper row */
+#define BASS_NEON_S     0.55f              /* seconds the neon takes to breathe once off-beat */
+#define BASS_X_DEFAULT  380.0f             /* the right-hand floor, clear of the castle's default span
+                                              (2026-09-21: moved in from 404 for the wider stack) */
 #define GLOW_HALF_W     13                 /* four sticks fanned on the sand (glow_t and the
                                             * play rules are up with the other tank types) */
 #define GLOW_X_DEFAULT  150.0f             /* the open floor left of the castle (208..392 by default) */

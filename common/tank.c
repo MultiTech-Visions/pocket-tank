@@ -746,7 +746,12 @@ int   tank_decor_z_index(int item, int z) {
 }
 float tank_decor_x(const tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return 0;
-    return t->decor_x[item] > 0 ? t->decor_x[item] : DECOR[item].x_default;
+    float x = t->decor_x[item] > 0 ? t->decor_x[item] : DECOR[item].x_default;
+    /* clamped here rather than at the placement page alone, so a piece that
+       GREW - the bass stack went from one cabinet to five (2026-09-21) - can
+       never hang off the glass on a save that was legal when it was made. */
+    float half = (float)DECOR[item].half_w;
+    return clampf(x, DECOR_MARGIN + half, TANK_W - DECOR_MARGIN - half);
 }
 int tank_decor_z(const tank_t *t, int item) { return tank_decor_placeable(item) ? t->decor_z[item] : DECOR_Z_MIDDLE; }
 float tank_decor_top_y(const tank_t *t, int item) {
