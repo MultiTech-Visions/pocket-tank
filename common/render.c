@@ -2269,6 +2269,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
 #define SHP_BTN2_R    (SHP_MODAL_X + SHP_MODAL_W / 2 + 8)
 static int  g_shp_modal = -1;        /* the item whose modal is up, or -1 */
 static bool g_shp_earn;              /* the HOW TO EARN modal is up */
+static int  g_shp_coin;              /* consecutive taps on the balance coin (the dev grant) */
 static int  g_shp_page;              /* the shelf on show */
 static const icon_t *shop_icon(int item) {
     static const icon_t *const ic[SD_ITEM_COUNT] = { &icon_shop_plant, &icon_shop_snail, &icon_shop_castle,
@@ -2386,6 +2387,17 @@ int render_shop_tap(const tank_t *t, float x, float y) {
         }
         return on_mid ? SHOP_TAP_STOW + item : SHOP_TAP_KEPT;                   /* REMOVE */
     }
+    /* the dev grant (2026-09-21): SHP_DEV_TAPS taps IN A ROW on the balance
+     * coin are worth SD_DEV_GRANT - enough to buy the whole shelf and look at
+     * everything without playing for it. Any other tap on the page resets the
+     * count, so nobody reaches it by accident; a tank in somebody else's hands
+     * behaves exactly as before unless they tap the same 64 px coin five times
+     * running. The platform does the granting: this page never writes. */
+    if (x >= SHP_COIN_X && x < SHP_COIN_X + 64 && y >= SHP_COIN_Y && y < SHP_COIN_Y + 64) {
+        if (++g_shp_coin < SHP_DEV_TAPS) return SHOP_TAP_KEPT;
+        g_shp_coin = 0; return SHOP_TAP_GRANT;
+    }
+    g_shp_coin = 0;
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SHOP_TAP_CLOSE;
     if (x < SHP_EARN_X + SHP_EARN_W + 8 && y >= MSP_CLOSE_Y - 4) { g_shp_earn = true; return SHOP_TAP_KEPT; }
     if (SHP_PAGES > 1 && y >= MSP_CLOSE_Y - 4) { g_shp_page = (g_shp_page + 1) % SHP_PAGES; return SHOP_TAP_KEPT; }   /* MORE: the next shelf */
@@ -2395,7 +2407,7 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     }
     return SHOP_TAP_NONE;
 }
-void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; }
+void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; g_shp_coin = 0; }
 
 /* the toast: "+N" by a coin, top centre, for TOAST_S on the tank clock */
 #define TOAST_S 2.5f
@@ -2433,6 +2445,7 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
 #define SET_NOTE_Y    146            /* "FISH ARE QUIET AT NIGHT" */
 #define SET_ROW3_Y    176            /* LIGHTS OUT */
 #define SET_LABEL_X   32
+static int g_set_ver_taps;           /* consecutive taps on the version line (the dev page) */
 #define SET_SEG_X     190            /* first segment */
 #define SET_SEG_W     76
 #define SET_SEG_DX    82
@@ -2506,7 +2519,12 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
        fw version is something most people should not care about. minimize
        it", "make it 8px tall", "hug the bottom of the frame" (2026-09-16).
        The installer page shows the version it would write in the same words. */
-    char ver[40]; snprintf(ver, sizeof ver, "FW %s", version_port_string());
+    char ver[64]; snprintf(ver, sizeof ver, "FW %s", version_port_string());
+    /* three taps in and the line starts counting down, the way a phone does */
+    if (g_set_ver_taps >= 3) {
+        int left = SET_DEV_TAPS - g_set_ver_taps;
+        snprintf(ver + strlen(ver), sizeof ver - strlen(ver), "   %d MORE", left);
+    }
     draw_text_8px(&c, SET_LABEL_X, TANK_H - 8 - 6, MSP_DIM, ver);
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
 }
@@ -2518,7 +2536,7 @@ static int set_segment(float x, int n) {
 /* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent,
  * VOLUME 0..2, LIGHT 1 = AUTO / 0 = MANUAL; the number's own hits carry no
  * value (IDLE_UP / IDLE_DOWN the chevrons, IDLE_NUM the number itself). */
-enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN };
+enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN, SET_HIT_VERSION };
 int render_settings_tap(float x, float y, int *value) {
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SET_TAP_CLOSE;
     /* the row bands: from a little above each segment down to the next row
@@ -2534,6 +2552,8 @@ int render_settings_tap(float x, float y, int *value) {
         if (y < SET_NUM_Y + SET_NUM_H + 14) return SET_HIT_IDLE_NUM;      /* the number */
         return SET_HIT_IDLE_DOWN;                                          /* below, down to the bezel */
     }
+    /* the version line, bottom left: nothing else claims this corner */
+    if (y >= TANK_H - 34 && x < SET_LABEL_X + 170) { *value = 0; return SET_HIT_VERSION; }
     return SET_TAP_NONE;
 }
 static void set_step(tank_t *t, int dir) {
@@ -2566,7 +2586,10 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                 } else if ((h == SET_HIT_IDLE_UP || h == SET_HIT_IDLE_DOWN) && t->light_auto) {
                     set_step(t, h == SET_HIT_IDLE_UP ? +1 : -1); progression_settings_changed();
                     r = SET_TAP_IDLE; *value = t->light_idle_s;
+                } else if (h == SET_HIT_VERSION) {                  /* the phone trick: seven in a row */
+                    if (++g_set_ver_taps >= SET_DEV_TAPS) { g_set_ver_taps = 0; r = SET_TAP_DEV; }
                 } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME) { r = h; *value = v; }
+                if (h != SET_HIT_VERSION) g_set_ver_taps = 0;          /* any other tap starts the run over */
             }
         }
     }

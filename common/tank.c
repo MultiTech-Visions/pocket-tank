@@ -968,6 +968,18 @@ static void totem_end(tank_t *t) {
     t->totem_carrier = -1; t->totem_held_s = 0;
     s_totem_cool = TOTEM_COOL_S;
 }
+/* one fish takes up the totem: the parade begins and the lights drop for it.
+ * totem_tick reaches it through the social gate, tank_totem_force straight. */
+static void totem_lift(tank_t *t, int i) {
+    fish_t *f = &t->fish[i];
+    t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
+    t->totem_phase = TOTEM_WALK; t->totem_planted = false;
+    /* the lights go out for it: a parade is a night-time thing */
+    t->totem_light_was = t->light_manual_off;
+    t->light_manual_off = true;
+    f->ms_bits |= MS_TOTEM_HOLD;
+    tank_emit(TEV_TOTEM_LIFT, i);
+}
 static void totem_tick(tank_t *t, float dt) {
     if (!tank_bit_live(t, SD_ITEM_TOTEM)) { if (t->totem_phase != TOTEM_OFF) totem_end(t); return; }
     if (s_totem_cool > 0) s_totem_cool -= dt;
@@ -1024,15 +1036,17 @@ static void totem_tick(tank_t *t, float dt) {
         if (bar < TOTEM_SOCIAL_FLOOR) bar = TOTEM_SOCIAL_FLOOR;
         if (f->sociable < bar || f->stress > 5.0f) continue;
         if (tank_dist(f->x, f->y, tx, ty) > TOTEM_REACH) continue;
-        t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
-        t->totem_phase = TOTEM_WALK; t->totem_planted = false;
-        /* the lights go out for it: a parade is a night-time thing */
-        t->totem_light_was = t->light_manual_off;
-        t->light_manual_off = true;
-        f->ms_bits |= MS_TOTEM_HOLD;
-        tank_emit(TEV_TOTEM_LIFT, i);
+        totem_lift(t, i);
         break;
     }
+}
+/* the lift itself, so the dev page can call for one without repeating it */
+void tank_totem_force(tank_t *t) {
+    if (!tank_bit_live(t, SD_ITEM_TOTEM) || t->totem_phase != TOTEM_OFF) return;
+    int best = -1; float top = -1.0f;                 /* the most sociable fish gets it */
+    for (int i = 0; i < t->n_fish; i++)
+        if (t->fish[i].sociable > top) { top = t->fish[i].sociable; best = i; }
+    if (best >= 0) { s_totem_cool = 0; totem_lift(t, best); }
 }
 
 /* the bass stack (SD_ITEM_BASS): the thump is a picture (render.c reads the

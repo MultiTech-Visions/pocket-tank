@@ -129,8 +129,14 @@ void render_milestones_leave(void);
  * HOW TO EARN and CLOSE turns it, and wraps) turned the page. Page state is
  * render-local; render_shop_leave clears it (back to the first shelf) when
  * the page closes. */
-enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2,
+enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_GRANT = 3,
        SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_STOW = 64 };   /* BUY / MOVE / STOW + item index */
+/* SHOP_TAP_GRANT (2026-09-21): the dev override. SHP_DEV_TAPS taps in a row on
+ * the balance coin at the top of the shop; the platform calls
+ * progression_sd_grant(t, SD_DEV_GRANT) and the balance redraws. Any other tap
+ * on the page resets the count. It is a plain code, not a base + item index,
+ * so a handler testing `r >= SHOP_TAP_BUY` can never mistake it for a sale. */
+#define SHP_DEV_TAPS 5
 /* SHOP_TAP_STOW (2026-09-20): the owned item's REMOVE or PUT IN TANK button.
  * The platform calls progression_stow to flip it, and when a piece comes back
  * out of the box and can be placed, opens the placement page for it. */
@@ -185,7 +191,14 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_LIGHT (*value 1 = AUTO, the idle rule; 0 = MANUAL, the double-tap),
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
-enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5 };
+enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
+       SET_TAP_DEV = 6 };
+/* SET_TAP_DEV (2026-09-21): the phone trick. SET_DEV_TAPS taps in a row on the
+ * FW version line at the bottom left open ui_ext.c's dev page; from three taps
+ * on, the line itself counts down the ones still wanted. Any other tap on the
+ * settings page resets it, and so does leaving the page, so a keeper who never
+ * goes looking never sees it. */
+#define SET_DEV_TAPS 7
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);

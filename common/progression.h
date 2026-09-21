@@ -167,6 +167,10 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_BASS  70
 #define SD_PRICE_GLOW  30
 #define SD_PRICE_TOTEM 45
+/* the dev override (2026-09-21): what five taps on the shop's balance coin are
+ * worth. Comfortably over the whole shelf (595), so one grant buys everything
+ * and leaves room to REMOVE and re-buy while looking at it. */
+#define SD_DEV_GRANT   1000
 #define SD_PRICE_DISCO 120            /* the ball (2026-09-20): the centrepiece, priced like one */
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
