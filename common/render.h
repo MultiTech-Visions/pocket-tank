@@ -113,6 +113,14 @@ bool render_card_opens_page(int sel, float px, float py, float rx, float ry);
 
 /* Device battery pill (top-right), drawn with the stats card on hardware:
  * frac 0..1, charging tints the fill teal. */
+/* The detail panel's previous / next arrows (2026-09-16, exported 2026-09-21).
+ * Every page that opens a panel draws them with this and hit-tests them with
+ * render_panel_arrow_hit, so they are in one dress, in one place, with one
+ * hit box - a second set drawn by hand looked nothing like these.
+ * `x`, `y`, `w` are the panel's own box. The hit test returns -1 for the
+ * previous, +1 for the next, and 0 for anywhere else. */
+void render_panel_arrows(uint16_t *fb, int stride, int x, int y, int w);
+int  render_panel_arrow_hit(int x, int y, int w, float px, float py);
 void render_battery(uint16_t *fb, int stride, float frac, bool charging);
 /* the glow sticks a fish is HOLDING, drawn after the fish so one can never
  * disappear inside a big body (2026-09-21). render_tank calls it itself; it

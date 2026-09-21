@@ -212,7 +212,6 @@ void ui_fish_page_swipe(float dx, float clock) {
  * panel lets you walk along it, so this one does too. A milestone panel
  * walks the ones this fish has EARNED; a level's panel walks the levels.
  * Both wrap, and neither shows an arrow when there is only one thing. */
-#define FP_ARROW_W 44
 static int fp_ms_count(const fish_t *f) {
     int n = 0;
     for (int i = 0; i < FP_MS_N; i++) if (f->ms_bits & FP_MS[i].bit) n++;
@@ -363,41 +362,33 @@ void ui_fish_page(const tank_t *t, int fish, uint16_t *fb, int stride, float clo
     if (g_fp_modal >= FP_N) {                          /* a milestone's panel */
         const int m = g_fp_modal - FP_N;
         render_icon(fb, stride, X + (W - 32) / 2, Y + 8, FP_MS[m].icon, 255);
-        render_text(fb, stride, X + (W - render_text_w(FP_MS[m].name, 3)) / 2, Y + 44, 3, WHITE, FP_MS[m].name);
+        /* clear of the arrow buttons at the top corners */
+        render_text(fb, stride, X + (W - render_text_w(FP_MS[m].name, 3)) / 2, Y + 50, 3, WHITE, FP_MS[m].name);
         for (int i = 0; i < 3; i++)
-            render_text(fb, stride, X + (W - render_text_w(FP_MS[m].d[i], 2)) / 2, Y + 72 + i * 20, 2, TEAL, FP_MS[m].d[i]);
+            render_text(fb, stride, X + (W - render_text_w(FP_MS[m].d[i], 2)) / 2, Y + 80 + i * 20, 2, TEAL, FP_MS[m].d[i]);
         if (FP_MS[m].bit == MS_BASS_PARTY && f->parties > 0) {
             char n[32]; snprintf(n, sizeof n, "%d SO FAR", f->parties);
-            render_text(fb, stride, X + (W - render_text_w(n, 2)) / 2, Y + 134, 2, WHITE, n);
+            render_text(fb, stride, X + (W - render_text_w(n, 2)) / 2, Y + 142, 2, WHITE, n);
         }
-        /* on the TAP TO CLOSE line, where the sides are clear - centred
-           vertically they landed in the middle of the description */
-        if (fp_ms_count(f) > 1) {
-            fp_chevron(fb, stride, X + 22, Y + H - 26, -1, 16, TEAL);
-            fp_chevron(fb, stride, X + W - 22, Y + H - 26, +1, 16, TEAL);
-        }
+        if (fp_ms_count(f) > 1) render_panel_arrows(fb, stride, X, Y, W);
         render_text(fb, stride, X + (W - render_text_w("TAP TO CLOSE", 2)) / 2, Y + H - 20, 2, FAINT, "TAP TO CLOSE");
         return;
     }
     const char *label = FP_STAT[g_fp_modal].label;
-    render_text(fb, stride, X + (W - render_text_w(label, 3)) / 2, Y + 18, 3, FP_STAT[g_fp_modal].rgb, label);
+    render_text(fb, stride, X + (W - render_text_w(label, 3)) / 2, Y + 50, 3, FP_STAT[g_fp_modal].rgb, label);
     for (int i = 0; i < 3; i++) {
         const char *d = FP_STAT[g_fp_modal].d[i];
-        render_text(fb, stride, X + (W - render_text_w(d, 2)) / 2, Y + 58 + i * 24, 2, TEAL, d);
+        render_text(fb, stride, X + (W - render_text_w(d, 2)) / 2, Y + 76 + i * 22, 2, TEAL, d);
     }
-    fp_chevron(fb, stride, X + 22, Y + H - 32, -1, 16, TEAL);
-    fp_chevron(fb, stride, X + W - 22, Y + H - 32, +1, 16, TEAL);
+    render_panel_arrows(fb, stride, X, Y, W);
     render_text(fb, stride, X + (W - render_text_w("TAP TO CLOSE", 2)) / 2, Y + H - 26, 2, FAINT, "TAP TO CLOSE");
 }
 
 int ui_fish_page_tap(const tank_t *t, int fish, float x, float y) {
     if (g_fp_modal >= 0) {
         const int X = FP_MODAL_X, W = FP_MODAL_W, Y = FP_MODAL_Y, H = FP_MODAL_H;
-        int dir = 0;                                                  /* the arrows walk it along */
-        if (y >= Y + 20 && y < Y + H - 20) {
-            if (x >= X && x < X + FP_ARROW_W) dir = -1;
-            else if (x >= X + W - FP_ARROW_W && x < X + W) dir = 1;
-        }
+        (void)H;
+        int dir = render_panel_arrow_hit(X, Y, W, x, y);              /* the milestones page's own arrows */
         if (dir && g_fp_modal >= FP_N && fish >= 0 && fish < t->n_fish) {
             const fish_t *f = &t->fish[fish];
             int n = fp_ms_count(f);

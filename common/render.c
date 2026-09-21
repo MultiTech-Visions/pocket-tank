@@ -2003,6 +2003,27 @@ static void ms_chevron(ctx_t *c, int tx, int cy, bool left, uint32_t rgb) {
         rect_fill(c, xx, cy + i * 3, 3, 3, rgb);
     }
 }
+
+/* The detail panel's arrows, drawn and hit-tested HERE so every page that
+ * opens a panel gets the same pair in the same dress and the same place.
+ * The fish page in ui_ext.c had its own for a day and they looked nothing
+ * like these, which is precisely the drift this avoids (2026-09-21). */
+void render_panel_arrows(uint16_t *fb, int stride, int x, int y, int w) {
+    ctx_t c = ctx_full(fb, stride, 1.0f);
+    int ax = x + MSP_ARROW_IN, ay = y + MSP_ARROW_IN, bx = x + w - MSP_ARROW_IN - MSP_ARROW_W;
+    rect_fill(&c, ax, ay, MSP_ARROW_W, MSP_ARROW_H, 0x1c2f36);
+    rect_edge(&c, ax, ay, MSP_ARROW_W, MSP_ARROW_H, MSP_TEAL); rect_edge(&c, ax + 1, ay + 1, MSP_ARROW_W - 2, MSP_ARROW_H - 2, MSP_TEAL);
+    ms_chevron(&c, ax + 14, ay + MSP_ARROW_H / 2, true, 0xffffff);
+    rect_fill(&c, bx, ay, MSP_ARROW_W, MSP_ARROW_H, 0x1c2f36);
+    rect_edge(&c, bx, ay, MSP_ARROW_W, MSP_ARROW_H, MSP_TEAL); rect_edge(&c, bx + 1, ay + 1, MSP_ARROW_W - 2, MSP_ARROW_H - 2, MSP_TEAL);
+    ms_chevron(&c, bx + MSP_ARROW_W - 14, ay + MSP_ARROW_H / 2, false, 0xffffff);
+}
+int render_panel_arrow_hit(int x, int y, int w, float px, float py) {
+    if (py < y - 12 || py >= y + MSP_ARROW_IN + MSP_ARROW_H + 24) return 0;
+    if (px < x + MSP_ARROW_HIT) return -1;
+    if (px >= x + w - MSP_ARROW_HIT) return +1;
+    return 0;
+}
 /* the modal's group: how many things the arrows cycle through and where
    this one sits. nreq = the fry checklist's gate count (the caller has it). */
 static int ms_group(const tank_t *t, int nreq, int *idx) {
@@ -2134,15 +2155,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         {   /* the arrows (2026-09-16): the previous / next of the group at the
                top corners, in the buttons' dress, only when there is a group */
             int idx, n = ms_group(t, nreq, &idx);
-            if (n > 1) {
-                int ax = X + MSP_ARROW_IN, ay = Y + MSP_ARROW_IN, bx = X + W - MSP_ARROW_IN - MSP_ARROW_W;
-                rect_fill(&c, ax, ay, MSP_ARROW_W, MSP_ARROW_H, 0x1c2f36);
-                rect_edge(&c, ax, ay, MSP_ARROW_W, MSP_ARROW_H, MSP_TEAL); rect_edge(&c, ax + 1, ay + 1, MSP_ARROW_W - 2, MSP_ARROW_H - 2, MSP_TEAL);
-                ms_chevron(&c, ax + 14, ay + MSP_ARROW_H / 2, true, 0xffffff);
-                rect_fill(&c, bx, ay, MSP_ARROW_W, MSP_ARROW_H, 0x1c2f36);
-                rect_edge(&c, bx, ay, MSP_ARROW_W, MSP_ARROW_H, MSP_TEAL); rect_edge(&c, bx + 1, ay + 1, MSP_ARROW_W - 2, MSP_ARROW_H - 2, MSP_TEAL);
-                ms_chevron(&c, bx + MSP_ARROW_W - 14, ay + MSP_ARROW_H / 2, false, 0xffffff);
-            }
+            if (n > 1) render_panel_arrows(fb, stride, X, Y, W);
         }
     }
 }
@@ -2153,9 +2166,9 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
             fry_req_t req[FRY_REQ_MAX]; bool staged; int idx;
             int n = ms_group(t, progression_next_fry(t, req, &staged), &idx);
             const int Y = g_ms_kind >= 0 ? MSP_FRY_MODAL_Y : MSP_MODAL_Y;
-            if (n > 1 && y >= Y - 12 && y < Y + MSP_ARROW_IN + MSP_ARROW_H + 24) {
-                if (x < MSP_MODAL_X + MSP_ARROW_HIT)               { ms_step(t, -1); return MS_TAP_KEPT; }
-                if (x >= MSP_MODAL_X + MSP_MODAL_W - MSP_ARROW_HIT) { ms_step(t, +1); return MS_TAP_KEPT; }
+            int dir = n > 1 ? render_panel_arrow_hit(MSP_MODAL_X, Y, MSP_MODAL_W, x, y) : 0;
+            if (dir) {
+                ms_step(t, dir); return MS_TAP_KEPT;
             }
         }
         if ((g_ms_kind >= 0 && !g_ms_tip) || ms_fish_more()) {   /* HOW? on a gate, MORE on a fish */
