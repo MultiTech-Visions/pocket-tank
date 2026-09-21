@@ -97,7 +97,13 @@ jobs:
         shell: bash
         run: |
           S='${{ matrix.sep }}'
+          # --collect-data esptool: the stub flashers live in the package as
+          # DATA (esptool/targets/stub_flasher/*/<chip>.json) and PyInstaller
+          # leaves data behind unless it is asked. Without them the exe gets
+          # all the way to a connected tank and dies on "Stub flasher JSON
+          # file for esp32s3 not found".
           pyinstaller --onefile --console --clean \
+            --collect-data esptool \
             --name PocketTankUpgrade \
             --add-data "payload/bootloader.bin${S}." \
             --add-data "payload/partition-table.bin${S}." \
@@ -105,20 +111,24 @@ jobs:
             --add-data "payload/flash.json${S}." \
             tools/upgrade/pocket_tank_upgrade.py
           ls -la dist
-      - name: Check it actually starts and can read its payload
+      - name: Check the bundle is complete
         shell: bash
         run: |
-          # no board attached here, so it must fail at the PORT, not earlier:
-          # anything about a missing bundled file means the packing is wrong
-          set +e
+          # --selfcheck opens every payload file AND builds the esp32s3 stub
+          # flasher, which is the part that needs no board and used to be
+          # missing. A bogus port only proves the exe starts: it dies at the
+          # serial open, long before esptool would ever load a stub, so it let
+          # a broken build through once. Both run now, in that order.
           BIN=dist/PocketTankUpgrade
           [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          "./$BIN" --selfcheck
+          set +e
           out=$("./$BIN" NOT_A_PORT 2>&1)
           set -e
           echo "$out"
           echo "$out" | grep -q "POCKET TANK" || { echo "it did not start"; exit 1; }
-          echo "$out" | grep -qi "missing from the bundle" && { echo "a bundled file is missing"; exit 1; }
-          echo "it starts and found its payload"
+          echo "$out" | grep -qi "incomplete" && { echo "the bundle is missing something"; exit 1; }
+          echo "the bundle is complete and the exe starts"
       - name: Make the double-clickable file
         shell: bash
         run: |
