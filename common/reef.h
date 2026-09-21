@@ -60,3 +60,31 @@ unsigned reef_epoch(const tank_t *t);
 void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim);
 
 #endif
+
+/* ---- the builder (2026-09-21) -----------------------------------------
+ * Two states, and the swipe between them is the whole interface.
+ *
+ *   CANVAS  the tank with the reef on it and, if a piece is in hand, a ghost
+ *           of it under the finger. Drag to move it, tap to stamp it, and a
+ *           line at the foot says SWIPE UP FOR PIECES.
+ *   MENU    swiped up: a vertical bar of colour circles down one side and
+ *           the catalogue of shapes beside it, scrolled with a drag. Tap a
+ *           colour, tap a shape, and the menu drops away with that piece in
+ *           hand.
+ *
+ * The page never writes to the tank by itself - reef_ui_tap and the drag
+ * calls do, because they ARE the edit - but nothing here reaches past the
+ * grid. The platform opens it, feeds it touches, and closes it.
+ */
+enum { REEF_UI_NONE = 0, REEF_UI_KEPT, REEF_UI_CLOSE };
+void reef_ui_open(tank_t *t);        /* fresh: nothing in hand, menu down */
+void reef_ui_close(void);
+bool reef_ui_menu_up(void);
+void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock);
+/* a press, a drag and a release, in screen coordinates. reef_ui_tap is the
+ * release that commits: it stamps, picks a colour or a shape, or closes. */
+void reef_ui_press(tank_t *t, float x, float y);
+void reef_ui_drag(tank_t *t, float x, float y);
+int  reef_ui_tap(tank_t *t, float x, float y, float dx, float dy);
+/* what is in hand, for the platform's log and the tests */
+void reef_ui_hand(int *shape, int *rot, int *colour);

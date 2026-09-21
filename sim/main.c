@@ -1036,6 +1036,7 @@ static float sim_bat = 0.87f;        /* no cell here: the B key steps it so ever
 static bool confirm_view = false;    /* X: the reset prompt (YES wipes the save) */
 static bool settings_view = false;   /* the settings page (from the milestones page's SETTINGS button) */
 static bool dev_view = false;        /* the dev page (seven taps on the version line) */
+static bool reef_view = false;       /* the reef builder (BUILD on the overview) */
 static char dev_status[48];          /* the last dev action's one line */
 static float dev_bat = -1.0f;        /* a faked charge for the bolt, or < 0 for the real one */
 static bool shop_view = false;       /* the shop (the sand dollar on the milestones page's TANK row; $ key) */
@@ -1140,7 +1141,8 @@ static void frame_cb(lv_timer_t *timer) {
                        printf("a new fry, %s: the birth flow is up (announce / name / family; S drops it)\n", tank.fish[nb].name); }
     }
     sound_frame(now, dt);
-    if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
+    if (reef_view) { render_tank(&tank, canvas_buf, TANK_W); reef_ui_draw(&tank, canvas_buf, TANK_W, tank.clock); }
+    else if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
     else if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
     else if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
     else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume());
@@ -1655,8 +1657,9 @@ static int selftest_shop(void) {
         static uint16_t fb[TANK_W * TANK_H];
         render_milestones(&tank, fb, TANK_W);
         if (render_milestones_tap(&tank, 52, 254 + 20) != MS_TAP_SHOP) { printf("FAIL: the sand dollar did not open the shop\n"); return 1; }
-        if (render_milestones_tap(&tank, 178 + 58, 312 + 10) != MS_TAP_SHOP) { printf("FAIL: UPGRADES did not open the shop\n"); return 1; }
-        if (render_milestones_tap(&tank, 32 + 58, 312 + 10) != MS_TAP_SETTINGS || render_milestones_tap(&tank, 324 + 46, 312 + 10) != MS_TAP_CLOSE) { printf("FAIL: SETTINGS / CLOSE moved\n"); return 1; }
+        if (render_milestones_tap(&tank, MSP_UPG_X_T + 52, 312 + 10) != MS_TAP_SHOP) { printf("FAIL: UPGRADES did not open the shop\n"); return 1; }
+        if (render_milestones_tap(&tank, MSP_SET_X_T + 52, 312 + 10) != MS_TAP_SETTINGS || render_milestones_tap(&tank, MSP_CLOSE_X_T + 48, 312 + 10) != MS_TAP_CLOSE) { printf("FAIL: SETTINGS / CLOSE moved\n"); return 1; }
+        if (render_milestones_tap(&tank, MSP_REEF_X_T + 34, 312 + 10) != MS_TAP_REEF) { printf("FAIL: BUILD did not open the reef builder\n"); return 1; }
         render_milestones_leave();
         tank.sd_unlocks = 0; tank.sd_balance = SD_PRICE_PLANT + 5; want = tank.sd_balance;
         render_shop(&tank, fb, TANK_W);
@@ -2208,7 +2211,8 @@ int main(int argc, char **argv) {
         }
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */
-        bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || fishpage_fish >= 0;
+        bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || reef_view || fishpage_fish >= 0;
+        if (reef_view && mpress) { if (mdown) reef_ui_drag(&tank, (float)mx, (float)my); else reef_ui_press(&tank, (float)mx, (float)my); }
         { float wmx, wmy; render_camera_unmap((float)mx, (float)my, &wmx, &wmy);
           if (mpress && !modal) tank_touch_drag(&tank, wmx, wmy);   /* stroke -> wipe/slash */
           if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, wmx, wmy); }
@@ -2227,6 +2231,11 @@ int main(int argc, char **argv) {
             else if (notice_current()) notice_dismiss();      /* an announcement up: the tap closes it */
             else if (settings_view || ms_back) ms_back = false;   /* the page owns the glass: render_settings_touch took it
                                                                     (and its CLOSE already brought the milestones page back) */
+            else if (reef_view) {                       /* the builder: swipe up for pieces, tap to place */
+                int r = reef_ui_tap(&tank, (float)press_x, (float)press_y, (float)(mx - press_x), (float)(my - press_y));
+                if (r == REEF_UI_CLOSE) { reef_view = false; milestones_view = true; progression_save(&tank); printf("reef: done, saved\n"); }
+                else if (r == REEF_UI_KEPT) progression_save(&tank);
+            }
             else if (dev_view) {                        /* the dev page: eight buttons and CLOSE */
                 int a = ui_dev_page_tap((float)press_x, (float)press_y);
                 if (a == UI_DEV_CLOSE) { dev_view = false; settings_view = true; }
@@ -2287,8 +2296,9 @@ int main(int argc, char **argv) {
                     progression_ack_milestones(&tank); render_milestones_leave();
                     printf("fish page: %s, from the overview\n", tank.fish[fishpage_fish].name);
                 }
-                else if (r == MS_TAP_CLOSE || r == MS_TAP_SETTINGS || r == MS_TAP_SHOP) {
+                else if (r == MS_TAP_CLOSE || r == MS_TAP_SETTINGS || r == MS_TAP_SHOP || r == MS_TAP_REEF) {
                     milestones_view = false; settings_view = r == MS_TAP_SETTINGS; shop_view = r == MS_TAP_SHOP;
+                    if (r == MS_TAP_REEF) { reef_view = true; reef_ui_open(&tank); printf("reef builder up (swipe up for pieces, DONE leaves)\n"); }
                     progression_ack_milestones(&tank); render_milestones_leave(); }
                 /* MS_TAP_KEPT: a badge / name opened the detail modal, or the modal closed; anything else: nothing */
             }

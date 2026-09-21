@@ -565,6 +565,24 @@ None of this adds a goal or a model input. It steers a fish that is *already*
 sociable or idle, the same way the totem parade does, and the model still owns
 every decision it makes.
 
+**The reef builder.** The tank's backdrop is yours. **BUILD**, at the foot of
+the overview page, opens a grid of 16 px cells — 28 across, 23 down — over the
+live tank. Swipe up and the catalogue comes in: fifteen colours as circles
+down the left, sixteen Tetris-ish shapes beside them, drag to scroll. Tap a
+colour, tap a shape, and the menu drops away with that piece under your
+finger. Move it, **TURN** it, tap to place it. **RUB** swaps the paint for an
+eraser. Everything else in the tank — the kelp, the sand, the shop's pieces,
+the fish — draws in front of it.
+
+It stores the *painted grid*, not a list of pieces: a fixed 322 bytes in the
+save however much you build, nothing to overflow, and stacking and overlap
+come free because a stamp is just paint. That is also how Lego behaves once
+it is together — nothing remembers where one brick ended.
+
+Being static, it bakes into the cached scene rather than being redrawn each
+frame, so the cache's key carries the reef's edit count; without that a piece
+you placed would not appear until the next day/night change.
+
 **The follow cam.** Tap a fish and the view eases in to 2x and keeps that
 fish with you, so you can see what it is actually doing. The scene is still
 drawn 1:1 — the renderer has no transform and threading one through every

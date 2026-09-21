@@ -22,6 +22,7 @@
 #include "advisor_llm_esp.h"
 #include "touch_port.h"
 #include "ui_ext.h"
+#include "reef.h"
 #include "battery_port.h"
 #include "imu_port.h"
 #include "director.h"
@@ -487,7 +488,7 @@ static void tank_task(void *arg) {
             /* the follow cam: only over the live tank, and only for a fish -
                not the snail's card, and never under a page */
             { bool page = touch_port_milestones() || touch_port_settings() || touch_port_shop() ||
-                          touch_port_dev() || touch_port_fishpage() >= 0 || setup_active() || touch_port_confirm_up();
+                          touch_port_dev() || touch_port_reef() || touch_port_fishpage() >= 0 || setup_active() || touch_port_confirm_up();
               int who = (!page && sel >= 0 && sel != RENDER_CARD_SNAIL) ? sel : -1;
               render_camera_tick(&tank, who, CAM_ZOOM, dt);
               if (!page) render_camera_apply(fb[cur], TANK_W, s_cam_scratch, PLAN_FB_BYTES / sizeof(uint16_t));
@@ -507,6 +508,9 @@ static void tank_task(void *arg) {
                 sel = -1;
             } else if (touch_port_dev()) {       /* the dev page: the hidden workbench */
                 ui_dev_page(&tank, fb[cur], TANK_W, s_dev_status);
+                sel = -1;
+            } else if (touch_port_reef()) {      /* the reef builder, over the live tank */
+                reef_ui_draw(&tank, fb[cur], TANK_W, tank.clock);
                 sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (sel >= 0) {                      /* tapped fish: stats card + the exact pill */

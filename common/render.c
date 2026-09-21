@@ -1860,15 +1860,20 @@ int render_confirm_hit(float x, float y) {
 #define MSP_BADGE_X0  176
 #define MSP_BADGE_DX  40
 #define MSP_ICON      32
-#define MSP_CLOSE_X   324               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
+#define MSP_CLOSE_X   MSP_CLOSE_X_T               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
 #define MSP_CLOSE_Y   312
-#define MSP_CLOSE_W   92
+#define MSP_CLOSE_W   96
 #define MSP_CLOSE_H   30
-#define MSP_SET_X     32                /* the SETTINGS button, bottom left, where the brightness row was */
-#define MSP_SET_W     116
+/* Four across the foot since the reef builder joined them (2026-09-21):
+ * the row was re-spaced rather than any label shortened, because SETTINGS
+ * and UPGRADES need every pixel of their eight characters. */
+#define MSP_SET_X     MSP_SET_X_T                /* the SETTINGS button, bottom left, where the brightness row was */
+#define MSP_SET_W     104
 #define MSP_SD_X      36                /* the sand dollar on the TANK row (the shop), centred like the fish portraits */
-#define MSP_UPG_X     178               /* the UPGRADES button, centred between SETTINGS and CLOSE: the shop too (Strato, 2026-09-15) */
-#define MSP_UPG_W     116
+#define MSP_UPG_X     MSP_UPG_X_T               /* the UPGRADES button: the shop (Strato, 2026-09-15) */
+#define MSP_UPG_W     104
+#define MSP_REEF_X    MSP_REEF_X_T               /* BUILD: the reef behind everything (reef.h) */
+#define MSP_REEF_W    68
 #define MSP_MODAL_X   56
 #define MSP_MODAL_Y   100
 #define MSP_MODAL_W   336
@@ -2116,6 +2121,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
     button(&c, MSP_SET_X, MSP_CLOSE_Y, MSP_SET_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SETTINGS", 2);   /* bottom left (2026-09-15) */
     button(&c, MSP_UPG_X, MSP_CLOSE_Y, MSP_UPG_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPGRADES", 2);   /* the shop, between them */
+    button(&c, MSP_REEF_X, MSP_CLOSE_Y, MSP_REEF_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "BUILD", 2);    /* the reef behind it all */
     /* a modal up: the page under it is out of reach (any tap only closes the
        modal), so it LOOKS out of reach - every pixel at half (Strato: with
        CLOSE lit it looked like you could still tap it). One shift per
@@ -2192,7 +2198,8 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
         }
         render_milestones_leave(); return MS_TAP_KEPT;   /* any other tap: back to the page */
     }
-    if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return MS_TAP_CLOSE;      /* slop out to the glass edge */
+    if (x >= MSP_CLOSE_X - 4 && y >= MSP_CLOSE_Y - 4) return MS_TAP_CLOSE;      /* slop out to the glass edge */
+    if (x >= MSP_REEF_X - 6 && x < MSP_REEF_X + MSP_REEF_W + 6 && y >= MSP_CLOSE_Y - 4) return MS_TAP_REEF;
     if (x < MSP_SET_X + MSP_SET_W + 8 && y >= MSP_CLOSE_Y - 4) return MS_TAP_SETTINGS;   /* the settings page */
     if (y >= MSP_CLOSE_Y - 4) return MS_TAP_SHOP;                                        /* UPGRADES: the rest of the strip is the shop */
     int row = -1; bool tank_row = false, fry_row = false;

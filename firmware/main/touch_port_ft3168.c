@@ -11,6 +11,7 @@
  * Coordinates are mapped from the portrait panel to the landscape tank. */
 #include "touch_port.h"
 #include "ui_ext.h"
+#include "reef.h"
 #include "board_pins.h"
 #include "tank.h"
 #include "render.h"
@@ -43,6 +44,7 @@ static int  s_fp = -1;                            /* a fish's own page up (ui_fi
 static bool s_cf; static int64_t s_cf_us; static int s_cf_ans;   /* reset confirm prompt */
 static bool s_set;                                /* settings page up (CLOSE returns to the milestones page) */
 static bool s_dev;                                /* dev page up (seven taps on the version line) */
+static bool s_reef;                               /* the reef builder up (BUILD on the overview) */
 static int  s_dev_act;                            /* what its last button asked for; main.c does it */
 static bool s_shop;                               /* the shop page up (CLOSE returns to the milestones page) */
 static bool s_back;                               /* the settings page's CLOSE just brought the milestones page back: that
@@ -125,7 +127,11 @@ void touch_port_poll(tank_t *t) {
             else ESP_LOGI(TAG, "setup done: %s + %s", t->fish[0].name, t->fish[1].name);
         }
     }
-    bool modal = s_ms || s_set || s_dev || s_shop || s_cf || su || s_fp >= 0;  /* a page or a prompt owns the glass */
+    bool modal = s_ms || s_set || s_dev || s_shop || s_reef || s_cf || su || s_fp >= 0;  /* a page or a prompt owns the glass */
+    if (s_reef && !s_cf && !su) {                            /* the builder owns the glass while it is up */
+        if (touched && !s_down) reef_ui_press(t, tx, ty);
+        else if (touched) reef_ui_drag(t, tx, ty);
+    }
     if (s_fp >= 0 && touched && s_down) ui_fish_page_swipe(tx - s_lx, t->clock);   /* the long lines scrub */
     bool on_card = s_sel >= 0 && RENDER_CARD_HIT(s_px, s_py);   /* the card is not glass */
     if (touched) { s_lx = tx; s_ly = ty; if (!modal && !on_card) tank_touch_drag(t, wx, wy); }  /* stroke = wipe/slash */
@@ -139,6 +145,11 @@ void touch_port_poll(tank_t *t) {
            124 px slab on the left edge rolls further than 24 px and takes
            longer than 350 ms, so this used to be read as a stroke and the
            card just sat there (2026-09-21) */
+        if (s_reef && !s_cf && !su && (dx * dx + dy * dy >= 24 * 24 || now - s_press_us >= 350000)) {
+            int r = reef_ui_tap(t, s_px, s_py, dx, dy);          /* a swipe: the menu, or the catalogue's scroll */
+            if (r == REEF_UI_CLOSE) { s_reef = false; s_ms = true; progression_save(t); }
+            goto released;
+        }
         if (!modal && !s_cf && render_card_opens_page(s_sel, s_px, s_py, s_lx, s_ly)) {
             s_fp = s_sel; s_sel = -1;
             ESP_LOGI(TAG, "card press %.0f,%.0f release %.0f,%.0f -> the %s page", s_px, s_py, s_lx, s_ly, t->fish[s_fp].name);
@@ -161,6 +172,12 @@ void touch_port_poll(tank_t *t) {
         if (now - s_press_us < 350000 && dx * dx + dy * dy < 24 * 24) {
             if (notice_current()) { notice_dismiss(); ESP_LOGI(TAG, "tap closed the announcement"); goto released; }
             if (s_set || s_back) { s_back = false; goto released; }   /* the settings page had the glass (render_settings_touch above) */
+            if (s_reef) {                                           /* the builder: swipe up for pieces, tap to place */
+                int r = reef_ui_tap(t, s_px, s_py, s_lx - s_px, s_ly - s_py);
+                if (r == REEF_UI_CLOSE) { s_reef = false; s_ms = true; progression_save(t); ESP_LOGI(TAG, "reef: done, saved"); }
+                else if (r == REEF_UI_KEPT) progression_save(t);     /* every edit is worth keeping at once */
+                goto released;
+            }
             if (s_dev) {                                            /* the dev page: eight buttons and CLOSE */
                 int a = ui_dev_page_tap(s_px, s_py);
                 ESP_LOGI(TAG, "dev tap at %.0f,%.0f -> %d", s_px, s_py, a);
@@ -193,7 +210,13 @@ void touch_port_poll(tank_t *t) {
                     ESP_LOGI(TAG, "fish page: %s, from the overview", t->fish[s_fp].name);
                     goto released;
                 }
-                if (r != MS_TAP_CLOSE && r != MS_TAP_SETTINGS && r != MS_TAP_SHOP) goto released;   /* only a button leaves the page */
+                if (r != MS_TAP_CLOSE && r != MS_TAP_SETTINGS && r != MS_TAP_SHOP && r != MS_TAP_REEF) goto released;   /* only a button leaves the page */
+                if (r == MS_TAP_REEF) {                          /* BUILD: the reef behind everything */
+                    s_ms = false; s_sel = -1; s_reef = true; reef_ui_open(t);
+                    progression_ack_milestones(t); render_milestones_leave();
+                    ESP_LOGI(TAG, "reef builder up (swipe up for pieces, DONE leaves)");
+                    goto released;
+                }
                 s_ms = false; s_sel = -1; s_set = r == MS_TAP_SETTINGS; s_shop = r == MS_TAP_SHOP;
                 progression_ack_milestones(t); render_milestones_leave();   /* everything shown is now "seen" */
                 goto released;
@@ -246,7 +269,7 @@ void touch_port_dismiss(void) { s_sel = -1; if (s_ms) render_milestones_leave();
 /* ---- reset confirm prompt ---- */
 void touch_port_confirm_open(void) {
     s_cf = true; s_cf_us = esp_timer_get_time(); s_cf_ans = 0;
-    s_sel = -1; s_ms = false; s_set = false; s_dev = false; s_shop = false; s_fp = -1; ui_fish_page_leave(); render_shop_leave();   /* it replaces the card / the pages */
+    s_sel = -1; s_ms = false; s_set = false; s_dev = false; s_shop = false; s_reef = false; s_fp = -1; ui_fish_page_leave(); render_shop_leave();   /* it replaces the card / the pages */
     ESP_LOGI(TAG, "reset prompt up (YES / NO on the glass; NO by itself in %d s)", (int)(CONFIRM_TIMEOUT_US / 1000000));
 }
 bool touch_port_confirm_answer(int ans) {
@@ -263,6 +286,7 @@ float touch_port_confirm_frac(void) {
 int  touch_port_confirm_take(void)  { int a = s_cf_ans; s_cf_ans = 0; return a; }
 bool touch_port_pressed_since(int64_t us) { return s_down && s_press_us > us; }
 bool touch_port_dev(void) { return s_dev; }
+bool touch_port_reef(void) { return s_reef; }
 int  touch_port_take_dev(void) { int a = s_dev_act; s_dev_act = 0; return a; }
 bool touch_port_settings(void) { return s_set; }
 void touch_port_show_settings(bool on) { s_set = on; if (on) { s_ms = false; s_sel = -1; } }
