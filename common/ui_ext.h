@@ -63,9 +63,14 @@ enum { UI_DEV_NONE = 0, UI_DEV_KEPT, UI_DEV_CLOSE,
        UI_DEV_UNLOCK_ALL,   /* buy the whole shelf, placed where it defaults */
        UI_DEV_GROW,         /* push a fish to its next stage */
        UI_DEV_PARTY,        /* lift the totem now: parade, party, march home */
-       UI_DEV_LIGHT,        /* day / night, this instant */
        UI_DEV_FRY,          /* a fry arrives */
        UI_DEV_BATTERY };    /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
+/* this fork's own milestone bits (MS_LOCAL_BIT0 and up), for the announcement
+ * render.c puts over the live tank: its tables only reach the upstream ones.
+ * Returns the badge icon and, through `name`, what to call it - NULL for a bit
+ * that is not one of ours. */
+#include "icons.h"
+const icon_t *ui_local_ms(uint32_t bit, const char **name);
 void ui_dev_page(const tank_t *t, uint16_t *fb, int stride, const char *status);
 int  ui_dev_page_tap(float x, float y);
 bool ui_dev_apply(tank_t *t, int act, char *status, size_t n);

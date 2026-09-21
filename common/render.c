@@ -3,6 +3,7 @@
  * that grow with the tank's milestones. Everything is drawn
  * into a bare RGB565 buffer; night dims the palette. */
 #include "render.h"
+#include "ui_ext.h"   /* this fork's milestones, for the announcement */
 #include "icons.h"
 #include "progression.h"
 #include "tank_events.h"
@@ -2223,6 +2224,12 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
         int bi = 0; while (bi < 31 && !(bit & (1u << bi))) bi++;
         if (f) snprintf(title, sizeof title, "%s", f->name);
         snprintf(caption, sizeof caption, "%s", bi < MS_FISH_COUNT ? MS_NAMES[bi] : "");
+        if (!ic) {                                            /* one of this fork's own (MS_LOCAL_BIT0 up):
+                                                                 FISH_BADGES and MS_NAMES both stop short of
+                                                                 it, so ui_ext.c keeps the icon and the name */
+            const char *nm = NULL; const icon_t *li = ui_local_ms(bit, &nm);
+            if (li) { ic = li; snprintf(caption, sizeof caption, "%s", nm); }
+        }
         if (!ic && f) render_fish_preview(fb, stride, X + W / 2, Y + 48, f->size * 1.6f, f->color, f->fin, f->accent, t->clock);
     }
     if (ic) blit_icon_scaled(&c, X + (W - ic->w * 2) / 2, Y + 16 + (32 - ic->w), ic, 2, true);

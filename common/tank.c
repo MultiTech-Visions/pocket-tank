@@ -1164,6 +1164,12 @@ static void touch_tick(tank_t *t, float dt) {
        AUTO the idle rule owns it - 2026-09-15: the old always-on override
        rode in the save and froze a tank in permanent day) */
     if (!t->startled && t->tap_count == 2 && t->tap_burst_t > TAP_WINDOW) {
+        /* the keeper's double-tap always wins. light_override outranks
+           light_manual_off in tank_tick, so anything that had set it - the
+           director, the sim's key, the dev page's old LIGHT button - used to
+           leave the double-tap pressing a dead switch for good. Taking the
+           override off here hands the light back, every time. */
+        t->light_override = false;
         if (!t->light_auto) t->light_manual_off = !t->light_manual_off;
         t->tap_count = 0;
     }

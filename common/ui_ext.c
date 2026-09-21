@@ -153,6 +153,15 @@ static int fp_ms_at(const fish_t *f, int slot) {
         if (f->ms_bits & FP_MS[i].bit) { if (n == slot) return i; n++; }
     return -1;
 }
+/* the announcement over the live tank asks for these: render.c's own tables
+ * stop at the upstream bits (FISH_BADGES[6], MS_NAMES[MS_FISH_COUNT]), so a
+ * milestone of this fork's - MS_LOCAL_BIT0 and up - came out with no icon and
+ * an empty caption, just the fish and its name. */
+const icon_t *ui_local_ms(uint32_t bit, const char **name) {
+    for (int i = 0; i < FP_MS_N; i++)
+        if (FP_MS[i].bit == bit) { if (name) *name = FP_MS[i].name; return FP_MS[i].icon; }
+    return NULL;
+}
 static int g_fp_modal = -1;          /* the level (0..FP_N-1) or milestone (FP_N+) whose panel is up, or -1 */
 
 static float fp_value(const fish_t *f, int i) {      /* every level on one 0..10 scale */
@@ -335,11 +344,16 @@ void ui_fish_page_leave(void) { g_fp_modal = -1; }
 #define DV_H      44
 #define DV_ROWS   4
 /* the order on the glass, and what each one asks the platform for */
-static const struct { const char *label; int act; } DV_BTN[DV_COLS * DV_ROWS] = {
+/* No LIGHT button: it called tank_toggle_light, which latches light_override
+ * on for good, and light_override outranks the double-tap's light_manual_off
+ * in tank_tick - so one press killed the double-tap until the tank was reset.
+ * The double-tap is the way to work the light and always was. */
+#define DV_N 7
+static const struct { const char *label; int act; } DV_BTN[DV_N] = {
     { "+1000 SAND",  UI_DEV_DOLLARS },    { "BROKE",      UI_DEV_BROKE },
     { "BUY IT ALL",  UI_DEV_UNLOCK_ALL }, { "GROW A FISH", UI_DEV_GROW },
-    { "BASS PARTY",  UI_DEV_PARTY },      { "LIGHT",      UI_DEV_LIGHT },
-    { "ADD A FRY",   UI_DEV_FRY },        { "BATTERY",    UI_DEV_BATTERY },
+    { "BASS PARTY",  UI_DEV_PARTY },      { "ADD A FRY",  UI_DEV_FRY },
+    { "BATTERY",     UI_DEV_BATTERY },
 };
 static void dv_cell(int i, int *x, int *y) {
     *x = DV_X0 + (i % DV_COLS) * DV_DX;
@@ -354,7 +368,7 @@ void ui_dev_page(const tank_t *t, uint16_t *fb, int stride, const char *status) 
     snprintf(line, sizeof line, "SAND %d    FISH %d", (int)t->sd_balance, t->n_fish);
     render_text(fb, stride, DV_X0, 46, 2, TEAL, line);
     for (int x = DV_X0; x < TANK_W - DV_X0; x++) render_rect_blend(fb, stride, x, 66, 1, 1, DIM, 200);
-    for (int i = 0; i < DV_COLS * DV_ROWS; i++) {
+    for (int i = 0; i < DV_N; i++) {
         int bx, by; dv_cell(i, &bx, &by);
         render_button(fb, stride, bx, by, DV_W, DV_H, INNER, TEAL, DV_BTN[i].label, 2);
     }
@@ -364,7 +378,7 @@ void ui_dev_page(const tank_t *t, uint16_t *fb, int stride, const char *status) 
 }
 int ui_dev_page_tap(float x, float y) {
     if (x >= FP_CLOSE_X - 12 && y >= FP_CLOSE_Y - 8) return UI_DEV_CLOSE;
-    for (int i = 0; i < DV_COLS * DV_ROWS; i++) {
+    for (int i = 0; i < DV_N; i++) {
         int bx, by; dv_cell(i, &bx, &by);
         if (x >= bx - 6 && x < bx + DV_W + 6 && y >= by - 6 && y < by + DV_H + 6) return DV_BTN[i].act;
     }
@@ -416,10 +430,6 @@ bool ui_dev_apply(tank_t *t, int act, char *status, size_t n) {
         if (t->totem_phase != TOTEM_OFF)      { snprintf(status, n, "A PARADE IS ALREADY RUNNING"); return true; }
         tank_totem_force(t);
         snprintf(status, n, "%s HAS THE TOTEM - LIGHTS OUT", t->fish[t->totem_carrier].name);
-        return true;
-    case UI_DEV_LIGHT:
-        tank_toggle_light(t);
-        snprintf(status, n, t->night ? "LIGHTS OUT" : "LIGHTS ON");
         return true;
     case UI_DEV_FRY:
         progression_stage_arrival(t);
