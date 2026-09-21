@@ -84,7 +84,8 @@ enum { UI_DEV_NONE = 0, UI_DEV_KEPT, UI_DEV_CLOSE,
        UI_DEV_GROW,         /* push a fish to its next stage */
        UI_DEV_PARTY,        /* lift the totem now: parade, party, march home */
        UI_DEV_FRY,          /* a fry arrives */
-       UI_DEV_BATTERY };    /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
+       UI_DEV_BATTERY,      /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
+       UI_DEV_REEF };       /* the reef builder found / forgotten, without the combo */    /* step the faked charge: 100 -> 60 -> 40 -> 10 -> real */
 /* this fork's own milestone bits (MS_LOCAL_BIT0 and up), for the announcement
  * render.c puts over the live tank: its tables only reach the upstream ones.
  * Returns the badge icon and, through `name`, what to call it - NULL for a bit

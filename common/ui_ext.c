@@ -437,12 +437,12 @@ void ui_fish_page_leave(void) { g_fp_modal = -1; }
  * on for good, and light_override outranks the double-tap's light_manual_off
  * in tank_tick - so one press killed the double-tap until the tank was reset.
  * The double-tap is the way to work the light and always was. */
-#define DV_N 7
+#define DV_N 8
 static const struct { const char *label; int act; } DV_BTN[DV_N] = {
     { "+1000 SAND",  UI_DEV_DOLLARS },    { "BROKE",      UI_DEV_BROKE },
     { "BUY IT ALL",  UI_DEV_UNLOCK_ALL }, { "GROW A FISH", UI_DEV_GROW },
     { "BASS PARTY",  UI_DEV_PARTY },      { "ADD A FRY",  UI_DEV_FRY },
-    { "BATTERY",     UI_DEV_BATTERY },
+    { "BATTERY",     UI_DEV_BATTERY },    { "REEF",       UI_DEV_REEF },
 };
 static void dv_cell(int i, int *x, int *y) {
     *x = DV_X0 + (i % DV_COLS) * DV_DX;
@@ -523,6 +523,11 @@ bool ui_dev_apply(tank_t *t, int act, char *status, size_t n) {
     case UI_DEV_FRY:
         progression_stage_arrival(t);
         snprintf(status, n, "A FRY IS ON ITS WAY");
+        return true;
+    case UI_DEV_REEF:                       /* the builder, without hunting for the combo */
+        t->reef_open = t->reef_open ? 0 : 1;
+        progression_save(t);
+        snprintf(status, n, t->reef_open ? "REEF BUILDER: FOUND (SHOP, TOP RIGHT)" : "REEF BUILDER: HIDDEN AGAIN");
         return true;
     default:
         return false;                     /* UI_DEV_BATTERY: the platform's own */

@@ -600,6 +600,14 @@ bool reef_remove(tank_t *t, int index) {
 }
 
 /* ---- drawing ---- */
+/* The reef is the BACKDROP, and a backdrop that shouts is a backdrop you
+ * lose the fish against. Everything drawn into the tank is muted: pulled
+ * towards the deep water it sits in and knocked down in brightness, so it
+ * reads as depth rather than as foreground. The catalogue and the ghost
+ * draw at full strength, because there you are choosing a colour and need
+ * to see it (2026-09-21). */
+#define REEF_MUTE   0.56f     /* how much of the colour survives into the tank */
+#define REEF_TOWARD 0x14343f  /* ... and the water it is pulled towards */
 static uint32_t reef_shade(uint32_t rgb, int level, float dim) {
     int r = (int)((rgb >> 16) & 0xff), g = (int)((rgb >> 8) & 0xff), b = (int)(rgb & 0xff);
     if (level == 1) { r = r * 44 / 100; g = g * 44 / 100; b = b * 44 / 100; }        /* the deep side */
@@ -607,12 +615,25 @@ static uint32_t reef_shade(uint32_t rgb, int level, float dim) {
     if (dim < 1.0f) { r = (int)(r * dim); g = (int)(g * dim); b = (int)(b * dim); }
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
+static uint32_t reef_mute(uint32_t rgb) {
+    int r = (int)((rgb >> 16) & 0xff), g = (int)((rgb >> 8) & 0xff), b = (int)(rgb & 0xff);
+    int tr = (REEF_TOWARD >> 16) & 0xff, tg = (REEF_TOWARD >> 8) & 0xff, tb = REEF_TOWARD & 0xff;
+    r = tr + (int)((r - tr) * REEF_MUTE);
+    g = tg + (int)((g - tg) * REEF_MUTE);
+    b = tb + (int)((b - tb) * REEF_MUTE);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
 void reef_draw_shape(uint16_t *fb, int stride, int x, int y, int shape,
                      uint8_t colour, int alpha, float dim) {
+    reef_draw_shape_muted(fb, stride, x, y, shape, colour, alpha, dim, false);
+}
+void reef_draw_shape_muted(uint16_t *fb, int stride, int x, int y, int shape,
+                           uint8_t colour, int alpha, float dim, bool mute) {
     if (shape < 0 || shape >= REEF_SHAPE_N) return;
     const reef_shape_t *s = &REEF_SHAPES[shape];
     uint32_t base = REEF_PALETTE[colour < 1 ? 1 : colour > REEF_COLOURS ? REEF_COLOURS : colour];
     uint32_t lut[4] = { 0, reef_shade(base, 1, dim), reef_shade(base, 2, dim), reef_shade(base, 3, dim) };
+    if (mute) for (int i = 1; i < 4; i++) lut[i] = reef_mute(lut[i]);
     for (int py = 0; py < s->ch * REEF_CELL; py++) {
         int run = 0, level = 0;
         for (int px = 0; px <= s->cw * REEF_CELL; px++) {   /* runs, so a row is a few rects not 32 */
@@ -646,9 +667,9 @@ static inline uint32_t carrier_hash(int x, int y) {
     return h;
 }
 static void reef_draw_carrier(const tank_t *t, uint16_t *fb, int stride, float dim) {
-    uint32_t rock  = reef_shade(CARRIER_ROCK, 2, dim);
-    uint32_t deep  = reef_shade(CARRIER_DEEP, 2, dim);
-    uint32_t light = reef_shade(CARRIER_LIGHT, 2, dim);
+    uint32_t rock  = reef_mute(reef_shade(CARRIER_ROCK, 2, dim));
+    uint32_t deep  = reef_mute(reef_shade(CARRIER_DEEP, 2, dim));
+    uint32_t light = reef_mute(reef_shade(CARRIER_LIGHT, 2, dim));
     for (int cy = 0; cy < REEF_ROWS; cy++)
         for (int cx = 0; cx < REEF_COLS; cx++) {
             if (!reef_occupied(t, cx, cy)) continue;
@@ -688,7 +709,7 @@ void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
     reef_piece_t p;
     for (int i = 0; i < reef_count(t); i++) {
         if (!reef_piece(t, i, &p)) continue;
-        reef_draw_shape(fb, stride, p.cx * REEF_CELL, p.cy * REEF_CELL, p.shape, p.colour, 255, dim);
+        reef_draw_shape_muted(fb, stride, p.cx * REEF_CELL, p.cy * REEF_CELL, p.shape, p.colour, 255, dim, true);
     }
 }
 
@@ -869,4 +890,68 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
         }
     }
     return REEF_UI_KEPT;
+}
+
+/* ---- finding it -------------------------------------------------------- */
+static const uint8_t COMBO[] = { REEF_G_SWIPE_L, REEF_G_SWIPE_R, REEF_G_SWIPE_U, REEF_G_SWIPE_D,
+                                 REEF_G_TAP_R, REEF_G_TAP_L, REEF_G_TAP_C };
+#define COMBO_N ((int)(sizeof COMBO / sizeof COMBO[0]))
+static int   s_combo;             /* how many in a row have matched */
+static float s_combo_at;          /* when the last one landed, on the tank clock */
+
+int reef_gesture_of(float px, float py, float dx, float dy) {
+    if (dx * dx + dy * dy >= 30 * 30) {                 /* a swipe: whichever way it went furthest */
+        if (fabsf(dx) > fabsf(dy)) return dx < 0 ? REEF_G_SWIPE_L : REEF_G_SWIPE_R;
+        return dy < 0 ? REEF_G_SWIPE_U : REEF_G_SWIPE_D;
+    }
+    (void)py;
+    if (px < TANK_W / 3.0f) return REEF_G_TAP_L;
+    if (px >= TANK_W * 2.0f / 3.0f) return REEF_G_TAP_R;
+    return REEF_G_TAP_C;
+}
+bool reef_combo(int gesture, float clock) {
+    if (s_combo > 0 && clock - s_combo_at > REEF_COMBO_GAP_S) s_combo = 0;   /* too slow: forgotten */
+    if (gesture == COMBO[s_combo]) {
+        s_combo_at = clock;
+        if (++s_combo >= COMBO_N) { s_combo = 0; return true; }
+        return false;
+    }
+    /* a wrong move starts over - but if it happens to BE the first move,
+       start over from one rather than from nothing */
+    s_combo = (gesture == COMBO[0]) ? 1 : 0;
+    s_combo_at = clock;
+    return false;
+}
+bool reef_combo_busy(void) { return s_combo > 0; }
+int  reef_combo_progress(void) { return s_combo; }
+void reef_combo_reset(void) { s_combo = 0; }
+
+/* ---- the tour ---- */
+#define TOUR_FLASH_S 0.42f
+#define TOUR_FLASHES 3
+static int   s_tour;
+static float s_tour_t;
+void reef_tour_begin(void) { s_tour = REEF_TOUR_OVERVIEW; s_tour_t = 0; }
+void reef_tour_tick(float dt) { if (s_tour) s_tour_t += dt; }
+int  reef_tour_stage(void) { return s_tour; }
+bool reef_tour_lit(void) { return s_tour && fmodf(s_tour_t, TOUR_FLASH_S * 2) < TOUR_FLASH_S; }
+bool reef_tour_stage_done(void) { return s_tour && s_tour_t >= TOUR_FLASH_S * 2 * TOUR_FLASHES; }
+void reef_tour_next(void) { if (s_tour == REEF_TOUR_OVERVIEW) { s_tour = REEF_TOUR_SHOP; s_tour_t = 0; } else s_tour = REEF_TOUR_OFF; }
+void reef_tour_end(void) { s_tour = REEF_TOUR_OFF; s_tour_t = 0; }
+
+/* ---- the little coral in the shop's corner ---- */
+void reef_icon_draw(uint16_t *fb, int stride, bool highlight) {
+    render_rect(fb, stride, REEF_ICON_X, REEF_ICON_Y, REEF_ICON_W, REEF_ICON_H, 0x04141a);
+    render_rect_edge(fb, stride, REEF_ICON_X, REEF_ICON_Y, REEF_ICON_W, REEF_ICON_H,
+                     highlight ? 0xffffff : 0x3f6a72);
+    if (highlight)
+        render_rect_edge(fb, stride, REEF_ICON_X - 3, REEF_ICON_Y - 3, REEF_ICON_W + 6, REEF_ICON_H + 6, 0xffffff);
+    /* the catalogue's own art, not a second drawing that then drifts from
+       it. A 2x2 coral, because a 2x3 one hangs out of the box. */
+    reef_draw_shape_muted(fb, stride, REEF_ICON_X + (REEF_ICON_W - 32) / 2,
+                          REEF_ICON_Y + (REEF_ICON_H - 32) / 2, REEF_ICON_SHAPE, 7, 255, 1.0f, false);
+}
+bool reef_icon_hit(float x, float y) {
+    return x >= REEF_ICON_X - 8 && x < REEF_ICON_X + REEF_ICON_W + 8 &&
+           y >= REEF_ICON_Y - 8 && y < REEF_ICON_Y + REEF_ICON_H + 8;
 }

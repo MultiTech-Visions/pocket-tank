@@ -450,6 +450,17 @@ static void tank_task(void *arg) {
                       touch_port_show_shop(false); setup_begin_place(&tank, item);
                       ESP_LOGI(TAG, "shop: placement page up for the %s", SD_ITEMS[item].name); } }
               else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", SD_ITEMS[item].name, (int)tank.sd_balance, SD_ITEMS[item].price); } }
+        /* the tour (reef.h): three flashes round UPGRADES, then the shop with
+           three round the coral in its corner, so the way back in is shown
+           rather than described */
+        if (reef_tour_stage()) {
+            reef_tour_tick(dt);
+            if (reef_tour_stage_done()) {
+                if (reef_tour_stage() == REEF_TOUR_OVERVIEW) { touch_port_show_milestones(false); touch_port_show_shop(true); }
+                reef_tour_next();
+                if (!reef_tour_stage()) ESP_LOGI(TAG, "reef: the tour is done");
+            }
+        }
         brightness_apply(tank.night);
         { static int64_t last_bat; if (now - last_bat > 5LL * 60 * 1000000) {   /* battery log: awake sample every 5 min */
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }

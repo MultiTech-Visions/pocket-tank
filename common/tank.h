@@ -403,6 +403,9 @@ typedef struct tank {
      * one tank is one struct. 28 x 23 at 4 bits is 322 bytes. */
     uint8_t  reef[322];   /* REEF_SAVE_BYTES; reef.c static-asserts the two agree */
     uint8_t  fish_speed;
+    /* the reef builder is not on by default: it is found (reef.h's combo) or
+     * switched on from the dev page, and then it stays found. */
+    uint8_t  reef_open;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
                                     * shot). Not saved. */
@@ -662,6 +665,22 @@ void  tank_totem_force(tank_t *t);
  * become keen and go for it. Returns how many were called over, 0 for a tap
  * that was not on the pile - so a caller can tell whether the tap was spent. */
 int   tank_glow_nudge(tank_t *t, float x, float y);
+/* a tap on the TOTEM: somebody goes and gets it. Nobody was ever picking it
+ * up on their own - it wants a really sociable fish to wander within reach
+ * of it in daylight with the cooldown clear, which almost never lines up -
+ * so a tap invites the nearest calm fish and, for TOTEM_INVITE_S, that fish
+ * ignores the social bar, the cooldown and the hour. Returns false for a tap
+ * that was not on the totem, so the caller knows the tap is unspent. */
+/* Lights out with any of the festival gear in the tank and the fish are not
+ * ready for bed: for AFTERHOURS_S they keep playing with the glowy things
+ * instead. The model still chooses REST if it wants to - this only steers a
+ * resting fish towards the sticks rather than to the reef, and keeps it
+ * looking awake while it does. */
+#define AFTERHOURS_S     300.0f
+bool  tank_afterhours(const tank_t *t);
+#define TOTEM_INVITE_S   26.0f   /* long enough to actually swim there from the far side */
+#define TOTEM_TAP_REACH  34.0f
+bool  tank_totem_nudge(tank_t *t, float x, float y);
 /* something just went into the tank: the fish come and look it over */
 void  tank_decor_noticed(tank_t *t, int item);
 /* the rally in flight: how many passes, and who is waiting for the catch

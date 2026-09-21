@@ -238,12 +238,26 @@ static void draw_fish_core(ctx_t *c, const fish_t *f, float clock, bool asleep, 
 #undef TX
 #undef TY
 }
+static bool g_reef_built = false;      /* is there a reef to be lost against? */
+/* A soft dark pool under whatever is about to be drawn. Against a plain
+ * gradient a fish reads fine; against a built reef it disappears into the
+ * colour behind it, and so do the glow sticks. Three loose ellipses of very
+ * low alpha cost almost nothing and put a shadow between the subject and
+ * the background without looking like an outline (2026-09-21). */
+static void draw_backing(ctx_t *c, float cx, float cy, float rx, float ry) {
+    fill_ellipse(c, cx, cy, rx * 1.55f, ry * 1.75f, 0x000000, 26);
+    fill_ellipse(c, cx, cy, rx * 1.20f, ry * 1.35f, 0x000000, 34);
+    fill_ellipse(c, cx, cy, rx * 0.92f, ry * 1.02f, 0x000000, 40);
+}
 /* the tank's fish: roll state per slot (the preview above has none) */
 static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f, int idx) {
     float ch = cosf(f->heading);
     float want = ch < -0.05f ? -1.0f : ch > 0.05f ? 1.0f : g_roll[idx];
     g_roll[idx] += (want - g_roll[idx]) * 0.18f;
-    draw_fish_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST, g_roll[idx], 1.0f);
+    if (g_reef_built) draw_backing(c, f->x, f->y, f->size * 13.0f, f->size * 7.0f);
+    /* asleep - unless the rig is on and the after-hours window is still
+       open, in which case nobody is asleep yet (tank.h) */
+    draw_fish_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST && !tank_afterhours(t), g_roll[idx], 1.0f);
 }
 
 /* a bed of swaying seaweed fronds; seed varies phase/heights between beds.
@@ -426,6 +440,7 @@ static void draw_glow_set(ctx_t *c, const tank_t *t, bool carried_pass) {
            both rings so it reads as a light rather than a dash of colour */
         float pulse = (t->night || live) ? 0.85f + 0.15f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.80f;
         ctx_t *dst = (t->night || live) ? &lit : c;
+        if (g_reef_built) draw_backing(dst, cx, cy, 9.0f, 6.0f);   /* so a stick is not lost in the coral */
         fill_ellipse(dst, cx, cy, 19, 13, COL[i], (int)((t->night || live ? 38 : 22) * pulse));
         fill_ellipse(dst, cx, cy, 13, 9, COL[i], (int)((t->night || live ? 66 : 38) * pulse));
         src_t s = src_color(COL[i], dst->dim);
@@ -1233,6 +1248,7 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
 }
 
 void render_tank(const tank_t *t, uint16_t *fb, int stride) {
+    g_reef_built = !reef_empty(t);      /* only pay for the backings when there is a reef */
     /* Night used to drop the palette to 0.45. With the sticks, the totem and
        the rig all doing their thing after dark there is more to see down
        there, so the dark is 80% as deep as it was: 1 - 0.8 * (1 - 0.45). */
@@ -1862,20 +1878,18 @@ int render_confirm_hit(float x, float y) {
 #define MSP_BADGE_X0  176
 #define MSP_BADGE_DX  40
 #define MSP_ICON      32
-#define MSP_CLOSE_X   MSP_CLOSE_X_T               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
+#define MSP_CLOSE_X   324               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
 #define MSP_CLOSE_Y   312
-#define MSP_CLOSE_W   96
+#define MSP_CLOSE_W   92
 #define MSP_CLOSE_H   30
 /* Four across the foot since the reef builder joined them (2026-09-21):
  * the row was re-spaced rather than any label shortened, because SETTINGS
  * and UPGRADES need every pixel of their eight characters. */
-#define MSP_SET_X     MSP_SET_X_T                /* the SETTINGS button, bottom left, where the brightness row was */
-#define MSP_SET_W     104
+#define MSP_SET_X     32                /* the SETTINGS button, bottom left, where the brightness row was */
+#define MSP_SET_W     116
 #define MSP_SD_X      36                /* the sand dollar on the TANK row (the shop), centred like the fish portraits */
-#define MSP_UPG_X     MSP_UPG_X_T               /* the UPGRADES button: the shop (Strato, 2026-09-15) */
-#define MSP_UPG_W     104
-#define MSP_REEF_X    MSP_REEF_X_T               /* BUILD: the reef behind everything (reef.h) */
-#define MSP_REEF_W    68
+#define MSP_UPG_X     178               /* the UPGRADES button, centred between SETTINGS and CLOSE (Strato, 2026-09-15) */
+#define MSP_UPG_W     116
 #define MSP_MODAL_X   56
 #define MSP_MODAL_Y   100
 #define MSP_MODAL_W   336
@@ -2123,7 +2137,10 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
     button(&c, MSP_SET_X, MSP_CLOSE_Y, MSP_SET_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SETTINGS", 2);   /* bottom left (2026-09-15) */
     button(&c, MSP_UPG_X, MSP_CLOSE_Y, MSP_UPG_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPGRADES", 2);   /* the shop, between them */
-    button(&c, MSP_REEF_X, MSP_CLOSE_Y, MSP_REEF_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "BUILD", 2);    /* the reef behind it all */
+    if (reef_tour_stage() == REEF_TOUR_OVERVIEW && reef_tour_lit()) {      /* being shown the way in */
+        rect_edge(&c, MSP_UPG_X - 4, MSP_CLOSE_Y - 4, MSP_UPG_W + 8, MSP_CLOSE_H + 8, 0xffffff);
+        rect_edge(&c, MSP_UPG_X - 5, MSP_CLOSE_Y - 5, MSP_UPG_W + 10, MSP_CLOSE_H + 10, 0xffffff);
+    }
     /* a modal up: the page under it is out of reach (any tap only closes the
        modal), so it LOOKS out of reach - every pixel at half (Strato: with
        CLOSE lit it looked like you could still tap it). One shift per
@@ -2200,8 +2217,7 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
         }
         render_milestones_leave(); return MS_TAP_KEPT;   /* any other tap: back to the page */
     }
-    if (x >= MSP_CLOSE_X - 4 && y >= MSP_CLOSE_Y - 4) return MS_TAP_CLOSE;      /* slop out to the glass edge */
-    if (x >= MSP_REEF_X - 6 && x < MSP_REEF_X + MSP_REEF_W + 6 && y >= MSP_CLOSE_Y - 4) return MS_TAP_REEF;
+    if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return MS_TAP_CLOSE;      /* slop out to the glass edge */
     if (x < MSP_SET_X + MSP_SET_W + 8 && y >= MSP_CLOSE_Y - 4) return MS_TAP_SETTINGS;   /* the settings page */
     if (y >= MSP_CLOSE_Y - 4) return MS_TAP_SHOP;                                        /* UPGRADES: the rest of the strip is the shop */
     int row = -1; bool tank_row = false, fry_row = false;
@@ -2386,6 +2402,8 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     ctx_t c = ctx_full(fb, stride, 1.0f);
     rect_fill(&c, 0, 0, TANK_W, TANK_H, MSP_INK);
     blit_icon(&c, SHP_COIN_X, SHP_COIN_Y, &icon_shop_sand_dollar_64, 255);
+    if (t->reef_open)                                     /* found it: the way into the builder */
+        reef_icon_draw(fb, stride, reef_tour_stage() == REEF_TOUR_SHOP && reef_tour_lit());
     draw_text(&c, 112, SHP_COIN_Y + 6, 2, MSP_TEAL, "SAND DOLLARS");
     char bal[16]; snprintf(bal, sizeof bal, "%d", (int)t->sd_balance);
     draw_text(&c, 112, SHP_COIN_Y + 28, 4, 0xffffff, bal);
@@ -2497,6 +2515,7 @@ int render_shop_tap(const tank_t *t, float x, float y) {
         g_shp_coin = 0; return SHOP_TAP_GRANT;
     }
     g_shp_coin = 0;
+    if (t->reef_open && reef_icon_hit(x, y)) return SHOP_TAP_REEF;   /* the coral in the corner */
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SHOP_TAP_CLOSE;
     if (x < SHP_EARN_X + SHP_EARN_W + 8 && y >= MSP_CLOSE_Y - 4) { g_shp_earn = true; return SHOP_TAP_KEPT; }
     if (SHP_PAGES > 1 && y >= MSP_CLOSE_Y - 4) { g_shp_page = (g_shp_page + 1) % SHP_PAGES; return SHOP_TAP_KEPT; }   /* MORE: the next shelf */

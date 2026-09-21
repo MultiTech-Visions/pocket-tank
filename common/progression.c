@@ -117,6 +117,8 @@ typedef struct {
     int16_t  fish_parties[N_FISH_MAX];   /* bass parties attended, per fish (2026-09-20) */
     uint8_t  reef[322];                  /* the reef the keeper built (reef.h, 2026-09-21), two cells
                                             to a byte. All zeros = never built one. */
+    uint8_t  reef_open;                  /* the reef builder has been found (2026-09-21); 0 in an
+                                            older save, which is right - it had not been */
     uint8_t  fish_speed;                 /* the keeper's pace: 0 slower, 1 normal, 2 faster (2026-09-21).
                                             0 in an older save would read as SLOWER, so it is stored
                                             biased by one and a zero means "never set" = NORMAL. */
@@ -622,7 +624,8 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     for (int i = 0; i < t->n_fish; i++) t->fish[i].parties = sv.fish_parties[i];
     /* stored biased by one: 0 is "this save predates the setting" = NORMAL */
     t->fish_speed = sv.fish_speed ? (uint8_t)((sv.fish_speed - 1) % FISH_SPEED_N) : 1;
-    memcpy(t->reef, sv.reef, sizeof t->reef);   /* all zeros in an older save: no reef, which is right */
+    memcpy(t->reef, sv.reef, sizeof t->reef);
+    t->reef_open = sv.reef_open ? 1 : 0;   /* all zeros in an older save: no reef, which is right */
     if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
         if (sv.glow_x[0] > 0) {
             for (int i = 0; i < GLOW_N; i++) {
@@ -819,6 +822,7 @@ void progression_save(tank_t *t) {
     sv.sd_stowed = t->sd_stowed;
     for (int i = 0; i < N_FISH_MAX; i++) sv.fish_parties[i] = i < t->n_fish ? t->fish[i].parties : 0;
     memcpy(sv.reef, t->reef, sizeof sv.reef);
+    sv.reef_open = t->reef_open;
     sv.fish_speed = (uint8_t)((t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1) + 1);
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);

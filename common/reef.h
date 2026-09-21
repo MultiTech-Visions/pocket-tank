@@ -85,6 +85,11 @@ void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim);
 /* one piece on its own, for the ghost and the catalogue's tiles */
 void reef_draw_shape(uint16_t *fb, int stride, int x, int y, int shape,
                      uint8_t colour, int alpha, float dim);
+/* the same, with `mute` telling it whether this is going into the TANK -
+ * where the reef is a backdrop and must not compete with the fish - or onto
+ * a page, where you are choosing a colour and need to see it */
+void reef_draw_shape_muted(uint16_t *fb, int stride, int x, int y, int shape,
+                           uint8_t colour, int alpha, float dim, bool mute);
 
 /* ---- the builder ------------------------------------------------------- */
 enum { REEF_UI_NONE = 0, REEF_UI_KEPT, REEF_UI_CLOSE };
@@ -98,3 +103,51 @@ int  reef_ui_tap(tank_t *t, float x, float y, float dx, float dy);
 void reef_ui_hand(int *shape, int *colour, bool *rubbing);
 
 #endif
+
+/* ---- finding it (2026-09-21) -------------------------------------------
+ * The builder is not on by default. It is FOUND: a sequence on the glass
+ * that nobody does by accident -
+ *
+ *   swipe left, swipe right, swipe up, swipe down,
+ *   tap the right third, tap the left third, tap the middle.
+ *
+ * Feed every gesture on the live tank to reef_combo, in order. It returns
+ * true on the last one, and the tank is never disturbed on the way: the
+ * caller asks reef_combo_busy() first and, while a run is under way, does
+ * NOT let the gesture do its usual job, so the taps raise no fright and the
+ * swipe up does not open the overview mid-sequence. A run that stalls for
+ * REEF_COMBO_GAP_S forgets itself.
+ *
+ * Then the tour: rather than dropping somebody into a page they have never
+ * seen, the overview opens with UPGRADES flashing, and then the shop opens
+ * with the new coral icon flashing, so the way back is something they have
+ * been shown rather than told. */
+enum { REEF_G_NONE = 0, REEF_G_SWIPE_L, REEF_G_SWIPE_R, REEF_G_SWIPE_U, REEF_G_SWIPE_D,
+       REEF_G_TAP_L, REEF_G_TAP_C, REEF_G_TAP_R };
+#define REEF_COMBO_GAP_S 3.0f
+bool reef_combo(int gesture, float clock);    /* true = that was the last one */
+bool reef_combo_busy(void);                   /* a run is under way: leave the tank alone */
+int  reef_combo_progress(void);               /* how far in, for a log */
+void reef_combo_reset(void);
+/* which gesture a press-and-release was, in tank coordinates */
+int  reef_gesture_of(float px, float py, float dx, float dy);
+
+/* the tour: 0 none, 1 the overview with UPGRADES flashing, 2 the shop with
+ * the coral icon flashing. The platform drives the pages; this owns the
+ * flashing and when each stage is done. */
+enum { REEF_TOUR_OFF = 0, REEF_TOUR_OVERVIEW, REEF_TOUR_SHOP };
+void reef_tour_begin(void);
+void reef_tour_tick(float dt);
+int  reef_tour_stage(void);
+bool reef_tour_lit(void);                     /* is the highlight showing this instant? */
+bool reef_tour_stage_done(void);              /* three flashes gone by: move on */
+void reef_tour_next(void);
+void reef_tour_end(void);
+/* the little coral in the shop's top right corner, once it is found */
+#define REEF_ICON_X (TANK_W - 52)
+#define REEF_ICON_Y 10
+#define REEF_ICON_W 40
+#define REEF_ICON_H 40
+#define REEF_ICON_SHAPE 1      /* a 2x2 coral: a 2x3 one hangs out of the box */
+void reef_icon_draw(uint16_t *fb, int stride, bool highlight);
+bool reef_icon_hit(float x, float y);

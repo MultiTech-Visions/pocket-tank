@@ -162,13 +162,11 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride);
  * brightness row). */
 enum { MS_TAP_NONE = 0, MS_TAP_KEPT = 1, MS_TAP_CLOSE = 2, MS_TAP_SETTINGS = 3,   /* SETTINGS: the button bottom left (2026-09-15) opens the settings page */
        MS_TAP_SHOP = 4,                                                           /* the sand dollar left of the TANK row opens the shop */
-       MS_TAP_REEF = 5,                                                           /* BUILD: the reef builder (reef.h) */
 /* the foot row's x positions, so a test aims at the buttons rather than at
  * numbers copied out of render.c that then move (2026-09-21) */
-#define MSP_SET_X_T   24
-#define MSP_UPG_X_T   132
-#define MSP_REEF_X_T  244
-#define MSP_CLOSE_X_T 320
+#define MSP_SET_X_T   32
+#define MSP_UPG_X_T   178
+#define MSP_CLOSE_X_T 324
        MS_TAP_FISH = 16 };                                                        /* + the fish index (2026-09-20): its popup's MORE button was
                                                                                    * tapped - the platform closes this page and opens ui_fish_page */
 int  render_milestones_tap(const tank_t *t, float x, float y);
@@ -187,6 +185,7 @@ void render_milestones_leave(void);
  * render-local; render_shop_leave clears it (back to the first shelf) when
  * the page closes. */
 enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_GRANT = 3,
+       SHOP_TAP_REEF = 4,     /* the coral in the top right corner: the builder (reef.h) */
        SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_STOW = 64 };   /* BUY / MOVE / STOW + item index */
 /* SHOP_TAP_GRANT (2026-09-21): the dev override. SHP_DEV_TAPS taps in a row on
  * the balance coin at the top of the shop; the platform calls

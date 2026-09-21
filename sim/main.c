@@ -1140,6 +1140,13 @@ static void frame_cb(lv_timer_t *timer) {
         if (nb >= 0) { selected_fish = -1; milestones_view = false; snd(SND_ARRIVAL, AUDIO_PITCH_ONE);
                        printf("a new fry, %s: the birth flow is up (announce / name / family; S drops it)\n", tank.fish[nb].name); }
     }
+    if (reef_tour_stage()) {                       /* the tour walks the way back in */
+        reef_tour_tick(dt);
+        if (reef_tour_stage_done()) {
+            if (reef_tour_stage() == REEF_TOUR_OVERVIEW) { milestones_view = false; shop_view = true; }
+            reef_tour_next();
+        }
+    }
     sound_frame(now, dt);
     if (reef_view) { render_tank(&tank, canvas_buf, TANK_W); reef_ui_draw(&tank, canvas_buf, TANK_W, tank.clock); }
     else if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
@@ -1659,7 +1666,6 @@ static int selftest_shop(void) {
         if (render_milestones_tap(&tank, 52, 254 + 20) != MS_TAP_SHOP) { printf("FAIL: the sand dollar did not open the shop\n"); return 1; }
         if (render_milestones_tap(&tank, MSP_UPG_X_T + 52, 312 + 10) != MS_TAP_SHOP) { printf("FAIL: UPGRADES did not open the shop\n"); return 1; }
         if (render_milestones_tap(&tank, MSP_SET_X_T + 52, 312 + 10) != MS_TAP_SETTINGS || render_milestones_tap(&tank, MSP_CLOSE_X_T + 48, 312 + 10) != MS_TAP_CLOSE) { printf("FAIL: SETTINGS / CLOSE moved\n"); return 1; }
-        if (render_milestones_tap(&tank, MSP_REEF_X_T + 34, 312 + 10) != MS_TAP_REEF) { printf("FAIL: BUILD did not open the reef builder\n"); return 1; }
         render_milestones_leave();
         tank.sd_unlocks = 0; tank.sd_balance = SD_PRICE_PLANT + 5; want = tank.sd_balance;
         render_shop(&tank, fb, TANK_W);
@@ -2212,11 +2218,23 @@ int main(int argc, char **argv) {
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */
         bool modal = confirm_view || setup_up || settings_view || shop_view || dev_view || reef_view || fishpage_fish >= 0;
+        bool combo_ate_it = false;                       /* the hidden way in (reef.h) */
+        if (!mpress && mdown && !modal && !confirm_view) {
+            float wpx2, wpy2; render_camera_unmap((float)press_x, (float)press_y, &wpx2, &wpy2);
+            bool was = reef_combo_busy();
+            int g = reef_gesture_of(wpx2, wpy2, (float)(mx - press_x), (float)(my - press_y));
+            if (reef_combo(g, tank.clock)) {
+                tank.reef_open = 1; progression_save(&tank);
+                selected_fish = -1; milestones_view = true; reef_tour_begin();
+                printf("the reef builder has been found\n");
+                combo_ate_it = true;
+            } else if (was) combo_ate_it = true;         /* mid-run: leave the tank alone */
+        }
         if (reef_view && mpress) { if (mdown) reef_ui_drag(&tank, (float)mx, (float)my); else reef_ui_press(&tank, (float)mx, (float)my); }
         { float wmx, wmy; render_camera_unmap((float)mx, (float)my, &wmx, &wmy);
           if (mpress && !modal) tank_touch_drag(&tank, wmx, wmy);   /* stroke -> wipe/slash */
           if (mpress && !modal && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, wmx, wmy); }
-        if (!mpress && mdown) {
+        if (!mpress && mdown && !combo_ate_it) {
             int dx = mx - press_x, dy = my - press_y;
             if (confirm_view) {                    /* the prompt owns the glass: press AND release on one button */
                 int h = press_ms > confirm_ms ? render_confirm_hit((float)press_x, (float)press_y) : 0;
@@ -2253,7 +2271,11 @@ int main(int argc, char **argv) {
             }
             else if (shop_view) {                       /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(&tank, (float)press_x, (float)press_y);
-                if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
+                if (r == SHOP_TAP_REEF) {                   /* the coral in the corner: the builder */
+                    shop_view = false; render_shop_leave(); reef_view = true; reef_ui_open(&tank); reef_tour_end();
+                    printf("reef builder up (swipe up for coral, DONE leaves)\n");
+                }
+                else if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
                 else if (r == SHOP_TAP_GRANT) {             /* the dev override: five taps on the balance coin */
                     progression_sd_grant(&tank, SD_DEV_GRANT); snd(SND_CONFIRM, AUDIO_PITCH_ONE);
                     printf("shop: dev grant +%d sand dollars (%d)\n", SD_DEV_GRANT, tank.sd_balance);
@@ -2296,9 +2318,8 @@ int main(int argc, char **argv) {
                     progression_ack_milestones(&tank); render_milestones_leave();
                     printf("fish page: %s, from the overview\n", tank.fish[fishpage_fish].name);
                 }
-                else if (r == MS_TAP_CLOSE || r == MS_TAP_SETTINGS || r == MS_TAP_SHOP || r == MS_TAP_REEF) {
+                else if (r == MS_TAP_CLOSE || r == MS_TAP_SETTINGS || r == MS_TAP_SHOP) {
                     milestones_view = false; settings_view = r == MS_TAP_SETTINGS; shop_view = r == MS_TAP_SHOP;
-                    if (r == MS_TAP_REEF) { reef_view = true; reef_ui_open(&tank); printf("reef builder up (swipe up for pieces, DONE leaves)\n"); }
                     progression_ack_milestones(&tank); render_milestones_leave(); }
                 /* MS_TAP_KEPT: a badge / name opened the detail modal, or the modal closed; anything else: nothing */
             }

@@ -136,6 +136,22 @@ void touch_port_poll(tank_t *t) {
     bool on_card = s_sel >= 0 && RENDER_CARD_HIT(s_px, s_py);   /* the card is not glass */
     if (touched) { s_lx = tx; s_ly = ty; if (!modal && !on_card) tank_touch_drag(t, wx, wy); }  /* stroke = wipe/slash */
     if (touched && !modal && !on_card && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, wx, wy);
+    if (!touched && s_down && !modal && !s_cf && !su) {
+        /* The hidden way in (reef.h). Every gesture on the live tank is
+           offered to it; once a run is under way the gesture is CONSUMED, so
+           the taps raise no fright and the swipe up does not open the
+           overview half way through. The first gesture still does its usual
+           job, because a stray swipe left must not stop wiping the glass. */
+        bool was = reef_combo_busy();
+        int g = reef_gesture_of(s_wpx, s_wpy, s_lx - s_px, s_ly - s_py);
+        if (reef_combo(g, t->clock)) {
+            t->reef_open = 1; progression_save(t);
+            s_sel = -1; s_ms = true; reef_tour_begin();
+            ESP_LOGI(TAG, "the reef builder has been found");
+            s_down = touched; return;
+        }
+        if (was) { s_down = touched; return; }            /* mid-run: the tank is left alone */
+    }
     if (!touched && s_down) {
         /* release: classify with the LAST touched position (the old code fell
            back to the PRESS position here, so dx/dy were always 0 - every
@@ -188,7 +204,11 @@ void touch_port_poll(tank_t *t) {
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(t, s_px, s_py);
                 ESP_LOGI(TAG, "shop tap at %.0f,%.0f -> %s", s_px, s_py, r == SHOP_TAP_CLOSE ? "CLOSE" : r == SHOP_TAP_GRANT ? "dev grant" : r >= SHOP_TAP_MOVE ? "MOVE" : r >= SHOP_TAP_BUY ? "UNLOCK" : r == SHOP_TAP_KEPT ? "modal" : "nothing");
-                if (r == SHOP_TAP_CLOSE) { s_shop = false; render_shop_leave(); s_ms = true; }   /* back to the milestones page (2026-09-16) */
+                if (r == SHOP_TAP_REEF) {                            /* the coral in the corner */
+                    s_shop = false; render_shop_leave(); s_reef = true; reef_ui_open(t); reef_tour_end();
+                    ESP_LOGI(TAG, "reef builder up (swipe up for coral, DONE leaves)");
+                }
+                else if (r == SHOP_TAP_CLOSE) { s_shop = false; render_shop_leave(); s_ms = true; }   /* back to the milestones page (2026-09-16) */
                 else if (r == SHOP_TAP_GRANT || r >= SHOP_TAP_BUY) s_shop_act = r;   /* main.c buys (and plays the cue), grants, or opens the placement page */
                 goto released;
             }
@@ -210,13 +230,7 @@ void touch_port_poll(tank_t *t) {
                     ESP_LOGI(TAG, "fish page: %s, from the overview", t->fish[s_fp].name);
                     goto released;
                 }
-                if (r != MS_TAP_CLOSE && r != MS_TAP_SETTINGS && r != MS_TAP_SHOP && r != MS_TAP_REEF) goto released;   /* only a button leaves the page */
-                if (r == MS_TAP_REEF) {                          /* BUILD: the reef behind everything */
-                    s_ms = false; s_sel = -1; s_reef = true; reef_ui_open(t);
-                    progression_ack_milestones(t); render_milestones_leave();
-                    ESP_LOGI(TAG, "reef builder up (swipe up for pieces, DONE leaves)");
-                    goto released;
-                }
+                if (r != MS_TAP_CLOSE && r != MS_TAP_SETTINGS && r != MS_TAP_SHOP) goto released;   /* only a button leaves the page */
                 s_ms = false; s_sel = -1; s_set = r == MS_TAP_SETTINGS; s_shop = r == MS_TAP_SHOP;
                 progression_ack_milestones(t); render_milestones_leave();   /* everything shown is now "seen" */
                 goto released;
