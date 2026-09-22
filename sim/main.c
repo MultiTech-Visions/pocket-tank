@@ -619,7 +619,7 @@ static int selftest_sleep(void) {
             if (r != SET_TAP_LIGHT || v != 0 || tank.light_auto) { printf("FAIL: LIGHTS OUT MANUAL tap -> %d/%d, auto %d\n", r, v, tank.light_auto); return 1; }
             for (int i = 0; i < 30 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
             if (tank.night) { printf("FAIL: lights went out in MANUAL\n"); return 1; }
-            render_settings(&tank, sfb, TANK_W, 60, 2, 74);
+            render_settings(&tank, sfb, TANK_W, 60, 2, 74, 0);
             /* in MANUAL a double-tap on the glass flips the light, and the flip rides in the save */
             tank_touch_tap(&tank, 200, 200); tank_touch_tap(&tank, 200, 200);
             for (int i = 0; i < 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
@@ -1170,7 +1170,7 @@ static void frame_cb(lv_timer_t *timer) {
     else if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
     else if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
     else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume(),
-                                            (int)((dev_bat >= 0 ? dev_bat : sim_bat) * 100 + 0.5f));
+                                            (int)((dev_bat >= 0 ? dev_bat : sim_bat) * 100 + 0.5f), 0);
     else if (shop_view) render_shop(&tank, canvas_buf, TANK_W);
     else {
         render_tank(&tank, canvas_buf, TANK_W);
@@ -1337,9 +1337,9 @@ static int snapshot(const char *prefix, int seconds) {
     tank.fish[1].ms_seen &= ~MS_FIRST_MEAL_FROM_YOU; tank.tank_ms_seen &= ~TMS_FIRST_FULL_NIGHT;
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestones.ppm", prefix); write_ppm(path, fb);
-    render_settings(&tank, fb, TANK_W, 60, 2, 74);                 /* MANUAL, the default */
+    render_settings(&tank, fb, TANK_W, 60, 2, 74, 0);                 /* MANUAL, the default */
     snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);
-    tank.light_auto = true; render_settings(&tank, fb, TANK_W, 60, 2, 74);   /* AUTO: the seconds */
+    tank.light_auto = true; render_settings(&tank, fb, TANK_W, 60, 2, 74, 0);   /* AUTO: the seconds */
     snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb); tank.light_auto = false;
     /* the shop (2026-09-15): broke, rich, an item's modal, the HOW TO EARN
        modal, then the tank with both purchases in it and the toast */

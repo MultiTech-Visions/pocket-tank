@@ -270,7 +270,11 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
  * settings page resets it, and so does leaving the page, so a keeper who never
  * goes looking never sees it. */
 #define SET_DEV_TAPS 7
-void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume, int bat_pct);
+/* bat_mv: the raw cell millivolts beside the percentage, 0 = do not show.
+ * Only the board with no fuel gauge passes it - there the percentage is a
+ * curve fitted to a divider reading, and the number it was fitted from is
+ * the one worth seeing when a battery is behaving oddly. */
+void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume, int bat_pct, int bat_mv);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
 

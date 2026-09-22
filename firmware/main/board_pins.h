@@ -61,6 +61,7 @@
    measurable, a third of it at a time, on ADC1 channel 0. Waveshare's own
    examples read it as 3.3/4096 * 3 * raw. No VBUS sense reaches the chip,
    so "charging" is not knowable here; the meter just shows a level. */
+#define BOARD_HAS_FUEL_GAUGE 0
 #define PIN_BAT_ADC       1
 #define BAT_ADC_DIV       3
 /* GPIO46 is a STRAPPING PIN as well as this board's backlight. Holding a
@@ -97,6 +98,9 @@
 /* defaults for the board that does not set them */
 #ifndef BOARD_SCREEN_FLIPPED
 #define BOARD_SCREEN_FLIPPED 0
+#endif
+#ifndef BOARD_HAS_FUEL_GAUGE
+#define BOARD_HAS_FUEL_GAUGE 1
 #endif
 #ifndef PIN_BAT_ADC
 #define PIN_BAT_ADC (-1)          /* the AMOLED board has a real fuel gauge */

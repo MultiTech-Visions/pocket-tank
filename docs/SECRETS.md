@@ -143,7 +143,7 @@ short list rather than an evening:
 | panel | SH8601/CO5300 QSPI, 368x448, frame rotated 90 | ST7789 SPI, 240x240, frame **squashed** to 240x197 and letterboxed |
 | brightness | a panel command | LEDC PWM on GPIO46 |
 | power | AXP2101 PMIC: PWR key, real soft power-off, fuel gauge | **none.** ETA6096 charge management only |
-| battery | the PMIC's own state of charge | GPIO1, behind a 200k/100k divider: ADC1 ch0, x3, through a discharge curve. **Charging is not sensed** - no VBUS or /CHG line reaches the chip |
+| battery | the PMIC's own state of charge | GPIO1, behind a 200k/100k divider: ADC1 ch0, x3, through a discharge curve. **Charging is not sensed** - no VBUS or /CHG line reaches the chip. Settings shows the raw millivolts beside the percentage here, because the percentage is only a curve fitted to that number |
 | sleep | grace, then a PMIC soft cut | grace, then **the drowse carries on**; it must never deep sleep (see below) |
 | orientation | the IMU alone | the IMU XOR `BOARD_SCREEN_FLIPPED` - it hangs from its USB socket, bottom edge |
 | touch reset | a bit on the TCA9554 expander | a plain GPIO (47) |

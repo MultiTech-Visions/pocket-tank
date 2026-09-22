@@ -579,7 +579,8 @@ static void tank_task(void *arg) {
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
                 render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume(),
-                                s_bat_ok ? (int)((s_dev_bat >= 0 ? s_dev_bat : s_bat_frac) * 100 + 0.5f) : -1);
+                                s_bat_ok ? (int)((s_dev_bat >= 0 ? s_dev_bat : s_bat_frac) * 100 + 0.5f) : -1,
+                                BOARD_HAS_FUEL_GAUGE ? 0 : battery_port_vbat_mv());
                 sel = -1;
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
                 render_shop(&tank, fb[cur], TANK_W);
