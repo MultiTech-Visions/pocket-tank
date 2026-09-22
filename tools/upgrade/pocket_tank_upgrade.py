@@ -147,57 +147,92 @@ def selfcheck(spec):
     return 0
 
 
-def read_log(port_arg, seconds=10.0, quiet=False):
-    """--log: reset the tank and print what it says on its way up.
-
-    A tank with a dark screen has already told you why - over the USB serial
-    port, in the first two seconds after a reset - and nobody who was given
-    one of these has a toolchain to go and read it with. esptool brings
-    pyserial along, so this file can.
-
-    Toggling DTR/RTS the way the ROM expects is what makes the chip reset,
-    so the log starts at the beginning instead of halfway through."""
-    import serial
+def _ports():
     from serial.tools import list_ports
+    return [d.device for d in list_ports.comports()]
+
+
+def _wait_for_port(before, timeout=8.0):
+    """After a reset the tank's USB port GOES AWAY and comes back - possibly
+    under a different name. Holding the old handle across that reads nothing
+    forever, which is exactly what the first version of this did. So: watch
+    for a port to appear, preferring one that was not there before."""
+    end = time.time() + timeout
+    while time.time() < end:
+        now = _ports()
+        fresh = [p for p in now if p not in before]
+        if fresh:
+            return fresh[-1]
+        time.sleep(0.25)
+    now = _ports()
+    return now[-1] if now else None
+
+
+def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
+    """Print what the tank says on its way up.
+
+    The console is the native USB-Serial-JTAG - the same cable that flashes
+    it - so this is the one wire that carries both. (It only carries the log
+    at all since the console was pointed at it: the IDF default is UART0 on
+    two unconnected pins, and for a long time everything this firmware
+    printed went into the air.)"""
+    import serial
+    before = _ports()
     port = port_arg
+    if reset and not port_arg:
+        # give it a reset of its own, then wait for the port to come back
+        cands = before
+        if cands:
+            try:
+                s0 = serial.Serial(cands[-1], 115200, timeout=0.2)
+                s0.setDTR(False); s0.setRTS(True)
+                time.sleep(0.12)
+                s0.setRTS(False)
+                s0.close()
+            except Exception:
+                pass
+            time.sleep(0.4)
     if not port:
-        cands = [d.device for d in list_ports.comports()]
-        if not cands:
-            if not quiet:
-                print("   No serial ports at all. Is it plugged in, with a DATA cable?")
-            return 1
-        port = cands[-1]                 # the newest one is nearly always the tank
-        if len(cands) > 1 and not quiet:
-            print(f"   {len(cands)} ports here; reading {port}. Pass another if this is wrong:")
-            print(f"     {', '.join(cands)}")
-    if not quiet:
-        print(f"   Reading {port}. {int(seconds)} seconds. Copy ALL of this and send it over.")
-    print("-" * 62)
-    try:
-        ser = serial.Serial(port, 115200, timeout=0.2)
-    except Exception as e:
-        print(f"   Could not open {port}: {e}")
+        port = _wait_for_port(before if reset else [], timeout=8.0)
+    if not port:
+        if not quiet:
+            print("   No serial port came back. Is it plugged in, with a DATA cable?")
         return 1
-    try:
-        ser.setDTR(False); ser.setRTS(True)          # EN low: hold it in reset
-        time.sleep(0.12)
-        ser.setRTS(False)                            # and let go: it boots from here
-        ser.reset_input_buffer()
-        end = time.time() + seconds
-        while time.time() < end:
-            chunk = ser.read(4096)
-            if chunk:
-                sys.stdout.write(chunk.decode("utf-8", "replace"))
-                sys.stdout.flush()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        ser.close()
+    if not quiet:
+        print(f"   Reading {port} for {int(seconds)} seconds. Copy ALL of this.")
+    print("-" * 62)
+    got = 0
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            ser = serial.Serial(port, 115200, timeout=0.2)
+        except Exception:
+            time.sleep(0.3)                      # still re-enumerating; try again
+            fresh = _wait_for_port(before, timeout=1.5)
+            if fresh:
+                port = fresh
+            continue
+        try:
+            while time.time() < deadline:
+                chunk = ser.read(4096)
+                if chunk:
+                    got += len(chunk)
+                    sys.stdout.write(chunk.decode("utf-8", "replace"))
+                    sys.stdout.flush()
+        except Exception:
+            pass                                  # unplugged mid-read: go round again
+        finally:
+            try: ser.close()
+            except Exception: pass
     print()
     print("-" * 62)
-    if not quiet:
-        print("   That is the boot log. If it ends in a panic or keeps repeating,")
-        print("   the last few lines before it repeats are the ones that matter.")
+    if got == 0:
+        print("   Nothing came out of it at all. That is not proof of a dead board -")
+        print("   a board that would not talk cannot be flashed, and this one just was.")
+        print(f"   Ports seen: {', '.join(_ports()) or 'none'}")
+    elif not quiet:
+        print("   If that ends in a panic or keeps repeating, the lines just before")
+        print("   it repeats are the ones that matter.")
     return 0
 
 
@@ -296,7 +331,7 @@ def main():
     print("   Here is what it says as it starts. If anything is wrong, it is")
     print("   in here - copy this window and send it.")
     print()
-    read_log(argv_rest[0] if argv_rest else None, seconds=8.0, quiet=True)
+    read_log(argv_rest[0] if argv_rest else None, seconds=8.0, quiet=True, reset=False)
     pause()
     return 0
 

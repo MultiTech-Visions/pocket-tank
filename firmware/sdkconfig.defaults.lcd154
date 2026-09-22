@@ -17,3 +17,19 @@ CONFIG_POCKET_TANK_DISPLAY_SH8601=n
 # touch is a CST816 on this board; the same port drives it
 CONFIG_POCKET_TANK_TOUCH_FT3168=y
 CONFIG_POCKET_TANK_AUDIO_ES8311=y
+
+# THE LOG COMES OUT OF THE USB PORT. Without this, ESP-IDF sends the console
+# to UART0 on GPIO 43/44 - two pins with nothing soldered to them on this
+# board - so every ESP_LOG line this firmware printed went into the air, and
+# a boot log read over USB was always going to be empty. It is the native
+# USB-Serial-JTAG that the flasher already talks to, so the same cable that
+# writes the app now carries what it says.
+#
+# Only this board's build, deliberately: the two gift devices are working and
+# nothing about them is being changed to chase this.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# and say more while we are trying to find out why a screen is dark
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
