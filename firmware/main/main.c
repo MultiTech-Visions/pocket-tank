@@ -334,8 +334,8 @@ static void pwr_key_poll(int64_t now) {
 #define BTN_DEBOUNCE_US 50000
 static void sleep_button_poll(int64_t now) {
     if (gpio_get_level(BTN_SLEEP)) {
-        if (!s_pmic && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
-            enter_sleep();
+        if (!s_pmic && !BOARD_HAS_PWR_LATCH && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
+            enter_sleep();   /* ...but never on a board with its own PWR button: see BOARD_HAS_PWR_LATCH */
         s_btn_armed = true; s_btn_low_since = 0; s_btn_used = false;
     } else if (s_btn_armed) {
         if (!s_btn_low_since) s_btn_low_since = now;
@@ -579,7 +579,8 @@ static void tank_task(void *arg) {
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
                 render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume(),
-                                s_bat_ok ? (int)((s_dev_bat >= 0 ? s_dev_bat : s_bat_frac) * 100 + 0.5f) : -1);
+                                s_bat_ok ? (int)((s_dev_bat >= 0 ? s_dev_bat : s_bat_frac) * 100 + 0.5f) : -1,
+                                BOARD_HAS_FUEL_GAUGE ? 0 : battery_port_vbat_mv());
                 sel = -1;
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
                 render_shop(&tank, fb[cur], TANK_W);

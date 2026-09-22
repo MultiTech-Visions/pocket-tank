@@ -143,7 +143,8 @@ short list rather than an evening:
 | panel | SH8601/CO5300 QSPI, 368x448, frame rotated 90 | ST7789 SPI, 240x240, frame **squashed** to 240x197 and letterboxed |
 | brightness | a panel command | LEDC PWM on GPIO46 |
 | power | AXP2101 PMIC: PWR key, real soft power-off, fuel gauge | **none.** ETA6096 charge management only |
-| battery | the PMIC's own state of charge | GPIO1, behind a 200k/100k divider: ADC1 ch0, x3, through a discharge curve. **Charging is not sensed** - no VBUS or /CHG line reaches the chip |
+| battery | the PMIC's own state of charge | GPIO1, behind a 200k/100k divider: ADC1 ch0, x3, through a discharge curve. **Charging is not sensed** - no VBUS or /CHG line reaches the chip. Settings shows the raw millivolts beside the percentage here, because the percentage is only a curve fitted to that number |
+| buttons | one PWR key, on the PMIC | **three: PWR, BOOT, PLUS.** PWR is a hardware latch on the charge chip, wired to no GPIO - a short press is ON, a long hold is the force-off. The board can be genuinely off, which the AMOLED never is |
 | sleep | grace, then a PMIC soft cut | grace, then **the drowse carries on**; it must never deep sleep (see below) |
 | orientation | the IMU alone | the IMU XOR `BOARD_SCREEN_FLIPPED` - it hangs from its USB socket, bottom edge |
 | touch reset | a bit on the TCA9554 expander | a plain GPIO (47) |
@@ -157,11 +158,13 @@ Two traps, both of which cost a day:
   high at reset suppresses the ROM messages. That is a board that boots dark
   and says nothing on serial, intermittently, looking exactly like dead
   hardware. It is driven low and released on this board instead.
-- **No PMIC makes BOOT the sleep key** (`!s_pmic` in `sleep_button_poll`), and
+- **No PMIC used to make BOOT the sleep key** (`!s_pmic` in `sleep_button_poll`), and
   the end of the drowse used to be a plain `esp_deep_sleep_start()`. One stray
   press and the panel, the backlight and USB serial all went away together,
   with the ext0 wake fighting that held pad. A board with no PMIC no longer
-  deep sleeps on the idle path at all.
+  deep sleeps on the idle path at all, and a board with its own PWR button
+  (`BOARD_HAS_PWR_LATCH`) does not use BOOT as a sleep key at all - BOOT is
+  already the download-mode key and the keeper already has a power button.
 
 ## Fork discipline, because it will bite you
 

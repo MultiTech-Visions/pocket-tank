@@ -2786,7 +2786,7 @@ static void set_chevron(ctx_t *c, int cx, int y, bool up, uint32_t rgb) {   /* t
         rect_fill(c, cx + i * 3, yy, 3, 3, rgb);
     }
 }
-void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume, int bat_pct) {
+void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume, int bat_pct, int bat_mv) {
     ctx_t c = ctx_full(fb, stride, 1.0f);
     rect_fill(&c, 0, 0, TANK_W, TANK_H, MSP_INK);
     draw_text(&c, (TANK_W - text_w("SETTINGS", 3)) / 2, SET_TITLE_Y, 3, 0xffffff, "SETTINGS");
@@ -2802,6 +2802,10 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
         if (fillw > 0) rect_fill(&c, BX + 2, BY + 2, fillw, BH - 4,
                                  pc <= 15 ? 0xf25b65 : pc <= 35 ? 0xf2b134 : 0x6fe3a1);
         draw_text(&c, BX + BW + 8, BY + 1, 2, MSP_DIM, bt);
+        if (bat_mv > 0) {                       /* no fuel gauge: show what the percentage was fitted from */
+            char mv[16]; snprintf(mv, sizeof mv, "%d MV", bat_mv > 9999 ? 9999 : bat_mv);
+            draw_text(&c, BX + BW + 8 + text_w(bt, 2) + 8, BY + 1, 2, MSP_DIM, mv);
+        }
     }
     int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
