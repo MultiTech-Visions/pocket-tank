@@ -10,7 +10,6 @@
 #
 #   Windows         PocketTankUpgrade.exe
 #   Mac, Apple silicon (M1 and later)  PocketTankUpgrade-macOS-AppleSilicon.zip
-#   Mac, Intel                         PocketTankUpgrade-macOS-Intel.zip
 #
 # The Mac builds go out zipped because a GitHub release asset does not carry
 # the executable bit and Finder will not run a file that has lost it; macOS
@@ -83,11 +82,8 @@ jobs:
             label: macOS-AppleSilicon
             sep: ":"
             asset: PocketTankUpgrade-macOS-AppleSilicon.zip
-          - runner: macos-13             # Intel
-            label: macOS-Intel
-            sep: ":"
-            asset: PocketTankUpgrade-macOS-Intel.zip
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25      # a leg that cannot get a runner must not hold the release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -178,10 +174,12 @@ jobs:
           | --- | --- |
           | Windows | `PocketTankUpgrade.exe` |
           | Mac with Apple silicon (M1, M2, M3, M4) | `PocketTankUpgrade-macOS-AppleSilicon.zip` |
-          | Mac with an Intel chip | `PocketTankUpgrade-macOS-Intel.zip` |
 
-          Not sure which Mac? Apple menu -> About This Mac. "Chip" means Apple
-          silicon, "Processor" means Intel.
+          Intel Macs are not built: GitHub's macos-13 runners never get
+          assigned for this repository and the job sat waiting until the next
+          merge cancelled the whole run - which is why no new upgrader was
+          published between 21 and 22 September. Apple silicon and Windows
+          only.
 
           It replaces the app only. Your fish, their names, your sand dollars and
           everything the shop sold are kept, and the model partition is left alone.
