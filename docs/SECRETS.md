@@ -112,7 +112,10 @@ The tank is more alive than it looks. Almost everything in it answers.
 - **Curiosity.** Put something new in and the fish come and look it over.
 - **The snail** grazes the glass clean, even while the tank sleeps.
 - **The screen flips** when you turn the device over — the IMU drives it, and
-  the touch map flips with it. No IMU, always upright.
+  the touch map flips with it. No IMU, always upright. On the 1.54in board
+  that flip is XORed with `BOARD_SCREEN_FLIPPED` (`firmware/main/board_pins.h`),
+  because that one hangs from its USB socket on the bottom edge: upside down
+  is its right way up.
 
 ## In the reef builder
 

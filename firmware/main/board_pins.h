@@ -50,6 +50,16 @@
 #define PIN_BTN_BOOT      0
 #define PIN_BTN_A         5
 #define PIN_BTN_B         4
+/* This one hangs from its USB socket, which is on the bottom edge, so the
+   panel is mounted the other way up from the way it is drawn. The IMU flip
+   still works: it is XORed with this, so USB-down reads right side up and
+   turning the device over flips it as ever. */
+#define BOARD_SCREEN_FLIPPED 1
+/* GPIO46 is a STRAPPING PIN as well as this board's backlight. Holding a
+   strapping pad across a reset is how you get a board that comes up dark and
+   silent (ROM messages are suppressed when 46 is high at reset) - see
+   deep_sleep_now(). */
+#define BOARD_BL_IS_STRAP 1
 
 #else
 /* ---- Waveshare ESP32-S3-Touch-AMOLED-1.8 (the default) ---- */
@@ -74,6 +84,14 @@
 #define PIN_I2S_WS        45
 #define PIN_I2S_DOUT      8        /* ESP -> codec DSDIN */
 #define PIN_AMP_EN        46       /* NS4150B CTRL, 10k pulldown on the board */
+#endif
+
+/* defaults for the board that does not set them */
+#ifndef BOARD_SCREEN_FLIPPED
+#define BOARD_SCREEN_FLIPPED 0
+#endif
+#ifndef BOARD_BL_IS_STRAP
+#define BOARD_BL_IS_STRAP 0
 #endif
 
 #endif
