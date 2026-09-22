@@ -13,7 +13,6 @@
 #
 #   Windows                            PocketTankUpgrade-LCD154.exe
 #   Mac, Apple silicon (M1 and later)  PocketTankUpgrade-LCD154-macOS-AppleSilicon.zip
-#   Mac, Intel                         PocketTankUpgrade-LCD154-macOS-Intel.zip
 #
 # Because only one board's payload is bundled, the flasher does not ask which
 # tank it is - there is nothing to ask.
@@ -78,11 +77,8 @@ jobs:
             label: macOS-AppleSilicon
             sep: ":"
             asset: PocketTankUpgrade-LCD154-macOS-AppleSilicon.zip
-          - runner: macos-13             # Intel
-            label: macOS-Intel
-            sep: ":"
-            asset: PocketTankUpgrade-LCD154-macOS-Intel.zip
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25      # a leg that cannot get a runner must not hold the release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -176,7 +172,6 @@ jobs:
           | --- | --- |
           | Windows | `PocketTankUpgrade-LCD154.exe` |
           | Mac with Apple silicon (M1, M2, M3, M4) | `PocketTankUpgrade-LCD154-macOS-AppleSilicon.zip` |
-          | Mac with an Intel chip | `PocketTankUpgrade-LCD154-macOS-Intel.zip` |
 
           The tank is drawn at 448x368 as always and squashed to 240x197 on the
           way to this panel, centred with a black band above and below, so every
