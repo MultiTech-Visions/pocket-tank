@@ -35,3 +35,22 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED=y
 # and say more while we are trying to find out why a screen is dark
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
+
+# CONSERVATIVE BOOT POWER (2026-09-22). This board's rail is shared with a
+# battery header, and a tired cell there holds a voltage while being unable
+# to deliver current - it sags the supply at the one moment the boot draws
+# most, which is octal PSRAM and QIO flash coming up at 80 MHz. The failure
+# is a board that flashes perfectly (download mode runs slow with PSRAM off)
+# and then boots dark and silent, intermittently, with nothing on serial
+# because it never reaches the app at all.
+#
+# 40 MHz halves that inrush and costs a few frames a second on a panel that
+# is 240x240. On this board that is a trade worth making; the AMOLED build,
+# which has a PMIC doing the power path properly, keeps 80 MHz.
+CONFIG_SPIRAM_SPEED_80M=n
+CONFIG_SPIRAM_SPEED_40M=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=n
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+# and if the rail does sag, SAY so at the next boot instead of dying mutely
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y

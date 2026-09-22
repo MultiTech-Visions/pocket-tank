@@ -272,19 +272,39 @@ def main():
     print(rule)
     print("   POCKET TANK - upgrade the app")
     print(rule)
+    # THE RESCUE ENTRY. The upgrade deliberately leaves nvs alone, because
+    # that is where somebody's fish live - which means a board whose nvs went
+    # bad cannot be fixed by flashing the app again, no matter how many times.
+    # That is a real state (a save caught half-written when the rail collapses
+    # on an unplug) and from the outside it is indistinguishable from dead
+    # hardware: dark screen, nothing on serial, and a flash that "works" and
+    # changes nothing. So there is a way to erase the whole chip and start
+    # clean, on the menu rather than behind a flag, and honest about the cost.
+    rescue = [dict(b, id=b["id"] + "-rescue", rescue=True,
+                   label=b["label"] + "  - ERASE EVERYTHING FIRST (rescue; the saved tank is lost)")
+              for b in bs if not spec_of(b).get("wipes")]
     if picked is None:
-        if len(bs) == 1:
+        if len(bs) == 1 and not rescue:
             picked = bs[0]           # a one-board bundle: nothing to ask
         else:
-            picked = choose(bs)
+            picked = choose(bs + rescue)
             print()
     spec = spec_of(picked)
+    if picked.get("rescue"):
+        spec = dict(spec, wipes=True, erase_first=True)
     print(f"   {picked['label']}")
     if spec.get("wipes"):
         print()
-        print("   THIS ONE REPLACES EVERYTHING on the board, including the saved")
-        print("   tank. It is here to answer one question - does the screen work -")
-        print("   and Pocket Tank can be written back over it afterwards.")
+        if picked.get("rescue"):
+            print("   THIS ERASES THE WHOLE CHIP before writing - every fish, every")
+            print("   name, every sand dollar on THIS device is gone, and it starts")
+            print("   as a new tank. It is for a board that will not run what it was")
+            print("   just given: flashing the app again cannot fix a bad save,")
+            print("   because the app flash deliberately leaves the save alone.")
+        else:
+            print("   THIS ONE REPLACES EVERYTHING on the board, including the saved")
+            print("   tank. It is here to answer one question - does the screen work -")
+            print("   and Pocket Tank can be written back over it afterwards.")
     print(f"   firmware {spec['version']}, built {spec['built']}")
     print()
     if not spec.get("wipes"):
@@ -299,6 +319,14 @@ def main():
     argv = ["--chip", spec["chip"], "--baud", "460800"]
     if argv_rest:                              # an explicit port, e.g. PocketTankUpgrade.exe COM7
         argv += ["--port", argv_rest[0]]
+    if spec.get("erase_first"):
+        # a separate esptool run: erase_flash takes no image, and doing it
+        # first means the write below starts from a chip with no nvs on it
+        import esptool as _e
+        print("   Erasing the whole chip first. This takes about half a minute.")
+        print()
+        _e.main(argv + ["erase_flash"])
+        print()
     argv += ["write_flash"]
     for part in spec["parts"]:
         argv += [part["offset"], bundled(part["file"])]
