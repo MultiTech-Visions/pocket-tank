@@ -56,7 +56,13 @@ jobs:
       - name: Collect the images, and prove they cannot reach the save
         run: |
           python3 tools/upgrade/collect.py --build-dir firmware/build-lcd154 --out payload \
-                  --board lcd154 --label "1.54 inch square LCD"
+                  --board lcd154 --label "Pocket Tank"
+          # and Waveshare's own factory firmware, carried so a dark screen can
+          # be answered without a toolchain: if THIS lights the panel the board
+          # is fine and the fault is ours. Apache 2.0, see vendor/NOTICE.
+          python3 tools/upgrade/collect.py --out payload \
+                  --image tools/upgrade/vendor/waveshare_lcd154_factory.bin --offset 0x0 \
+                  --board factory --label "Waveshare's own test firmware (proves the screen works)"
       - uses: actions/upload-artifact@v4
         with:
           name: upgrader-lcd154-payload
@@ -104,6 +110,7 @@ jobs:
             --name PocketTankUpgradeLCD154 \
             --add-data "payload/boards.json${S}." \
             --add-data "payload/lcd154${S}lcd154" \
+            --add-data "payload/factory${S}factory" \
             tools/upgrade/pocket_tank_upgrade.py
           ls -la dist
       - name: Check the bundle is complete
@@ -113,11 +120,11 @@ jobs:
           [ -f "$BIN.exe" ] && BIN="$BIN.exe"
           "./$BIN" --selfcheck
           set +e
-          out=$("./$BIN" NOT_A_PORT 2>&1)
+          out=$("./$BIN" --board lcd154 NOT_A_PORT 2>&1)
           set -e
           echo "$out"
           echo "$out" | grep -q "POCKET TANK" || { echo "it did not start"; exit 1; }
-          echo "$out" | grep -q "1.54" || { echo "it did not name the board"; exit 1; }
+          echo "$out" | grep -qi "which tank\|Pocket Tank" || { echo "it did not offer the payloads"; exit 1; }
           echo "$out" | grep -qi "incomplete" && { echo "the bundle is missing something"; exit 1; }
           echo "the bundle is complete and the exe starts"
       - name: Make the double-clickable file
@@ -191,6 +198,11 @@ jobs:
 
           A board that has never run Pocket Tank also needs the 8 MB model
           partition written once, which this does not carry.
+
+          **If the screen stays dark**, run it again and pick option 2:
+          Waveshare's own factory firmware. If that lights the panel, the board
+          is fine and the fault is ours; if it does not, it is the board. It
+          replaces everything on the device (Pocket Tank writes back over it).
 
           **If the screen stays dark**, run the same file again with `--log`:
 

@@ -18,18 +18,20 @@ CONFIG_POCKET_TANK_DISPLAY_SH8601=n
 CONFIG_POCKET_TANK_TOUCH_FT3168=y
 CONFIG_POCKET_TANK_AUDIO_ES8311=y
 
-# THE LOG COMES OUT OF THE USB PORT. Without this, ESP-IDF sends the console
-# to UART0 on GPIO 43/44 - two pins with nothing soldered to them on this
-# board - so every ESP_LOG line this firmware printed went into the air, and
-# a boot log read over USB was always going to be empty. It is the native
-# USB-Serial-JTAG that the flasher already talks to, so the same cable that
-# writes the app now carries what it says.
+# THE LOG COMES OUT OF THE USB PORT - the way Waveshare's own examples for
+# this exact board do it. I had this half right and half wrong: the IDF
+# default primary console IS UART0 on GPIO 43/44, but the SECONDARY console
+# defaults to the native USB-Serial-JTAG, so the log was reaching the USB
+# port after all. My first attempt then set the secondary to NONE, which was
+# a step backwards.
 #
-# Only this board's build, deliberately: the two gift devices are working and
-# nothing about them is being changed to chase this.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_ESP_CONSOLE_UART_DEFAULT=n
-CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# Waveshare's 01_factory and 05_lvgl sdkconfigs both carry exactly this pair,
+# and those firmwares work on this board, so it is copied rather than
+# reasoned about: primary UART0, secondary USB. The log goes out both.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED=y
 # and say more while we are trying to find out why a screen is dark
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
