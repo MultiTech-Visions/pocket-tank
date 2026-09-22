@@ -700,11 +700,18 @@ cd firmware && idf.py -B build-lcd154 \
 Pins are from Waveshare's own BSP for the board, not guessed
 ([firmware/main/board_pins.h](firmware/main/board_pins.h)); the geometry is
 in [firmware/main/display_squash.h](firmware/main/display_squash.h), apart
-from the driver so it can be checked on a host with no ESP-IDF. The upgrader
-carries both builds and **asks which tank is plugged in** — it cannot tell,
-because both boards are an ESP32-S3 with 16 MB of flash and answer the
-bootloader identically. `--board amoled18` or `--board lcd154` skips the
-question.
+from the driver so it can be checked on a host with no ESP-IDF.
+
+**Each board has its own flasher, built by its own workflow, published to its
+own release.** `upgrader.yml` → the `upgrader` release, for the 1.8-inch
+tanks; `upgrader-lcd154.yml` → the `upgrader-lcd154` release, for this one.
+They share the script and the collect-and-prove step but nothing else, so
+work on one board cannot change the download somebody is using for the
+other. Neither flasher tries to work out which board it is talking to: both
+are an ESP32-S3 with 16 MB of flash that answer the bootloader identically,
+and reading back what is on there only says what it was flashed with last
+time. The download says which board it is for, and so does the flasher
+before it writes anything.
 
 The model lives in its own 8 MB raw partition and only needs flashing once.
 [docs/bringup.md](docs/bringup.md) is the step-by-step checklist with pass

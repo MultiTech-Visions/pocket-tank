@@ -1,14 +1,10 @@
 # The double-click upgraders, built on every push to main that changes the
 # firmware or the shared tank code.
 #
-# Job 1 builds the firmware - ONCE PER BOARD, the 1.8in AMOLED and the 1.54in
-# LCD - with the same ESP-IDF the project uses, and runs
-# tools/upgrade/collect.py for each, which copies the three images an upgrade
-# writes and REFUSES to continue if any of them could reach the nvs (saved
-# tank) or model partitions. Both payloads ride in every bundle and the
-# upgrader asks which tank is plugged in: it cannot tell by looking, since
-# both boards are an ESP32-S3 with 16 MB of flash that answer the bootloader
-# identically. Job 2 is a matrix: the same payload, the same
+# Job 1 builds the firmware with the same ESP-IDF the project uses and runs
+# tools/upgrade/collect.py, which copies the three images an upgrade writes
+# and REFUSES to continue if any of them could reach the nvs (saved tank) or
+# model partitions. Job 2 is a matrix: the same payload, the same
 # tools/upgrade/pocket_tank_upgrade.py and esptool bundled by PyInstaller into
 # one file per platform -
 #
@@ -53,29 +49,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # git describe wants the tags
-      # Two boards, two builds, one upgrader. The 1.54in LCD build is the
-      # same app with the frame squashed on the way to its panel; both
-      # payloads ride in every bundle and the upgrader asks which tank it is.
-      - name: Build the firmware, AMOLED 1.8in (ESP-IDF v5.4.1, esp32s3)
+      - name: Build the firmware (ESP-IDF v5.4.1, esp32s3)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.1
           target: esp32s3
           path: firmware
-          command: idf.py -B build-amoled18 build
-      - name: Build the firmware, LCD 1.54in
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-lcd154 -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.lcd154" build
       - name: Collect the images, and prove they cannot reach the save
         run: |
-          python3 tools/upgrade/collect.py --build-dir firmware/build-amoled18 --out payload \
-                  --board amoled18 --label "1.8 inch AMOLED (the round-cornered one)"
-          python3 tools/upgrade/collect.py --build-dir firmware/build-lcd154 --out payload \
-                  --board lcd154 --label "1.54 inch square LCD" 
+          python3 tools/upgrade/collect.py --build-dir firmware/build --out payload \
+                  --board amoled18 --label "1.8 inch AMOLED"
+          # (collect.py puts each board's images in their own folder now; the
+          # 1.54in LCD board has its own workflow, upgrader-lcd154.yml, and
+          # its own release, so nothing about THIS download can change when
+          # that one is touched)
       - uses: actions/upload-artifact@v4
         with:
           name: upgrader-payload
@@ -126,7 +113,6 @@ jobs:
             --name PocketTankUpgrade \
             --add-data "payload/boards.json${S}." \
             --add-data "payload/amoled18${S}amoled18" \
-            --add-data "payload/lcd154${S}lcd154" \
             tools/upgrade/pocket_tank_upgrade.py
           ls -la dist
       - name: Check the bundle is complete
@@ -141,9 +127,7 @@ jobs:
           [ -f "$BIN.exe" ] && BIN="$BIN.exe"
           "./$BIN" --selfcheck
           set +e
-          # --board skips the "which tank is this?" question: there is no
-          # stdin in CI, and being asked is the right behaviour for a person
-          out=$("./$BIN" --board amoled18 NOT_A_PORT 2>&1)
+          out=$("./$BIN" NOT_A_PORT 2>&1)
           set -e
           echo "$out"
           echo "$out" | grep -q "POCKET TANK" || { echo "it did not start"; exit 1; }
