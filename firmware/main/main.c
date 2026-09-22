@@ -282,6 +282,11 @@ static void deep_sleep_now(int wake_after_s) {
        the level the ROM wants. */
     gpio_set_level(PIN_LCD_BL, 0);
     gpio_hold_dis(PIN_LCD_BL);
+    /* the global deep-sleep hold is all-or-nothing, so this board gives up
+       the pad isolation rather than risk latching a strapping pin. Only the
+       director's timed `deepsleep N` reaches here on this board now - the
+       idle path above never deep sleeps without a PMIC - so the few mA it
+       costs are a bench cost, not a night on the shelf. */
 #else
     gpio_deep_sleep_hold_en();
 #endif

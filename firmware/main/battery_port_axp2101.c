@@ -3,6 +3,7 @@
  * bits[7:5] == 1 = charging, 0xA4 = state of charge in percent. Reads are
  * cached for 5 s; any I2C error or absent battery hides the meter. */
 #include "battery_port.h"
+#include "board_pins.h"
 #include "driver/i2c_master.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -10,6 +11,11 @@
 #include "esp_log.h"
 #include <strings.h>
 #include <string.h>
+#if PIN_BAT_ADC >= 0
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#endif
 
 #define AXP2101_ADDR      0x34
 #define REG_STATUS1       0x00
@@ -18,6 +24,75 @@
 #define REG_BAT_PERCENT   0xA4
 
 static i2c_master_dev_handle_t s_dev;
+
+/* ---- the OTHER board's meter ----------------------------------------
+ * The 1.54in board has no PMIC and no fuel gauge, so none of the register
+ * reads below answer. It does have an ETA6096 charge manager and the cell on
+ * GPIO1 behind a 200k/100k divider, which is enough for a level: read the
+ * ADC, multiply by the divider, and put the millivolts through a discharge
+ * curve. Everything public in this file goes through adc_mv()/curve() when
+ * the PMIC is absent, so the rest of the firmware never learns there are two
+ * kinds of battery.
+ *
+ * "Charging" is NOT knowable here - no VBUS sense and no /CHG pin reach the
+ * chip - so it is reported false rather than guessed at. On USB the voltage
+ * simply reads high. */
+#if PIN_BAT_ADC >= 0
+static adc_oneshot_unit_handle_t s_adc;
+static adc_cali_handle_t s_cali;
+
+static void adc_init(void) {
+    adc_oneshot_unit_init_cfg_t u = { .unit_id = ADC_UNIT_1 };
+    if (adc_oneshot_new_unit(&u, &s_adc) != ESP_OK) { s_adc = NULL; return; }
+    adc_oneshot_chan_cfg_t c = { .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
+    /* GPIO1 is ADC1 channel 0 on the S3, and the channels run with the pin */
+    if (adc_oneshot_config_channel(s_adc, (adc_channel_t)(PIN_BAT_ADC - 1), &c) != ESP_OK) {
+        adc_oneshot_del_unit(s_adc); s_adc = NULL; return;
+    }
+    adc_cali_curve_fitting_config_t cal = { .unit_id = ADC_UNIT_1, .chan = (adc_channel_t)(PIN_BAT_ADC - 1),
+                                            .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
+    if (adc_cali_create_scheme_curve_fitting(&cal, &s_cali) != ESP_OK) s_cali = NULL;
+    ESP_LOGI("battery", "no PMIC: battery read on GPIO%d (ADC1 ch%d, /%d divider)%s",
+             PIN_BAT_ADC, PIN_BAT_ADC - 1, BAT_ADC_DIV, s_cali ? ", calibrated" : ", uncalibrated");
+}
+
+/* eight reads: the divider is high-impedance and the panel's backlight PWM
+   is on the same board, so a single sample wanders by tens of millivolts */
+static int adc_mv(void) {
+    if (!s_adc) return 0;
+    int sum = 0, n = 0;
+    for (int i = 0; i < 8; i++) {
+        int raw, mv;
+        if (adc_oneshot_read(s_adc, (adc_channel_t)(PIN_BAT_ADC - 1), &raw) != ESP_OK) continue;
+        if (s_cali) { if (adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) continue; }
+        else mv = raw * 3300 / 4095;                 /* uncalibrated: the nominal full scale */
+        sum += mv; n++;
+    }
+    return n ? sum * BAT_ADC_DIV / n : 0;
+}
+
+/* a single 3.7 V cell under the tank's own load, in 5 % steps off the flat
+   part of the curve. Below 3.30 V the ESP32-S3 is close to browning out
+   anyway, so that is the floor rather than the cell's datasheet 3.0 V. */
+static float curve(int mv) {
+    static const short pt[][2] = { {4180,100},{4100,95},{4020,90},{3950,80},{3890,70},{3840,60},
+                                   {3790,50},{3750,40},{3710,30},{3660,20},{3600,12},{3520,6},{3400,2},{3300,0} };
+    int n = (int)(sizeof pt / sizeof pt[0]);
+    if (mv >= pt[0][0]) return 1.0f;
+    for (int i = 1; i < n; i++) {
+        if (mv >= pt[i][0]) {
+            float t = (float)(mv - pt[i][0]) / (pt[i - 1][0] - pt[i][0]);
+            return (pt[i][1] + t * (pt[i - 1][1] - pt[i][1])) / 100.0f;
+        }
+    }
+    return 0.0f;
+}
+#else
+static void adc_init(void) {}
+static int  adc_mv(void) { return 0; }
+static float curve(int mv) { (void)mv; return 0.0f; }
+#endif
+
 static int64_t s_last_us = -1;
 static float s_frac; static bool s_charging, s_valid;
 static bool rd(uint8_t reg, uint8_t *val);
@@ -25,7 +100,8 @@ static bool rd(uint8_t reg, uint8_t *val);
 bool battery_port_init(i2c_master_bus_handle_t bus) {
     if (!bus || i2c_master_probe(bus, AXP2101_ADDR, 50) != ESP_OK) {
         ESP_LOGW("battery", "no AXP2101");
-        return false;
+        adc_init();      /* the meter may still be readable; the PMIC is not */
+        return false;    /* the caller's s_pmic: no PWR key, no soft power-off */
     }
     i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7,
                                 .device_address = AXP2101_ADDR, .scl_speed_hz = 400000 };
@@ -178,12 +254,18 @@ void battery_port_trim_rails(void) {
 
 int battery_port_vbat_mv(void) {
     uint8_t h, l;
-    if (!s_dev || !rd(0x34, &h) || !rd(0x35, &l)) return 0;
+    if (!s_dev) return adc_mv();
+    if (!rd(0x34, &h) || !rd(0x35, &l)) return 0;
     return ((h & 0x1F) << 8) | l;                     /* 13-bit, 1 mV/LSB (XPowersLib readRegisterH5L8) */
 }
 
 void battery_port_dump(void) {
-    if (!s_dev) { ESP_LOGW("battery", "no AXP2101"); return; }
+    if (!s_dev) {
+        int mv = adc_mv();
+        ESP_LOGI("battery", "no PMIC; GPIO%d divider: VBAT %d mV -> %d%% (charging state is not sensed on this board)",
+                 PIN_BAT_ADC, mv, (int)(curve(mv) * 100 + 0.5f));
+        return;
+    }
     uint8_t st1 = 0, st2 = 0, cfg = 0, dc_en = 0, ldo0 = 0, ldo1 = 0, chg_en = 0, icc = 0, cv = 0, pct = 0;
     uint8_t dcv[5] = {0}, ldov[9] = {0};
     bool ok = rd(REG_STATUS1, &st1) && rd(REG_STATUS2, &st2) && rd(REG_COMMON_CFG, &cfg) &&
@@ -212,8 +294,21 @@ void battery_port_dump(void) {
 }
 
 bool battery_port_read(float *frac, bool *charging) {
-    if (!s_dev) return false;
     int64_t now = esp_timer_get_time();
+    if (!s_dev) {                                   /* no PMIC: the divider, same 5 s cache */
+        if (s_last_us < 0 || now - s_last_us > 5 * 1000000) {
+            s_last_us = now;
+            int mv = adc_mv();
+            /* no cell on the header reads as the rail through the divider,
+               which is nowhere near a plausible battery: hide the meter
+               rather than draw a confident wrong number */
+            s_valid = mv >= 2800 && mv <= 4400;
+            if (s_valid) { s_frac = curve(mv); s_charging = false; }
+        }
+        if (!s_valid) return false;
+        *frac = s_frac; *charging = s_charging;
+        return true;
+    }
     if (s_last_us < 0 || now - s_last_us > 5 * 1000000) {
         s_last_us = now;
         uint8_t st1, st2, pct;

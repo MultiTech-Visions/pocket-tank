@@ -55,6 +55,14 @@
    still works: it is XORed with this, so USB-down reads right side up and
    turning the device over flips it as ever. */
 #define BOARD_SCREEN_FLIPPED 1
+/* Battery. There is no PMIC and no fuel gauge on this board, but there IS
+   charge management (an ETA6096 off the MX1.25 header) and the cell is
+   brought to GPIO1 through a 200k/100k divider - so the voltage is
+   measurable, a third of it at a time, on ADC1 channel 0. Waveshare's own
+   examples read it as 3.3/4096 * 3 * raw. No VBUS sense reaches the chip,
+   so "charging" is not knowable here; the meter just shows a level. */
+#define PIN_BAT_ADC       1
+#define BAT_ADC_DIV       3
 /* GPIO46 is a STRAPPING PIN as well as this board's backlight. Holding a
    strapping pad across a reset is how you get a board that comes up dark and
    silent (ROM messages are suppressed when 46 is high at reset) - see
@@ -89,6 +97,10 @@
 /* defaults for the board that does not set them */
 #ifndef BOARD_SCREEN_FLIPPED
 #define BOARD_SCREEN_FLIPPED 0
+#endif
+#ifndef PIN_BAT_ADC
+#define PIN_BAT_ADC (-1)          /* the AMOLED board has a real fuel gauge */
+#define BAT_ADC_DIV 1
 #endif
 #ifndef BOARD_BL_IS_STRAP
 #define BOARD_BL_IS_STRAP 0
