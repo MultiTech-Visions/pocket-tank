@@ -133,6 +133,8 @@ typedef struct {
      * the default spot, which is what an older save gives. */
     float    decor_x_extra[SD_ITEM_N - SD_DECOR_SAVE_N];
     uint8_t  decor_z1_extra[SD_ITEM_N - SD_DECOR_SAVE_N];
+    uint8_t  club_off;                   /* the muffled club, heard while the rig parties
+                                            (2026-09-22). 0 = on, so an older save gets it */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -246,7 +248,7 @@ bool progression_save_tail_is_last(void) {
        8-byte aligned (it carries an int64), so an exact == would fail purely
        on padding. What this really asserts is that no upstream sync has
        appended a named field after this fork's tail. */
-    size_t end = offsetof(save_t, decor_z1_extra) + sizeof(((save_t *)0)->decor_z1_extra);
+    size_t end = offsetof(save_t, club_off) + sizeof(((save_t *)0)->club_off);
     return end <= sizeof(save_t) && sizeof(save_t) - end < _Alignof(save_t);
 }
 bool progression_stow(tank_t *t, int item, bool stow) {
@@ -647,6 +649,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     memcpy(t->reef, sv.reef, sizeof t->reef);
     t->reef_open = sv.reef_open ? 1 : 0;   /* all zeros in an older save: no reef, which is right */
     t->reef_hide = sv.reef_hide ? 1 : 0;
+    t->club_off = sv.club_off ? 1 : 0;
     if (t->sd_unlocks & SD_ITEM_GLOW) {              /* the sticks, wherever the fish left them */
         if (sv.glow_x[0] > 0) {
             for (int i = 0; i < GLOW_N; i++) {
@@ -850,6 +853,7 @@ void progression_save(tank_t *t) {
     memcpy(sv.reef, t->reef, sizeof sv.reef);
     sv.reef_open = t->reef_open;
     sv.reef_hide = t->reef_hide;
+    sv.club_off = t->club_off;
     sv.fish_speed = (uint8_t)((t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1) + 1);
     sv.setup_pending = s_setup_pending;
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);

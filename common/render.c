@@ -1310,7 +1310,9 @@ static void draw_scene_bare(const tank_t *t, uint16_t *fb, int stride, float dim
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     fill_ellipse(&c, t->reef_x, TANK_H - 16, 34 * grow, 10 + 2 * (grow - 1) * 10, 0x123028, 255);
     if (!bare) { int cx, z; bool placing; if (castle_state(t, &cx, &z, &placing)) draw_castle(&c, cx, 0, false); }   /* uncached: always drawn here */
-    reef_draw(t, fb, stride, dim);          /* the keeper's own reef, in front of the old rock (reef.c) */
+    /* the keeper's own reef, in front of the old rock (reef.c). The
+       builder's canvas shows it even when the setting hides it. */
+    if (bare) reef_draw_all(t, fb, stride, dim); else reef_draw(t, fb, stride, dim);
 }
 
 
@@ -2706,7 +2708,8 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
 #define SET_ROWS_Y    (SET_ROW2_Y + SET_ROW_DY)     /* SPEED */
 #define SET_ROW3_Y    (SET_ROWS_Y + SET_ROW_DY)     /* LIGHTS OUT */
 #define SET_ROWR_Y    (SET_ROW3_Y + SET_ROW_DY)     /* REEF (only once it is built) */
-#define SET_NOTE_Y    (SET_ROWR_Y + 36)             /* "FISH ARE QUIET AT NIGHT" */
+#define SET_ROWM_Y    (SET_ROWR_Y + SET_ROW_DY)     /* MUSIC (only with the rig AND the totem) */
+#define SET_NOTE_Y    (SET_ROWR_Y + 36)             /* "FISH ARE QUIET AT NIGHT" - the music row's spot */
 #define SET_LABEL_X   32
 #define SET_BAT_X     10             /* the charge, top left of the title row */
 #define SET_BAT_Y     12
@@ -2734,13 +2737,15 @@ static int g_set_ver_taps;           /* consecutive taps on the version line (th
 #define SET_NUM_H     (7 * SET_NUM_SCALE)
 #define SET_NUM_X     SET_SEG_X       /* the number's left edge (right-aligned in a 3-digit box) */
 #define SET_NUM_BOX_W (3 * 6 * SET_NUM_SCALE - SET_NUM_SCALE)
-#define SET_NUM_Y     292
-#define SET_NUM_GAP   20              /* chevron tip to the number */
+#define SET_NUM_Y     296
+#define SET_NUM_GAP   14              /* chevron tip to the number */
 #define SET_AFTER_Y   (SET_NUM_Y + (SET_NUM_H - 14) / 2)
 #define SET_STEP_PX   15              /* drag travel per step */
 #define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROWR_Y) - 12)   /* the LIGHTS OUT band ends where REEF's begins */
-#define SET_REEF_BAND_END  (SET_SEG_Y(SET_ROWR_Y) + SET_SEG_H + 8)
+#define SET_REEF_BAND_END  (SET_SEG_Y(SET_ROWM_Y) - 12)
+#define SET_MUSIC_BAND_END (SET_SEG_Y(SET_ROWM_Y) + SET_SEG_H + 6)
 static const char *const SET_REEF[2] = { "SHOW", "HIDE" };
+static const char *const SET_MUSIC[2] = { "OFF", "ON" };
 static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
 static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
@@ -2802,7 +2807,12 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     /* the reef is a row like the others, and only once there is one */
     if (t->reef_open || !reef_empty(t))
         set_row(&c, SET_ROWR_Y, "REEF", SET_REEF, 2, t->reef_hide ? 1 : 0);
-    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
+    /* MUSIC: the club heard from outside, while the rig throws its party.
+       Only with both pieces in the tank - with nothing to party at there is
+       nothing to hear, and the row would be a promise the tank cannot keep.
+       It takes the note's line; the note goes when it is there. */
+    if (tank_club_possible(t)) set_row(&c, SET_ROWM_Y, "MUSIC", SET_MUSIC, 2, t->club_off ? 0 : 1);
+    else draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
     if (t->light_auto) {
         /* AUTO: AFTER [ n ] SEC, the number with its chevrons */
         char num[8]; snprintf(num, sizeof num, "%d", t->light_idle_s);
@@ -2865,7 +2875,8 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROWS_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_SPEED; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_LIGHT_BAND_END)          { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg == 1; return SET_TAP_LIGHT; }
     if (y >= SET_LIGHT_BAND_END && y < SET_REEF_BAND_END)                   { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_REEF; }
-    if (y >= SET_REEF_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
+    if (y >= SET_REEF_BAND_END && y < SET_MUSIC_BAND_END)                   { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_MUSIC; }
+    if (y >= SET_MUSIC_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
         *value = 0;
         if (y < SET_NUM_Y - 8) return SET_HIT_IDLE_UP;                     /* the band above the number */
         if (y < SET_NUM_Y + SET_NUM_H + 14) return SET_HIT_IDLE_NUM;      /* the number */
@@ -2916,6 +2927,12 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                         t->reef_hide = v ? 1 : 0;
                         progression_settings_changed();
                         r = SET_TAP_REEF; *value = t->reef_hide;
+                    }
+                } else if (h == SET_TAP_MUSIC) {                    /* the club, heard from outside */
+                    if (tank_club_possible(t)) {
+                        t->club_off = v ? 0 : 1;                       /* segment 1 = ON */
+                        progression_settings_changed();
+                        r = SET_TAP_MUSIC; *value = !t->club_off;
                     }
                 } else if (h == SET_HIT_BULB) { g_set_bulb = true;
                 } else if (h == SET_HIT_MODAL) { g_set_bulb = false;

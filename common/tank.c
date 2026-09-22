@@ -1030,6 +1030,12 @@ bool tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carr
     return false;                                       /* home, upright, where the keeper put it */
 }
 bool tank_bass_party(const tank_t *t) { return t->totem_phase == TOTEM_HOLD || t->totem_phase == TOTEM_PLANTED; }
+bool tank_club_possible(const tank_t *t) {
+    return tank_bit_live(t, SD_ITEM_BASS) && tank_bit_live(t, SD_ITEM_TOTEM);
+}
+bool tank_club_audible(const tank_t *t) {
+    return !t->club_off && tank_club_possible(t) && tank_bass_party(t);
+}
 
 /* the castle's gate: fish swim freely through everything in this tank, so
  * "through the gate" is purely a question of where the fish is - the opening
@@ -1661,6 +1667,7 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
             tg.x = t->totem_party_x + cosf(tm * 1.2f) * 30;
             tg.y = TANK_H - 16 - 50 + sinf(tm * 1.5f) * 20;
         } else if (leader) {                                   /* walking: out to the speaker, or back home */
+            tg.speed = TOTEM_WALK_SPEED;                       /* a march, not a wander */
             if (t->totem_phase == TOTEM_HOME) {                /* all the way down onto its spot */
                 tg.x = home; tg.y = TOTEM_PLANT_Y;
             } else {

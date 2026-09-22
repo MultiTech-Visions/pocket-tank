@@ -253,7 +253,10 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
 enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
-       SET_TAP_DEV = 6, SET_TAP_SPEED = 7, SET_TAP_REEF = 8 };
+       SET_TAP_DEV = 6, SET_TAP_SPEED = 7, SET_TAP_REEF = 8, SET_TAP_MUSIC = 9 };
+/* SET_TAP_MUSIC (2026-09-22): the MUSIC row, which only exists while the tank
+ * holds both the bass stack and the totem. It flips tank_t.club_off itself and
+ * returns *value = 1 when the music is now ON. */
 /* SET_TAP_REEF (2026-09-22): the REEF chip, top right - shown only once the
  * builder has been found. It flips tank_t.reef_hide itself and returns with
  * *value = 1 when the reef is now hidden. `bat_pct` is the charge shown in

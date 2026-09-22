@@ -181,7 +181,7 @@ void touch_port_poll(tank_t *t) {
            card just sat there (2026-09-21) */
         if (s_reef && !s_cf && !su && (dx * dx + dy * dy >= 24 * 24 || now - s_press_us >= 350000)) {
             int r = reef_ui_tap(t, s_px, s_py, dx, dy);          /* a swipe: the menu, or the catalogue's scroll */
-            if (r == REEF_UI_CLOSE) { s_reef = false; s_ms = true; progression_save(t); }
+            if (r == REEF_UI_CLOSE) { s_reef = false; reef_ui_close(); s_ms = true; progression_save(t); }
             goto released;
         }
         if (!modal && !s_cf && render_card_opens_page(s_sel, s_px, s_py, s_lx, s_ly)) {
@@ -208,7 +208,7 @@ void touch_port_poll(tank_t *t) {
             if (s_set || s_back) { s_back = false; goto released; }   /* the settings page had the glass (render_settings_touch above) */
             if (s_reef) {                                           /* the builder: swipe up for pieces, tap to place */
                 int r = reef_ui_tap(t, s_px, s_py, s_lx - s_px, s_ly - s_py);
-                if (r == REEF_UI_CLOSE) { s_reef = false; s_ms = true; progression_save(t); ESP_LOGI(TAG, "reef: done, saved"); }
+                if (r == REEF_UI_CLOSE) { s_reef = false; reef_ui_close(); s_ms = true; progression_save(t); ESP_LOGI(TAG, "reef: done, saved"); }
                 else if (r == REEF_UI_KEPT) progression_save(t);     /* every edit is worth keeping at once */
                 goto released;
             }

@@ -85,8 +85,11 @@ int  reef_at(const tank_t *t, int cx, int cy);
 bool reef_remove(tank_t *t, int index);
 unsigned reef_epoch(const tank_t *t);
 
-/* draw the reef as the backdrop: over the water, under everything else */
+/* draw the reef as the backdrop: over the water, under everything else.
+ * Draws NOTHING while tank_t.reef_hide is set - the keeper asked for it out
+ * of sight. reef_draw_all ignores that, for the builder's own canvas. */
 void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim);
+void reef_draw_all(const tank_t *t, uint16_t *fb, int stride, float dim);
 /* one piece on its own, for the ghost and the catalogue's tiles */
 void reef_draw_shape(uint16_t *fb, int stride, int x, int y, int shape,
                      uint8_t colour, int alpha, float dim);

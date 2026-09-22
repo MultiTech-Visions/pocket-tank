@@ -417,6 +417,10 @@ typedef struct tank {
     uint8_t  reef_open;
     /* built it, kept it, and asked for it not to be drawn (settings) */
     uint8_t  reef_hide;
+    /* the muffled club heard while the rig parties: 0 = on. The setting only
+     * appears once the tank has both the speaker and the totem, because
+     * without them there is no party to hear. */
+    uint8_t  club_off;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
                                     * shot). Not saved. */
@@ -654,6 +658,11 @@ bool  tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *car
 /* the party at the speaker is on (the disco ball and anything else that wants
  * to join in reads this) */
 bool  tank_bass_party(const tank_t *t);
+/* should the muffled club be playing right now? Both pieces in the tank,
+ * a party under way, and the keeper has not switched it off. */
+bool  tank_club_audible(const tank_t *t);
+/* is the setting even worth showing? (both pieces in the tank) */
+bool  tank_club_possible(const tank_t *t);
 /* the chest: 0 shut .. 1 wide open (the lid's swing and the gold's glow),
  * and the keeper's tap - true when the tap was ON it, so the caller knows
  * the tap is spent */
@@ -788,29 +797,37 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
  * no speaker it is just a parade and then home again.
  *
  *   WALK    the carrier leads to the speaker; ends on ARRIVAL, not a clock
- *   HOLD    45 s: still carrying it, circling the speaker, everyone dancing
- *   PLANTED 45 s: the totem slammed into the sand at a jaunty angle by the
- *           speaker, the carrier now dancing with the rest
- *   HOME    it is picked back up and led to where it started, planted, and
- *           everyone goes back to their own business
+ *   HOLD    4 s: it arrives, holds the totem up, and plants it. This used to
+ *           be 45 s of circling the speaker with it aloft, which put the
+ *           whole event past two minutes and made the middle of it a lap of
+ *           honour nobody asked for (2026-09-22).
+ *   PLANTED 42 s: the totem in the sand at a jaunty angle by the speaker,
+ *           the carrier dancing with the rest - this is the party
+ *   HOME    it is picked back up and carried to where it started, planted,
+ *           and everyone goes back to their own business
+ *
+ * Walk, plant, party, walk home: about a minute all in.
  *
  * The walking legs are arrival-driven with a cap, because how long the swim
  * takes depends on where the keeper put things. */
 enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
 enum { CHEST_SHUT = 0, CHEST_OPENING, CHEST_OPEN, CHEST_CLOSING };
 #define TOTEM_PARADE_S     40.0f            /* no speaker: how long the parade itself lasts */
-#define TOTEM_WALK_MAX_S   60.0f            /* a walking leg cannot outstay this */
-#define TOTEM_HOLD_S       45.0f
-#define TOTEM_PLANTED_S    45.0f
+#define TOTEM_WALK_MAX_S   12.0f            /* a walking leg cannot outstay this */
+#define TOTEM_WALK_SPEED   34.0f            /* the carrier means it: the leg used to take a
+                                             * minute at a fish's own dawdle, which is most of
+                                             * where the two-minute party went (2026-09-22) */
+#define TOTEM_HOLD_S        4.0f            /* just long enough to hoist it and slam it down */
+#define TOTEM_PLANTED_S    40.0f            /* the party itself */
 #define TOTEM_ARRIVE_PX    50.0f            /* close enough to the speaker (a party has room) */
 /* Home is not "close enough": the totem has to be PUT BACK. The carrier is
  * steered to the keeper's spot at the depth where the pole's foot meets the
  * sand, and the event only ends once it is actually there - otherwise the
  * thing blinked from a fish's mouth to the floor across half the tank. */
 #define TOTEM_PLANT_Y      (TANK_H - 16 - TOTEM_H * 0.45f)
-#define TOTEM_HOME_PX       8.0f            /* how near home the carrier must truly get ... */
-#define TOTEM_HOME_Y_PX     8.0f            /* ... and how low, before it is planted */
-#define TOTEM_HOME_MAX_S   150.0f           /* the march home is patient; only a stuck fish hits this */
+#define TOTEM_HOME_PX      14.0f            /* how near home the carrier must truly get ... */
+#define TOTEM_HOME_Y_PX    10.0f            /* ... and how low, before it is planted */
+#define TOTEM_HOME_MAX_S    32.0f           /* the march home is patient; only a stuck fish hits this */
 #define TOTEM_COOL_S       90.0f            /* the quiet after the whole thing */
 /* ---- the disco ball (2026-09-20) -----------------------------------------
  * It hangs at the top of the tank wherever the keeper put it. When a party

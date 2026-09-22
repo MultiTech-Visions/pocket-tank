@@ -1106,6 +1106,14 @@ static void sound_frame(uint32_t now, float dt) {
     int cue = notice_take_cue();
     if (cue >= 0) snd(cue, AUDIO_PITCH_ONE);
     bool loop = setup_active() && !setup_is_birth() && setup_page() == SETUP_PG_BUBBLES;
+    { static bool club_on;                       /* the club, heard from outside, while the rig parties */
+      bool club = tank_club_audible(&tank);
+      if (club != club_on && s_adev) {
+          SDL_LockAudioDevice(s_adev);
+          if (club) audio_play(SND_CLUB_LOOP, AUDIO_PITCH_ONE, now); else audio_stop(SND_CLUB_LOOP);
+          SDL_UnlockAudioDevice(s_adev);
+          club_on = club;
+      } }
     if (loop != s_loop_on && s_adev) {
         SDL_LockAudioDevice(s_adev);
         if (loop) audio_play(SND_BUBBLES_LOOP, AUDIO_PITCH_ONE, now); else audio_stop(SND_BUBBLES_LOOP);
@@ -2228,6 +2236,7 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
             else if (r == SET_TAP_SPEED) printf("fish speed: %s\n", FISH_SPEED_NAMES[v < FISH_SPEED_N ? v : 1]);
             else if (r == SET_TAP_REEF) printf("reef: %s\n", v ? "hidden (still built)" : "showing again");
+            else if (r == SET_TAP_MUSIC) printf("club music: %s\n", v ? "on" : "off");
         }
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */
@@ -2265,7 +2274,7 @@ int main(int argc, char **argv) {
                                                                     (and its CLOSE already brought the milestones page back) */
             else if (reef_view) {                       /* the builder: swipe up for pieces, tap to place */
                 int r = reef_ui_tap(&tank, (float)press_x, (float)press_y, (float)(mx - press_x), (float)(my - press_y));
-                if (r == REEF_UI_CLOSE) { reef_view = false; milestones_view = true; progression_save(&tank); printf("reef: done, saved\n"); }
+                if (r == REEF_UI_CLOSE) { reef_view = false; reef_ui_close(); milestones_view = true; progression_save(&tank); printf("reef: done, saved\n"); }
                 else if (r == REEF_UI_KEPT) progression_save(&tank);
             }
             else if (dev_view) {                        /* the dev page: eight buttons and CLOSE */

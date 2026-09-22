@@ -17,6 +17,7 @@ static const policy_t POLICY[SND_COUNT] = {
     [SND_WHEEL_TICK]  = { 1, 25 },
     [SND_CONFIRM]     = { 1, 300 },
     [SND_BUBBLES_LOOP]= { 1, 0 },
+    [SND_CLUB_LOOP]   = { 1, 0 },
     [SND_EAT]         = { 2, 250 },
     [SND_SPOOK]       = { 2, 2000 },
     [SND_INVESTIGATE] = { 2, 1500 },
