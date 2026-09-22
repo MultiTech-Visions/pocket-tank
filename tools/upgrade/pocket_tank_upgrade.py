@@ -147,7 +147,7 @@ def selfcheck(spec):
     return 0
 
 
-def read_log(port_arg):
+def read_log(port_arg, seconds=10.0, quiet=False):
     """--log: reset the tank and print what it says on its way up.
 
     A tank with a dark screen has already told you why - over the USB serial
@@ -163,13 +163,15 @@ def read_log(port_arg):
     if not port:
         cands = [d.device for d in list_ports.comports()]
         if not cands:
-            print("   No serial ports at all. Is it plugged in, with a DATA cable?")
+            if not quiet:
+                print("   No serial ports at all. Is it plugged in, with a DATA cable?")
             return 1
         port = cands[-1]                 # the newest one is nearly always the tank
-        if len(cands) > 1:
+        if len(cands) > 1 and not quiet:
             print(f"   {len(cands)} ports here; reading {port}. Pass another if this is wrong:")
             print(f"     {', '.join(cands)}")
-    print(f"   Reading {port}. Ten seconds. Copy ALL of this and send it over.")
+    if not quiet:
+        print(f"   Reading {port}. {int(seconds)} seconds. Copy ALL of this and send it over.")
     print("-" * 62)
     try:
         ser = serial.Serial(port, 115200, timeout=0.2)
@@ -181,7 +183,7 @@ def read_log(port_arg):
         time.sleep(0.12)
         ser.setRTS(False)                            # and let go: it boots from here
         ser.reset_input_buffer()
-        end = time.time() + 10.0
+        end = time.time() + seconds
         while time.time() < end:
             chunk = ser.read(4096)
             if chunk:
@@ -193,8 +195,9 @@ def read_log(port_arg):
         ser.close()
     print()
     print("-" * 62)
-    print("   That is the boot log. If it ends in a panic or keeps repeating,")
-    print("   the last few lines before it repeats are the ones that matter.")
+    if not quiet:
+        print("   That is the boot log. If it ends in a panic or keeps repeating,")
+        print("   the last few lines before it repeats are the ones that matter.")
     return 0
 
 
@@ -287,9 +290,13 @@ def main():
     print(rule)
     print("   Your tank is exactly as you left it.")
     print()
-    print("   If the screen stays dark, run this file again with --log and")
-    print("   send what it prints:")
-    print(f"     {os.path.basename(sys.argv[0])} --log")
+    # and then it says what happened on the way up, without being asked.
+    # A dark screen has already explained itself here; asking somebody to
+    # discover a flag first is asking them to debug for me.
+    print("   Here is what it says as it starts. If anything is wrong, it is")
+    print("   in here - copy this window and send it.")
+    print()
+    read_log(argv_rest[0] if argv_rest else None, seconds=8.0, quiet=True)
     pause()
     return 0
 

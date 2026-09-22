@@ -91,7 +91,8 @@ bool display_port_init(void) {
     i2c_master_bus_config_t bus = { .i2c_port = I2C_NUM_0, .sda_io_num = PIN_I2C_SDA, .scl_io_num = PIN_I2C_SCL,
         .clk_source = I2C_CLK_SRC_DEFAULT, .flags.enable_internal_pullup = true };
     bus.glitch_ignore_cnt = 7;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus, &s_i2c));
+    esp_err_t ierr = i2c_new_master_bus(&bus, &s_i2c);
+    if (ierr != ESP_OK) { ESP_LOGE(TAG, "i2c bus: %s", esp_err_to_name(ierr)); s_i2c = NULL; }
 
     for (int i = 0; i < 2; i++) {
         s_stripe[i] = heap_caps_malloc(PANEL_W * STRIPE_ROWS * 2, MALLOC_CAP_DMA);
@@ -104,22 +105,30 @@ bool display_port_init(void) {
         .quadwp_io_num = -1, .quadhd_io_num = -1,
         .max_transfer_sz = PANEL_W * STRIPE_ROWS * 2,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &spi, SPI_DMA_CH_AUTO));
+    esp_err_t err = spi_bus_initialize(LCD_HOST, &spi, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "spi_bus_initialize: %s", esp_err_to_name(err)); return false; }
     esp_lcd_panel_io_spi_config_t io_cfg = {
         .dc_gpio_num = PIN_LCD_DC, .cs_gpio_num = PIN_LCD_CS,
         .pclk_hz = 40 * 1000 * 1000,             /* Waveshare's own example clocks it here */
         .lcd_cmd_bits = 8, .lcd_param_bits = 8, .spi_mode = 0, .trans_queue_depth = 10,
         .on_color_trans_done = on_trans_done,
     };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &s_io));
+    err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &s_io);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "panel_io_spi: %s", esp_err_to_name(err)); return false; }
     const esp_lcd_panel_dev_config_t pcfg = { .reset_gpio_num = PIN_LCD_RST,
                                               .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
                                               .bits_per_pixel = 16 };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(s_io, &pcfg, &s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel, true));   /* this panel is IPS: inverted */
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
+    /* NOT ESP_ERROR_CHECK: a panel that will not come up must not take the
+       board down with it. Failing here leaves the backlight ON and the tank
+       running, which is a device that can be looked at and asked questions,
+       instead of a boot loop that shows nothing and says nothing. */
+    err = esp_lcd_new_panel_st7789(s_io, &pcfg, &s_panel);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "new_panel_st7789: %s", esp_err_to_name(err)); s_panel = NULL; return false; }
+    esp_lcd_panel_reset(s_panel);
+    err = esp_lcd_panel_init(s_panel);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "panel_init: %s", esp_err_to_name(err)); s_panel = NULL; return false; }
+    esp_lcd_panel_invert_color(s_panel, true);   /* this panel is IPS: inverted */
+    esp_lcd_panel_disp_on_off(s_panel, true);
     /* the bands above and below the squashed frame, cleared once */
     memset(s_stripe[0], 0, PANEL_W * STRIPE_ROWS * 2);
     for (int y = 0; y < PANEL_H; y += STRIPE_ROWS) {
@@ -158,6 +167,7 @@ void display_port_map_touch(float px, float py, bool inverted, float *tx, float 
 }
 
 void display_port_flush(const uint16_t *fb) {
+    if (!s_panel) return;                        /* the panel never came up; the tank still runs */
     int cur = 0;
     for (int dy0 = 0; dy0 < PANEL_FIT_H; dy0 += STRIPE_ROWS) {
         int rows = dy0 + STRIPE_ROWS > PANEL_FIT_H ? PANEL_FIT_H - dy0 : STRIPE_ROWS;
