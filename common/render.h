@@ -73,6 +73,8 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #define RENDER_CARD_HIT(x, y) ((x) >= RENDER_CARD_X - RENDER_CARD_HIT_SIDE && (x) < RENDER_CARD_X + RENDER_CARD_W + RENDER_CARD_HIT_SIDE && \
                                (y) >= RENDER_CARD_Y && (y) < RENDER_CARD_Y + RENDER_CARD_H + RENDER_CARD_HIT_BELOW)
 void render_set_card_cache(uint16_t *buf);
+/* the builder's canvas: water, sand and the keeper's reef, nothing else */
+void render_reef_canvas(const tank_t *t, uint16_t *fb, int stride);
 
 /* ---- the follow cam (2026-09-21) --------------------------------------
  * While a fish's card is up the view eases in on that fish and keeps it
@@ -93,6 +95,9 @@ void render_set_card_cache(uint16_t *buf);
 #define CAM_FOLLOW_HZ  3.2f      /* ... and how closely the centre chases the fish */
 void  render_camera_tick(const tank_t *t, int fish, float zoom, float dt);
 void  render_camera_apply(uint16_t *fb, int stride, uint16_t *scratch, size_t scratch_px);
+/* aim it by hand at a point, with no card to dodge and no easing: the reef
+ * builder's magnifier. render_camera_apply and the mapping work as usual. */
+void  render_camera_point(float x, float y, float zoom);
 void  render_camera_reset(void);
 bool  render_camera_live(void);
 float render_camera_zoom(void);
@@ -248,7 +253,11 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
 enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
-       SET_TAP_DEV = 6, SET_TAP_SPEED = 7 };
+       SET_TAP_DEV = 6, SET_TAP_SPEED = 7, SET_TAP_REEF = 8 };
+/* SET_TAP_REEF (2026-09-22): the REEF chip, top right - shown only once the
+ * builder has been found. It flips tank_t.reef_hide itself and returns with
+ * *value = 1 when the reef is now hidden. `bat_pct` is the charge shown in
+ * the top left, or -1 for a platform that does not know it. */
 /* SET_TAP_SPEED (2026-09-21): the SPEED row, *value = tank_t.fish_speed as it
  * now stands (0 slower, 1 normal, 2 faster). render_settings_touch has already
  * written it to the tank and asked for a save; the platform only logs it. */
@@ -258,7 +267,7 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
  * settings page resets it, and so does leaving the page, so a keeper who never
  * goes looking never sees it. */
 #define SET_DEV_TAPS 7
-void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
+void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume, int bat_pct);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
 

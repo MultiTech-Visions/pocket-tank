@@ -4,6 +4,7 @@
 #include "render.h"
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 
 /* Coral reads as saturated colour against dark water, so these are picked
  * bright and spread round the wheel: a reef built out of them should look
@@ -535,6 +536,29 @@ bool reef_occupied(const tank_t *t, int cx, int cy) {
     }
     return false;
 }
+/* How much reef there is right behind a point, 1 at it and 0 well clear of
+ * it: what render.c's shadow under a fish fades on, so a fish out in open
+ * water carries no smudge and only one down among the coral does. The piece
+ * list is walked (at most REEF_MAX) rather than the cells, because
+ * reef_occupied is itself a walk and this runs per fish per frame. */
+float reef_near(const tank_t *t, float x, float y) {
+    if (t->reef_hide) return 0.0f;
+    float best = 1e9f;
+    reef_piece_t p;
+    for (int i = 0; i < reef_count(t); i++) {
+        if (!reef_piece(t, i, &p)) continue;
+        const reef_shape_t *sh = &REEF_SHAPES[p.shape];
+        float x0 = (float)(p.cx * REEF_CELL), x1 = x0 + sh->cw * REEF_CELL;
+        float y0 = (float)(p.cy * REEF_CELL), y1 = y0 + sh->ch * REEF_CELL;
+        float dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
+        float dy = y < y0 ? y0 - y : y > y1 ? y - y1 : 0;
+        float d = dx > dy ? dx : dy;                  /* box distance: no sqrt per piece */
+        if (d < best) best = d;
+        if (best <= REEF_NEAR_IN) return 1.0f;
+    }
+    if (best >= REEF_NEAR_OUT) return 0.0f;
+    return 1.0f - (best - REEF_NEAR_IN) / (REEF_NEAR_OUT - REEF_NEAR_IN);
+}
 int reef_at(const tank_t *t, int cx, int cy) {
     reef_piece_t p;
     for (int i = reef_count(t) - 1; i >= 0; i--) {          /* the last placed is on top */
@@ -704,6 +728,10 @@ static void reef_draw_carrier(const tank_t *t, uint16_t *fb, int stride, float d
         }
 }
 void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
+    /* hidden by the keeper (settings): still built, still saved, just not
+       drawn - unless the builder is open, where it is the thing being
+       worked on. */
+    if (t->reef_hide && !reef_ui_active()) return;
     if (reef_empty(t)) return;
     reef_draw_carrier(t, fb, stride, dim);           /* the dead mass it all grows on */
     reef_piece_t p;
@@ -718,20 +746,48 @@ void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
  * ghost of the piece in hand; the ghost says whether it MAY go there, so
  * the adjacency rule is something you can see rather than something that
  * silently refuses you. */
-#define RUI_BAR_COLS   2
-#define RUI_DOT_R      11
-#define RUI_DOT_DX     28
-#define RUI_DOT_DY     28
-#define RUI_BAR_W      (RUI_BAR_COLS * RUI_DOT_DX + 6)
-#define RUI_BAR_ROWS   ((REEF_COLOURS + RUI_BAR_COLS - 1) / RUI_BAR_COLS)
-#define RUI_CAT_X      (RUI_BAR_W + 10)
+/* ---- the layout -------------------------------------------------------
+ * Reworked 2026-09-22 after a session on the real glass:
+ *  - the colour dots were 22 px across and all but unhittable. The rail now
+ *    carries ONE big swatch that opens a panel of big ones.
+ *  - the hint sat along the foot, which is exactly where the first row of
+ *    coral goes, so it covered the thing being aimed at. It is at the top.
+ *  - a piece is planted when the finger LIFTS. Dragging across the clear
+ *    upper half and letting go used to throw the piece away.
+ *  - a slow drag in the catalogue was read as a tap on whatever was under
+ *    the finger. Anything past RUI_SLOP px is a scroll and never a tap.
+ *  - DONE was small; there was no way to start over. */
+#define RUI_SLOP       8             /* past this, a finger is scrolling, not tapping */
+#define RUI_RAIL_W     88            /* the left rail: colour, OUT, RESET */
+#define RUI_SW_Y       56            /* the big colour swatch */
+#define RUI_SW_H       58
+#define RUI_OUT_Y      (RUI_SW_Y + RUI_SW_H + 10)
+#define RUI_RESET_Y    (RUI_OUT_Y + 44)
+#define RUI_BTN_H      38
+#define RUI_DONE_W     118
+#define RUI_DONE_H     40
+#define RUI_DONE_X     (TANK_W - RUI_DONE_W - 8)
+#define RUI_DONE_Y     6
+#define RUI_CAT_X      (RUI_RAIL_W + 10)
 #define RUI_CAT_COLS   3
 #define RUI_TILE       110
 #define RUI_TILE_PAD   6
-#define RUI_MENU_Y     44
+#define RUI_MENU_Y     52
 #define RUI_FOOT_Y     (TANK_H - 24)
-#define RUI_HINT_Y     (TANK_H - 22)
-#define RUI_BTN_H      30
+#define RUI_HINT_Y     8             /* the hint is at the TOP now, off the building floor */
+#define RUI_HINT_H     26
+/* the colour panel: big swatches, five across */
+#define RUI_PAN_COLS   5
+#define RUI_PAN_X      24
+#define RUI_PAN_Y      64
+#define RUI_PAN_SW     76
+#define RUI_PAN_SH     62
+#define RUI_PAN_PAD    8
+/* the magnifier, for picking one coral out of a crowd */
+#define RUI_ZOOM_MAX   3.0f
+#define RUI_BACK_W     92
+#define RUI_BACK_H     34
+#define RUI_ZBAR_Y     (RUI_HINT_Y + RUI_HINT_H + 6)
 
 static bool  s_menu;
 static int   s_shape = -1, s_colour = 1;
@@ -739,13 +795,30 @@ static int   s_cx, s_cy;
 static float s_scroll, s_scroll0;
 static bool  s_rub;
 static bool  s_settled;      /* did the piece in hand find anywhere to rest in this column? */
+static bool  s_panel;        /* the colour panel is up over the catalogue */
+static bool  s_confirm;      /* RESET is asking */
+static float s_zoom = 1.0f;  /* the magnifier, in OUT mode only */
+static float s_zx, s_zy;     /* what it is centred on, in tank space */
+static float s_px, s_py;     /* where the finger went down (screen space) */
+static float s_zx0, s_zy0;   /* ... and where the view was then */
+static bool  s_dragged;      /* has it moved past the slop since? */
 
+static bool s_open;          /* the builder has the glass */
+bool reef_ui_active(void) { return s_open; }
 void reef_ui_open(tank_t *t) {
-    (void)t; s_menu = false; s_shape = -1; s_rub = false;
+    (void)t; s_menu = false; s_shape = -1; s_rub = false; s_open = true;
     s_cx = REEF_COLS / 2; s_cy = REEF_ROWS - 3; s_scroll = 0;
+    s_panel = s_confirm = false; s_zoom = 1.0f;
 }
-void reef_ui_close(void) { s_menu = false; s_shape = -1; }
+void reef_ui_close(void) { s_menu = false; s_shape = -1; s_open = false; s_zoom = 1.0f; }
 bool reef_ui_menu_up(void) { return s_menu; }
+bool reef_ui_zoom(float *x, float *y, float *z) {
+    if (s_zoom <= 1.01f || s_menu) return false;
+    if (x) *x = s_zx;
+    if (y) *y = s_zy;
+    if (z) *z = s_zoom;
+    return true;
+}
 void reef_ui_hand(int *shape, int *colour, bool *rubbing) {
     if (shape) *shape = s_shape;
     if (colour) *colour = s_colour;
@@ -764,6 +837,26 @@ static void rui_to_cell(const tank_t *t, float x, float y) {
     int settled = reef_settle(t, s_shape, s_cx, s_cy);   /* it falls to where it would rest */
     s_settled = settled >= 0;
     if (s_settled) s_cy = settled;
+}
+/* a touch in SCREEN space, put back into tank space if the magnifier is up */
+static void rui_unzoom(float *x, float *y) {
+    if (s_zoom <= 1.01f) return;
+    float tx, ty; render_camera_unmap(*x, *y, &tx, &ty);
+    *x = tx; *y = ty;
+}
+static void rui_pan(float dx, float dy) {
+    float rw = TANK_W / s_zoom * 0.5f, rh = TANK_H / s_zoom * 0.5f;
+    s_zx = s_zx0 - dx / s_zoom; s_zy = s_zy0 - dy / s_zoom;
+    if (s_zx < rw) s_zx = rw;
+    if (s_zx > TANK_W - rw) s_zx = TANK_W - rw;
+    if (s_zy < rh) s_zy = rh;
+    if (s_zy > TANK_H - rh) s_zy = TANK_H - rh;
+}
+
+static void rui_swatch(uint16_t *fb, int stride, int x, int y, int w, int h, int colour, bool lit) {
+    render_rect(fb, stride, x, y, w, h, REEF_PALETTE[colour]);
+    render_rect_edge(fb, stride, x, y, w, h, lit ? 0xffffff : 0x03151a);
+    if (lit) render_rect_edge(fb, stride, x - 3, y - 3, w + 6, h + 6, 0xffffff);
 }
 
 void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
@@ -784,35 +877,35 @@ void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
                         render_rect_edge(fb, stride, (s_cx + cx) * REEF_CELL, (s_cy + cy) * REEF_CELL,
                                          REEF_CELL, REEF_CELL, ok ? TEAL : NO);
         }
-        render_rect_blend(fb, stride, 0, RUI_HINT_Y - 6, TANK_W, 28, INK, 200);
-        const char *hint = s_rub ? "TAP A CORAL TO TAKE IT OUT"
+        /* the hint rides along the TOP: the bottom of the glass is where the
+           first row of coral goes, and the strip used to cover it */
+        render_rect_blend(fb, stride, 0, RUI_HINT_Y - 6, TANK_W, RUI_HINT_H + 4, INK, 200);
+        const char *hint = s_rub ? (s_zoom > 1.01f ? "TAP A CORAL TO TAKE IT OUT"
+                                                   : "TAP WHERE YOU WANT A CLOSER LOOK")
                          : s_shape < 0 ? "SWIPE UP FOR CORAL"
-                         : s_settled ? "TAP TO PLANT IT"
+                         : s_settled ? "LET GO TO PLANT IT"
                          : "NO ROOM IN THIS COLUMN";
         uint32_t hc = (s_shape >= 0 && !s_settled) ? NO : WHITE;
         render_text(fb, stride, (TANK_W - render_text_w(hint, 2)) / 2, RUI_HINT_Y, 2, hc, hint);
         if (s_shape >= 0)
-            render_button(fb, stride, TANK_W - 82, RUI_HINT_Y - 44, 74, RUI_BTN_H, PANEL, TEAL, "DROP", 2);
+            render_button(fb, stride, TANK_W - 90, TANK_H - RUI_BTN_H - 8, 82, RUI_BTN_H, PANEL, TEAL, "DROP", 2);
+        if (s_rub && s_zoom > 1.01f) {                      /* the magnifier's own bar, under the hint:
+                                                               down at the foot it covered the coral */
+            render_button(fb, stride, 8, RUI_ZBAR_Y, RUI_BACK_W, RUI_BACK_H, PANEL, TEAL, "BACK", 2);
+            char z[8]; snprintf(z, sizeof z, "%dX", (int)(s_zoom + 0.5f));
+            render_button(fb, stride, 8 + RUI_BACK_W + 8, RUI_ZBAR_Y, 56, RUI_BACK_H, PANEL, TEAL, z, 2);
+        }
         return;
     }
     /* ---- the catalogue ---- */
     render_rect_blend(fb, stride, 0, 0, TANK_W, TANK_H, INK, 236);
-    render_text(fb, stride, RUI_CAT_X, 14, 3, WHITE, "CORAL");
-    render_button(fb, stride, TANK_W - 96, 8, 88, 28, PANEL, TEAL, "DONE", 2);
-    for (int i = 1; i <= REEF_COLOURS; i++) {
-        int slot = i - 1;
-        int cy = RUI_MENU_Y + (slot / RUI_BAR_COLS) * RUI_DOT_DY + RUI_DOT_R;
-        int cx = 4 + (slot % RUI_BAR_COLS) * RUI_DOT_DX + RUI_DOT_R;
-        for (int dy = -RUI_DOT_R; dy <= RUI_DOT_R; dy++) {
-            int half = (int)sqrtf((float)(RUI_DOT_R * RUI_DOT_R - dy * dy));
-            render_rect(fb, stride, cx - half, cy + dy, half * 2 + 1, 1, REEF_PALETTE[i]);
-        }
-        if (!s_rub && i == s_colour)
-            render_rect_edge(fb, stride, cx - RUI_DOT_R - 3, cy - RUI_DOT_R - 3,
-                             RUI_DOT_R * 2 + 7, RUI_DOT_R * 2 + 7, WHITE);
-    }
-    { int ey = RUI_MENU_Y + RUI_BAR_ROWS * RUI_DOT_DY + 6;
-      render_button(fb, stride, 4, ey, RUI_BAR_W - 8, 28, s_rub ? 0x3a1418 : PANEL, NO, "OUT", 2); }
+    render_text(fb, stride, 12, 16, 3, WHITE, "CORAL");
+    render_button(fb, stride, RUI_DONE_X, RUI_DONE_Y, RUI_DONE_W, RUI_DONE_H, PANEL, TEAL, "DONE", 3);
+    /* the rail: the colour in hand (tap for the panel), OUT, RESET */
+    render_text(fb, stride, 8, RUI_SW_Y - 14, 1, FAINT, "COLOUR");
+    rui_swatch(fb, stride, 8, RUI_SW_Y, RUI_RAIL_W - 16, RUI_SW_H, s_colour, false);
+    render_button(fb, stride, 8, RUI_OUT_Y, RUI_RAIL_W - 16, RUI_BTN_H, s_rub ? 0x3a1418 : PANEL, NO, "OUT", 2);
+    render_button(fb, stride, 8, RUI_RESET_Y, RUI_RAIL_W - 16, RUI_BTN_H, PANEL, FAINT, "RESET", 2);
     for (int i = 0; i < REEF_SHAPE_N; i++) {
         int col = i % RUI_CAT_COLS, row = i / RUI_CAT_COLS;
         int x = RUI_CAT_X + col * (RUI_TILE + RUI_TILE_PAD);
@@ -828,15 +921,39 @@ void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
                     1, FAINT, sh->name);
     }
     render_rect(fb, stride, 0, RUI_FOOT_Y, TANK_W, TANK_H - RUI_FOOT_Y, INK);
-    render_text(fb, stride, RUI_CAT_X, RUI_FOOT_Y + 5, 2, FAINT, "DRAG TO SCROLL  -  TAP A CORAL");
+    render_text(fb, stride, 8, RUI_FOOT_Y + 5, 2, FAINT, "DRAG TO SCROLL  -  TAP TO PICK");
+    if (s_panel) {                                          /* the colours, big enough to hit */
+        render_rect_blend(fb, stride, 0, 0, TANK_W, TANK_H, INK, 246);
+        render_text(fb, stride, RUI_PAN_X, 24, 3, WHITE, "COLOUR");
+        render_button(fb, stride, RUI_DONE_X, RUI_DONE_Y, RUI_DONE_W, RUI_DONE_H, PANEL, TEAL, "DONE", 3);
+        for (int i = 1; i <= REEF_COLOURS; i++) {
+            int slot = i - 1;
+            int x = RUI_PAN_X + (slot % RUI_PAN_COLS) * (RUI_PAN_SW + RUI_PAN_PAD);
+            int y = RUI_PAN_Y + (slot / RUI_PAN_COLS) * (RUI_PAN_SH + RUI_PAN_PAD);
+            rui_swatch(fb, stride, x, y, RUI_PAN_SW, RUI_PAN_SH, i, i == s_colour);
+        }
+    }
+    if (s_confirm) {
+        const int W = 300, H = 118, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
+        render_rect_blend(fb, stride, 0, 0, TANK_W, TANK_H, INK, 220);
+        render_rect(fb, stride, X, Y, W, H, PANEL);
+        render_rect_edge(fb, stride, X, Y, W, H, NO);
+        render_text(fb, stride, X + (W - render_text_w("CLEAR THE WHOLE REEF?", 2)) / 2, Y + 20, 2, WHITE,
+                    "CLEAR THE WHOLE REEF?");
+        render_text(fb, stride, X + (W - render_text_w("THIS CANNOT BE UNDONE", 1)) / 2, Y + 44, 1, FAINT,
+                    "THIS CANNOT BE UNDONE");
+        render_button(fb, stride, X + 16, Y + H - 48, 120, 38, PANEL, FAINT, "KEEP IT", 2);
+        render_button(fb, stride, X + W - 136, Y + H - 48, 120, 38, 0x3a1418, NO, "CLEAR", 2);
+    }
 }
 
 void reef_ui_press(tank_t *t, float x, float y) {
+    s_px = x; s_py = y; s_dragged = false;
+    s_zx0 = s_zx; s_zy0 = s_zy;
     if (s_menu) { s_scroll0 = s_scroll; return; }
+    if (s_rub) return;                           /* the magnifier pans; nothing to aim */
+    rui_unzoom(&x, &y);
     rui_to_cell(t, x, y);
-}
-void reef_ui_drag(tank_t *t, float x, float y) {
-    if (!s_menu) rui_to_cell(t, x, y);
 }
 static void rui_scroll_to(float v) {
     int rows = (REEF_SHAPE_N + RUI_CAT_COLS - 1) / RUI_CAT_COLS;
@@ -844,37 +961,92 @@ static void rui_scroll_to(float v) {
     if (span < 0) span = 0;
     s_scroll = v < 0 ? 0 : v > span ? span : v;
 }
+void reef_ui_drag(tank_t *t, float x, float y) {
+    float dx = x - s_px, dy = y - s_py;
+    if (dx * dx + dy * dy > RUI_SLOP * RUI_SLOP) s_dragged = true;
+    if (s_menu) {                                 /* the catalogue follows the finger */
+        if (!s_panel && !s_confirm && s_dragged) rui_scroll_to(s_scroll0 - dy);
+        return;
+    }
+    if (s_rub) { if (s_zoom > 1.01f && s_dragged) rui_pan(dx, dy); return; }
+    rui_unzoom(&x, &y);
+    rui_to_cell(t, x, y);
+}
 int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
+    bool moved = dx * dx + dy * dy > RUI_SLOP * RUI_SLOP;
     if (!s_menu) {
-        if (dy < -40 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }
-        if (s_shape >= 0 && y >= RUI_HINT_Y - 44 && y < RUI_HINT_Y - 44 + RUI_BTN_H && x >= TANK_W - 96) {
-            s_shape = -1; return REEF_UI_KEPT;                      /* DROP */
-        }
-        if (y >= RUI_HINT_Y - 6) return REEF_UI_NONE;
-        if (s_rub) {                                                /* take one back out */
-            int i = reef_at(t, (int)(x / REEF_CELL), (int)(y / REEF_CELL));
-            if (i >= 0) { reef_remove(t, i); return REEF_UI_KEPT; }
-            return REEF_UI_NONE;
+        /* OUT mode: the magnifier owns the glass */
+        if (s_rub) {
+            if (s_zoom > 1.01f) {
+                if (y >= RUI_ZBAR_Y - 6 && y < RUI_ZBAR_Y + RUI_BACK_H + 6) {
+                    if (x < 8 + RUI_BACK_W) { s_zoom = 1.0f; return REEF_UI_KEPT; }         /* BACK */
+                    if (x < 8 + RUI_BACK_W + 8 + 56) {                                       /* the zoom step */
+                        s_zoom += 1.0f; if (s_zoom > RUI_ZOOM_MAX) s_zoom = 2.0f;
+                        rui_pan(0, 0);
+                        return REEF_UI_KEPT;
+                    }
+                }
+                if (moved) return REEF_UI_KEPT;                      /* that was a pan */
+                rui_unzoom(&x, &y);
+                int i = reef_at(t, (int)(x / REEF_CELL), (int)(y / REEF_CELL));
+                if (i >= 0) { reef_remove(t, i); return REEF_UI_KEPT; }
+                return REEF_UI_NONE;
+            }
+            if (dy < -40 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }
+            if (moved) return REEF_UI_KEPT;
+            /* the first tap does not take anything out: it goes in for a
+               closer look, so a finger can pick one coral out of a crowd */
+            s_zoom = 2.0f; s_zx = x; s_zy = y; s_zx0 = x; s_zy0 = y; rui_pan(0, 0);
+            return REEF_UI_KEPT;
         }
         if (s_shape >= 0) {
+            if (x >= TANK_W - 98 && y >= TANK_H - RUI_BTN_H - 16) { s_shape = -1; return REEF_UI_KEPT; }   /* DROP */
+            if (dy < -70 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }  /* back for another */
+            /* LETTING GO plants it, wherever the drag ended. Dragging across
+               the clear water at the top and releasing used to lose the
+               piece, which is the one way of aiming that lets you see it. */
+            rui_unzoom(&x, &y);
             rui_to_cell(t, x, y);
             if (s_settled && reef_place(t, s_shape, (uint8_t)s_colour, s_cx, s_cy)) return REEF_UI_KEPT;
             return REEF_UI_NONE;                                    /* refused: the ghost said so */
         }
+        if (dy < -40 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }
         return REEF_UI_NONE;
     }
+    /* ---- the catalogue ---- */
+    if (s_confirm) {
+        const int W = 300, H = 118, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
+        if (y >= Y + H - 54 && y < Y + H) {
+            if (x >= X + W - 142) { reef_clear(t); s_shape = -1; s_rub = false; }
+            s_confirm = false;
+        }
+        return REEF_UI_KEPT;
+    }
+    if (s_panel) {
+        if (y < RUI_DONE_Y + RUI_DONE_H + 6 && x >= RUI_DONE_X - 6) { s_panel = false; return REEF_UI_KEPT; }
+        for (int i = 1; i <= REEF_COLOURS; i++) {
+            int slot = i - 1;
+            int px = RUI_PAN_X + (slot % RUI_PAN_COLS) * (RUI_PAN_SW + RUI_PAN_PAD);
+            int py = RUI_PAN_Y + (slot / RUI_PAN_COLS) * (RUI_PAN_SH + RUI_PAN_PAD);
+            if (x >= px && x < px + RUI_PAN_SW && y >= py && y < py + RUI_PAN_SH) {
+                s_colour = i; s_rub = false; s_panel = false; return REEF_UI_KEPT;
+            }
+        }
+        return REEF_UI_KEPT;
+    }
     if (dy > 40 && fabsf(dx) < fabsf(dy)) { s_menu = false; return REEF_UI_KEPT; }
-    if (fabsf(dy) > 24) { rui_scroll_to(s_scroll0 - dy); return REEF_UI_KEPT; }
-    if (y < 40 && x >= TANK_W - 104) { s_menu = false; return REEF_UI_CLOSE; }
-    if (x < RUI_BAR_W) {
-        int ey = RUI_MENU_Y + RUI_BAR_ROWS * RUI_DOT_DY + 6;
-        if (y >= ey && y < ey + 32) { s_rub = !s_rub; if (s_rub) s_shape = -1; s_menu = false; return REEF_UI_KEPT; }
-        int row = (int)((y - RUI_MENU_Y) / RUI_DOT_DY);
-        int col = (int)((x - 4) / RUI_DOT_DX);
-        if (col < 0) col = 0;
-        if (col >= RUI_BAR_COLS) col = RUI_BAR_COLS - 1;
-        int i = row * RUI_BAR_COLS + col + 1;
-        if (row >= 0 && i >= 1 && i <= REEF_COLOURS) { s_colour = i; s_rub = false; }
+    /* anything past the slop was a scroll (the drag already moved it), and a
+       scroll must never also count as a tap on whatever it finished over */
+    if (moved) { rui_scroll_to(s_scroll0 - dy); return REEF_UI_KEPT; }
+    if (y < RUI_DONE_Y + RUI_DONE_H + 6 && x >= RUI_DONE_X - 6) { s_menu = false; return REEF_UI_CLOSE; }
+    if (x < RUI_RAIL_W) {
+        if (y >= RUI_SW_Y - 6 && y < RUI_SW_Y + RUI_SW_H + 6) { s_panel = true; return REEF_UI_KEPT; }
+        if (y >= RUI_OUT_Y - 4 && y < RUI_OUT_Y + RUI_BTN_H + 4) {
+            s_rub = !s_rub; s_zoom = 1.0f;
+            if (s_rub) s_shape = -1;
+            s_menu = false; return REEF_UI_KEPT;
+        }
+        if (y >= RUI_RESET_Y - 4 && y < RUI_RESET_Y + RUI_BTN_H + 4) { s_confirm = true; return REEF_UI_KEPT; }
         return REEF_UI_KEPT;
     }
     for (int i = 0; i < REEF_SHAPE_N; i++) {
@@ -883,7 +1055,7 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
         int ty = RUI_MENU_Y + row * (RUI_TILE + RUI_TILE_PAD) - (int)s_scroll;
         if (y > RUI_FOOT_Y) break;
         if (x >= tx && x < tx + RUI_TILE && y >= ty && y < ty + RUI_TILE) {
-            s_shape = i; s_rub = false; s_menu = false;
+            s_shape = i; s_rub = false; s_menu = false; s_zoom = 1.0f;
             s_cy = REEF_ROWS - REEF_SHAPES[i].ch;                   /* start it on the floor */
             s_settled = reef_settle(t, i, s_cx, s_cy) >= 0;
             return REEF_UI_KEPT;

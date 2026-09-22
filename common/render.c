@@ -244,17 +244,21 @@ static bool g_reef_built = false;      /* is there a reef to be lost against? */
  * colour behind it, and so do the glow sticks. Three loose ellipses of very
  * low alpha cost almost nothing and put a shadow between the subject and
  * the background without looking like an outline (2026-09-21). */
-static void draw_backing(ctx_t *c, float cx, float cy, float rx, float ry) {
-    fill_ellipse(c, cx, cy, rx * 1.55f, ry * 1.75f, 0x000000, 26);
-    fill_ellipse(c, cx, cy, rx * 1.20f, ry * 1.35f, 0x000000, 34);
-    fill_ellipse(c, cx, cy, rx * 0.92f, ry * 1.02f, 0x000000, 40);
+/* `k` is how much reef is behind this point (reef_near): out in open water
+ * the shadow is not drawn at all, because there is nothing there to be lost
+ * against and the smudge was visible on the bare gradient. */
+static void draw_backing(ctx_t *c, float cx, float cy, float rx, float ry, float k) {
+    if (k <= 0.02f) return;
+    fill_ellipse(c, cx, cy, rx * 1.55f, ry * 1.75f, 0x000000, (int)(26 * k));
+    fill_ellipse(c, cx, cy, rx * 1.20f, ry * 1.35f, 0x000000, (int)(34 * k));
+    fill_ellipse(c, cx, cy, rx * 0.92f, ry * 1.02f, 0x000000, (int)(40 * k));
 }
 /* the tank's fish: roll state per slot (the preview above has none) */
 static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f, int idx) {
     float ch = cosf(f->heading);
     float want = ch < -0.05f ? -1.0f : ch > 0.05f ? 1.0f : g_roll[idx];
     g_roll[idx] += (want - g_roll[idx]) * 0.18f;
-    if (g_reef_built) draw_backing(c, f->x, f->y, f->size * 13.0f, f->size * 7.0f);
+    if (g_reef_built) draw_backing(c, f->x, f->y, f->size * 13.0f, f->size * 7.0f, reef_near(t, f->x, f->y));
     /* asleep - unless the rig is on and the after-hours window is still
        open, in which case nobody is asleep yet (tank.h) */
     draw_fish_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST && !tank_afterhours(t), g_roll[idx], 1.0f);
@@ -440,7 +444,7 @@ static void draw_glow_set(ctx_t *c, const tank_t *t, bool carried_pass) {
            both rings so it reads as a light rather than a dash of colour */
         float pulse = (t->night || live) ? 0.85f + 0.15f * fast_sin(t->clock * (1.1f + 0.3f * i) + i) : 0.80f;
         ctx_t *dst = (t->night || live) ? &lit : c;
-        if (g_reef_built) draw_backing(dst, cx, cy, 9.0f, 6.0f);   /* so a stick is not lost in the coral */
+        if (g_reef_built) draw_backing(dst, cx, cy, 9.0f, 6.0f, reef_near(t, cx, cy));   /* so a stick is not lost in the coral */
         fill_ellipse(dst, cx, cy, 19, 13, COL[i], (int)((t->night || live ? 38 : 22) * pulse));
         fill_ellipse(dst, cx, cy, 13, 9, COL[i], (int)((t->night || live ? 66 : 38) * pulse));
         src_t s = src_color(COL[i], dst->dim);
@@ -1160,7 +1164,17 @@ static bool castle_state(const tank_t *t, int *cx, int *z, bool *placing) {
 static int g_scene_castle_x = -2, g_scene_castle_z = -1;   /* what the baked scene holds (-1 = no castle) */
 static unsigned g_scene_reef = 0;      /* ... and which edit of the built reef */
 
+static void draw_scene_bare(const tank_t *t, uint16_t *fb, int stride, float dim, bool bare);
 static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
+    draw_scene_bare(t, fb, stride, dim, false);
+}
+/* `bare`: the water, the sand and the keeper's own reef, and nothing else -
+ * the builder's canvas. Building against a tank full of fish, kelp and a
+ * castle was like painting a wall while the room is being used. */
+void render_reef_canvas(const tank_t *t, uint16_t *fb, int stride) {
+    draw_scene_bare(t, fb, stride, 1.0f, true);
+}
+static void draw_scene_bare(const tank_t *t, uint16_t *fb, int stride, float dim, bool bare) {
     ctx_t c = ctx_full(fb, stride, dim);
     /* water gradient #0a3c46 → #08272f → #031015 */
     for (int y = 0; y < TANK_H; y++) {
@@ -1186,7 +1200,7 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     /* reef rock (the entity fish know); it widens as the tank earns milestones */
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     fill_ellipse(&c, t->reef_x, TANK_H - 16, 34 * grow, 10 + 2 * (grow - 1) * 10, 0x123028, 255);
-    { int cx, z; bool placing; if (castle_state(t, &cx, &z, &placing)) draw_castle(&c, cx, 0, false); }   /* uncached: always drawn here */
+    if (!bare) { int cx, z; bool placing; if (castle_state(t, &cx, &z, &placing)) draw_castle(&c, cx, 0, false); }   /* uncached: always drawn here */
     reef_draw(t, fb, stride, dim);          /* the keeper's own reef, in front of the old rock (reef.c) */
 }
 
@@ -1252,7 +1266,7 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
 }
 
 void render_tank(const tank_t *t, uint16_t *fb, int stride) {
-    g_reef_built = !reef_empty(t);      /* only pay for the backings when there is a reef */
+    g_reef_built = !reef_empty(t) && !t->reef_hide;   /* only pay for the backings when there is a reef to see */
     /* Night used to drop the palette to 0.45. With the sticks, the totem and
        the rig all doing their thing after dark there is more to see down
        there, so the dark is 80% as deep as it was: 1 - 0.8 * (1 - 0.45). */
@@ -1672,7 +1686,12 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride) 
     if (fish_idx < 0 || fish_idx >= t->n_fish) return;
     ctx_t c = ctx_full(fb, stride, 1.0f);            /* card ignores night dimming */
     const fish_t *f = &t->fish[fish_idx];
-    ring(&c, f->x, f->y, 17 * f->size, f->color);
+    /* The card is drawn AFTER render_camera_apply, so this ring is in SCREEN
+       space while the follow cam is up: drawing it at the tank coordinate
+       left it sitting away from its fish by however far the view had moved,
+       which is why the gap looked like it changed as the zoom eased in. */
+    { float sx, sy; render_camera_map(f->x, f->y, &sx, &sy);
+      ring(&c, sx, sy, 17 * f->size * render_camera_zoom(), f->color); }
     unsigned ep; const uint16_t *scene = render_scene_buf(&ep);
     if (g_card && scene) {
         if (fish_idx != g_card_fish || ep != g_card_epoch ||
@@ -2577,6 +2596,12 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
 #define SET_NOTE_Y    174            /* "FISH ARE QUIET AT NIGHT" */
 #define SET_ROW3_Y    204            /* LIGHTS OUT */
 #define SET_LABEL_X   32
+#define SET_BAT_X     10             /* the charge, top left of the title row */
+#define SET_BAT_Y     12
+#define SET_REEF_X    (TANK_W - 108) /* the REEF chip, top right */
+#define SET_REEF_Y    8
+#define SET_REEF_W    100
+#define SET_REEF_H    26
 static int g_set_ver_taps;           /* consecutive taps on the version line (the dev page) */
 #define SET_SEG_X     190            /* first segment */
 #define SET_SEG_W     76
@@ -2621,10 +2646,29 @@ static void set_chevron(ctx_t *c, int cx, int y, bool up, uint32_t rgb) {   /* t
         rect_fill(c, cx + i * 3, yy, 3, 3, rgb);
     }
 }
-void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume) {
+void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume, int bat_pct) {
     ctx_t c = ctx_full(fb, stride, 1.0f);
     rect_fill(&c, 0, 0, TANK_W, TANK_H, MSP_INK);
     draw_text(&c, (TANK_W - text_w("SETTINGS", 3)) / 2, SET_TITLE_Y, 3, 0xffffff, "SETTINGS");
+    /* the charge, top left: the rows are full, and this is the page you are
+       already on when you wonder how long it has left */
+    if (bat_pct >= 0) {
+        int pc = bat_pct > 100 ? 100 : bat_pct;
+        char bt[8]; snprintf(bt, sizeof bt, "%d%%", pc);
+        const int BX = SET_BAT_X, BY = SET_BAT_Y, BW = 26, BH = 13;
+        rect_edge(&c, BX, BY, BW, BH, MSP_TEAL);
+        rect_fill(&c, BX + BW, BY + 4, 2, 5, MSP_TEAL);                    /* the nub */
+        int fillw = (BW - 4) * pc / 100;
+        if (fillw > 0) rect_fill(&c, BX + 2, BY + 2, fillw, BH - 4,
+                                 pc <= 15 ? 0xf25b65 : pc <= 35 ? 0xf2b134 : 0x6fe3a1);
+        draw_text(&c, BX + BW + 8, BY + 1, 2, MSP_DIM, bt);
+    }
+    /* the reef chip, top right: only once the builder has been found */
+    if (t->reef_open || !reef_empty(t)) {
+        bool hid = t->reef_hide != 0;
+        button(&c, SET_REEF_X, SET_REEF_Y, SET_REEF_W, SET_REEF_H,
+               hid ? 0x2a1c1c : 0x1c2f36, hid ? 0xf2b134 : MSP_TEAL, hid ? "REEF OFF" : "REEF ON", 2);
+    }
     int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
@@ -2673,6 +2717,7 @@ static int set_segment(float x, int n) {
 enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN, SET_HIT_VERSION };
 int render_settings_tap(float x, float y, int *value) {
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SET_TAP_CLOSE;
+    if (x >= SET_REEF_X - 6 && y >= SET_REEF_Y - 6 && y < SET_REEF_Y + SET_REEF_H + 6) { *value = 0; return SET_TAP_REEF; }
     /* the row bands: from a little above each segment down to the next row
        (fingers report low); the LIGHTS OUT band ends just under its
        segments so the number's up chevron below is its own */
@@ -2727,6 +2772,12 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                     t->fish_speed = (uint8_t)(v < 0 ? 0 : v >= FISH_SPEED_N ? FISH_SPEED_N - 1 : v);
                     progression_settings_changed();
                     r = SET_TAP_SPEED; *value = t->fish_speed;
+                } else if (h == SET_TAP_REEF) {                     /* out of sight, still built */
+                    if (t->reef_open || !reef_empty(t)) {
+                        t->reef_hide = t->reef_hide ? 0 : 1;
+                        progression_settings_changed();
+                        r = SET_TAP_REEF; *value = t->reef_hide;
+                    }
                 } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME) { r = h; *value = v; }
                 if (h != SET_HIT_VERSION) g_set_ver_taps = 0;          /* any other tap starts the run over */
             }
@@ -2756,10 +2807,12 @@ static float cam_clamp(float v, float lo, float hi) { return v < lo ? lo : v > h
 static float g_cam_z = 1.0f;        /* where the ease has got to */
 static float g_cam_x, g_cam_y;      /* what it is centred on, in tank space */
 static bool  g_cam_on;              /* is it easing in, or back out */
+static bool  g_cam_bias = true;     /* leave room for the stats card (not when the builder drives it) */
 static float g_cam_ox, g_cam_oy;    /* the region's top-left, after clamping */
 
 void render_camera_tick(const tank_t *t, int fish, float zoom, float dt) {
     bool want = fish >= 0 && fish < t->n_fish && zoom > 1.01f;
+    g_cam_bias = true;
     g_cam_on = want;
     if (want) {
         const fish_t *f = &t->fish[fish];
@@ -2775,7 +2828,14 @@ void render_camera_tick(const tank_t *t, int fish, float zoom, float dt) {
     g_cam_z += (target - g_cam_z) * e;
     if (g_cam_z < 1.004f) g_cam_z = 1.0f;                            /* settle exactly, so 1x costs nothing */
 }
-void render_camera_reset(void) { g_cam_z = 1.0f; g_cam_on = false; }
+/* the same view, aimed by hand: the reef builder's magnifier, which centres
+ * on a point the keeper picked instead of on a fish and has no card to leave
+ * room for. Immediate, not eased - the keeper is dragging it. */
+void render_camera_point(float x, float y, float zoom) {
+    g_cam_bias = false; g_cam_on = zoom > 1.01f;
+    g_cam_x = x; g_cam_y = y; g_cam_z = zoom < 1.0f ? 1.0f : zoom;
+}
+void render_camera_reset(void) { g_cam_z = 1.0f; g_cam_on = false; g_cam_bias = true; }
 bool render_camera_live(void) { return g_cam_z > 1.0f; }
 float render_camera_zoom(void) { return g_cam_z; }
 /* the region that will be magnified, clamped so the view never leaves the
@@ -2785,7 +2845,7 @@ static void cam_region(float *ox, float *oy, float *w, float *h) {
     /* The card owns the left of the glass, so dead centre puts the fish
        behind it. Aim instead at the middle of what the card leaves, which
        on a 448 px tank moves the fish about 75 screen px right. */
-    float bias = (RENDER_CARD_X + RENDER_CARD_W) * 0.5f / g_cam_z;
+    float bias = g_cam_bias ? (RENDER_CARD_X + RENDER_CARD_W) * 0.5f / g_cam_z : 0.0f;
     float x = cam_clamp(g_cam_x - rw * 0.5f - bias, 0, TANK_W - rw);
     float y = cam_clamp(g_cam_y - rh * 0.5f, 0, TANK_H - rh);
     *ox = x; *oy = y; *w = rw; *h = rh;

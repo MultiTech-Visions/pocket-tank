@@ -406,6 +406,8 @@ typedef struct tank {
     /* the reef builder is not on by default: it is found (reef.h's combo) or
      * switched on from the dev page, and then it stays found. */
     uint8_t  reef_open;
+    /* built it, kept it, and asked for it not to be drawn (settings) */
+    uint8_t  reef_hide;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
                                     * shot). Not saved. */

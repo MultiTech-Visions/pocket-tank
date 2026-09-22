@@ -619,7 +619,7 @@ static int selftest_sleep(void) {
             if (r != SET_TAP_LIGHT || v != 0 || tank.light_auto) { printf("FAIL: LIGHTS OUT MANUAL tap -> %d/%d, auto %d\n", r, v, tank.light_auto); return 1; }
             for (int i = 0; i < 30 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
             if (tank.night) { printf("FAIL: lights went out in MANUAL\n"); return 1; }
-            render_settings(&tank, sfb, TANK_W, 60, 2);
+            render_settings(&tank, sfb, TANK_W, 60, 2, 74);
             /* in MANUAL a double-tap on the glass flips the light, and the flip rides in the save */
             tank_touch_tap(&tank, 200, 200); tank_touch_tap(&tank, 200, 200);
             for (int i = 0; i < 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
@@ -1148,11 +1148,21 @@ static void frame_cb(lv_timer_t *timer) {
         }
     }
     sound_frame(now, dt);
-    if (reef_view) { render_tank(&tank, canvas_buf, TANK_W); reef_ui_draw(&tank, canvas_buf, TANK_W, tank.clock); }
+    if (reef_view) {                              /* a bare canvas: water, sand, the reef */
+        static uint16_t reef_scratch[TANK_W * TANK_H];
+        render_reef_canvas(&tank, canvas_buf, TANK_W);
+        float zx, zy, zz;
+        if (reef_ui_zoom(&zx, &zy, &zz)) {        /* the magnifier, for taking one out */
+            render_camera_point(zx, zy, zz);
+            render_camera_apply(canvas_buf, TANK_W, reef_scratch, TANK_W * TANK_H);
+        } else render_camera_reset();
+        reef_ui_draw(&tank, canvas_buf, TANK_W, tank.clock);
+    }
     else if (dev_view) ui_dev_page(&tank, canvas_buf, TANK_W, dev_status);
     else if (fishpage_fish >= 0) ui_fish_page(&tank, fishpage_fish, canvas_buf, TANK_W, tank.clock);
     else if (milestones_view) render_milestones(&tank, canvas_buf, TANK_W);
-    else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume());
+    else if (settings_view) render_settings(&tank, canvas_buf, TANK_W, sim_bright, audio_volume(),
+                                            (int)((dev_bat >= 0 ? dev_bat : sim_bat) * 100 + 0.5f));
     else if (shop_view) render_shop(&tank, canvas_buf, TANK_W);
     else {
         render_tank(&tank, canvas_buf, TANK_W);
@@ -1163,8 +1173,11 @@ static void frame_cb(lv_timer_t *timer) {
         render_sd_toast(&tank, canvas_buf, TANK_W);      /* "+N" sand dollars, as they are earned */
         if (ui_visible) {
             draw_brain_dot();
-            if (selected_fish >= 0)
+            if (selected_fish >= 0) {
                 render_stats_card(&tank, selected_fish, canvas_buf, TANK_W);
+                if (selected_fish != RENDER_CARD_SNAIL)   /* the ticker along the foot */
+                    ui_fish_ticker(&tank, selected_fish, canvas_buf, TANK_W, tank.clock);
+            }
         }
         ui_battery_bolt(canvas_buf, TANK_W, dev_bat >= 0 ? dev_bat : sim_bat, false, tank.clock);   /* the charge bolt, top right, always */
         const notice_t *nt = notice_current();
@@ -1316,9 +1329,9 @@ static int snapshot(const char *prefix, int seconds) {
     tank.fish[1].ms_seen &= ~MS_FIRST_MEAL_FROM_YOU; tank.tank_ms_seen &= ~TMS_FIRST_FULL_NIGHT;
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestones.ppm", prefix); write_ppm(path, fb);
-    render_settings(&tank, fb, TANK_W, 60, 2);                     /* MANUAL, the default */
+    render_settings(&tank, fb, TANK_W, 60, 2, 74);                 /* MANUAL, the default */
     snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);
-    tank.light_auto = true; render_settings(&tank, fb, TANK_W, 60, 2);   /* AUTO: the seconds */
+    tank.light_auto = true; render_settings(&tank, fb, TANK_W, 60, 2, 74);   /* AUTO: the seconds */
     snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb); tank.light_auto = false;
     /* the shop (2026-09-15): broke, rich, an item's modal, the HOW TO EARN
        modal, then the tank with both purchases in it and the toast */
@@ -2214,6 +2227,7 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
             else if (r == SET_TAP_SPEED) printf("fish speed: %s\n", FISH_SPEED_NAMES[v < FISH_SPEED_N ? v : 1]);
+            else if (r == SET_TAP_REEF) printf("reef: %s\n", v ? "hidden (still built)" : "showing again");
         }
         { static int last_mx; if (fishpage_fish >= 0 && mpress && mdown) ui_fish_page_swipe((float)(mx - last_mx), tank.clock);
           last_mx = mx; }                                                   /* scrub the long lines */
