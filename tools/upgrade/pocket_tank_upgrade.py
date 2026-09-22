@@ -178,7 +178,7 @@ def lcd154_watchdog_reset(port_arg):
     from esptool.cmds import detect_chip
     port = port_arg or (_ports() or [None])[-1]
     if not port:
-        return
+        return None
     try:
         esp = detect_chip(port, 115200, connect_mode="no_reset")   # the stub, still running
         esp.write_reg(esp.RTC_CNTL_WDTWPROTECT_REG, esp.RTC_CNTL_WDT_WKEY)   # unlock
@@ -186,12 +186,13 @@ def lcd154_watchdog_reset(port_arg):
         esp.write_reg(esp.RTC_CNTL_WDTCONFIG0_REG, (1 << 31) | (5 << 28) | (1 << 8) | 2)   # enable, stage 0 = system reset
         esp.write_reg(esp.RTC_CNTL_WDTWPROTECT_REG, 0)                       # lock
         esp._port.close()
-        time.sleep(0.5)
+        return port                              # read it NOW: the boot's chatter is over in two seconds
     except Exception as e:                       # the log read below will show what state it is in
         print(f"   (watchdog reset did not go through: {e})")
+        return None
 
 
-def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
+def read_log(port_arg, seconds=10.0, quiet=False, reset=True, settle=1.5):
     """Print what the tank says on its way up.
 
     The console is the native USB-Serial-JTAG - the same cable that flashes
@@ -223,7 +224,7 @@ def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
         return 1
     print(f"   Reading {port} for {int(seconds)} seconds. Copy ALL of this.")
     print("-" * 62)
-    time.sleep(1.5)                  # let it finish re-enumerating after the reset
+    time.sleep(settle)               # let it finish re-enumerating after the reset (0: it never went away)
     got = 0
     tried = []
     deadline = time.time() + seconds
@@ -422,9 +423,13 @@ def main():
     # trap above: there esptool's watchdog reset already did the job and the
     # port never went away, so just read it.
     if picked["id"] == "lcd154":
-        lcd154_watchdog_reset(argv_rest[0] if argv_rest else None)
-    read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True,
-             reset=(picked["id"] != "lcd154"))
+        # The port never goes away on this board, and after the first two
+        # seconds the app only speaks every ten: wait 1.5 s and the window
+        # reads three seconds of nothing and gives up (2026-09-22, twice).
+        port = lcd154_watchdog_reset(argv_rest[0] if argv_rest else None)
+        read_log(port, seconds=12.0, quiet=True, reset=False, settle=0)
+    else:
+        read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True, reset=True)
     pause()
     return 0
 
