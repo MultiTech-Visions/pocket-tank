@@ -97,6 +97,15 @@ The tank is more alive than it looks. Almost everything in it answers.
 - **Catch.** A fish carrying a glow stick high enough will throw it to
   another. Three passes in one rally is the rare one and fires its own event
   (`GLOW_RALLY_GEM`, `TEV_GLOW_RALLY`).
+- **The diver has a life.** Now and then he stoops over a glow stick lying
+  near his boots, looks at it, and **lobs it into the top third of the water**
+  on his own air, where it hangs and then falls the whole way back down past
+  everyone (about one every three to six minutes, and only if a stick is
+  where he walks). While the rig parties he **goes to the speaker and
+  dances**, both arms up. And every so often he **takes the totem up himself**
+  and leads the parade - the same event a fish leads, with him at the front
+  and the school falling in around him. Roughly five to ten of those an hour
+  in a tank that has everything, against the fish's own.
 - **Curiosity.** Put something new in and the fish come and look it over.
 - **The snail** grazes the glass clean, even while the tank sleeps.
 - **The screen flips** when you turn the device over — the IMU drives it, and

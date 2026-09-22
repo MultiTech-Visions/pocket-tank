@@ -276,7 +276,12 @@ breathes a stream of real bubbles for nine seconds before it shuts - tap it
 and it opens now and stays open until you tap it again - and a brass-helmet
 **diver** (90) in the old canvas suit, who plods his patch of sand, stops
 every so often to look at whatever he is beside, bobs on his own air and lets
-a string of bubbles go from his helmet. Tap him and he turns round.
+a string of bubbles go from his helmet. Tap him and he turns round. He is not
+only scenery: he stoops over a glow stick lying near his boots and **lobs it
+into the top third of the water**, where it hangs and then falls the whole way
+back down; he **dances at the speaker** while the rig parties; and every so
+often he **lifts the totem himself** and leads the parade, with the school
+falling in around him.
 
 **Four things a fish can earn here**, and unlike the badges on the overview
 page these are hidden completely until they happen - they show on the fish's

@@ -433,12 +433,14 @@ static void draw_glow_set(ctx_t *c, const tank_t *t, bool carried_pass) {
     for (int i = 0; i < GLOW_N; i++) {
         const glow_t *g = &t->glow[i];
         if (g->x <= 0 && g->y <= 0) continue;                 /* never placed */
-        if ((g->carrier >= 0) != carried_pass) continue;
+        /* the carried pass covers a stick in a fin AND one in the diver's
+           glove: either way it goes on top of whoever is holding it */
+        if ((g->carrier != -1) != carried_pass) continue;
         float cx = g->x, cy = g->y;
         float hx = cosf(g->ang) * 6.5f, hy = sinf(g->ang) * 6.5f;
         /* carried or falling it is lit whatever the hour - a stick in the water
            is the thing you are meant to be watching */
-        bool live = g->carrier >= 0 || g->vy > 0;
+        bool live = g->carrier != -1 || g->vy > 0 || g->lob_s > 0;
         /* brighter all round (2026-09-21): one lying on the sand in daylight
            used to sit at 0.55 and was easy to miss, and the halo is +2 px on
            both rings so it reads as a light rather than a dash of colour */
@@ -624,11 +626,15 @@ static void draw_diver(ctx_t *c, const tank_t *t) {
         const src_t *sp = (y % 5 == 4) ? &canvas_d : u < 0.1f ? &canvas_l : &canvas;
         span(c, (int)(dx - half), (int)(dx + half), (int)(top + 18 + y), sp, 255);
     }
-    /* the arms: the leading one swings as he walks */
-    float swing = resting ? 0.0f : fast_sin(t->clock * 2.0f) * 4.0f;
+    /* the arms: the leading one swings as he walks. Dancing, both go up and
+       the swing doubles - he is having a better time than the plod lets on. */
+    bool dancing = tank_diver_dancing(t);
+    float swing = dancing ? fast_sin(t->clock * 4.4f) * 8.0f
+                          : resting ? 0.0f : fast_sin(t->clock * 2.0f) * 4.0f;
+    float lift = dancing ? -6.0f : 0.0f;
     for (int y = 0; y < 12; y++) {
-        span(c, (int)(dx - 12 - (dir > 0 ? 0 : 1)), (int)(dx - 9), (int)(top + 21 + y + (dir > 0 ? swing : -swing)), &canvas, 255);
-        span(c, (int)(dx + 9), (int)(dx + 12 + (dir > 0 ? 1 : 0)), (int)(top + 21 + y + (dir > 0 ? -swing : swing)), &canvas, 255);
+        span(c, (int)(dx - 12 - (dir > 0 ? 0 : 1)), (int)(dx - 9), (int)(top + 21 + y + lift + (dir > 0 ? swing : -swing)), &canvas, 255);
+        span(c, (int)(dx + 9), (int)(dx + 12 + (dir > 0 ? 1 : 0)), (int)(top + 21 + y + lift + (dir > 0 ? -swing : swing)), &canvas, 255);
     }
     /* the lead boots, planted on the sand */
     for (int y = 0; y < 6; y++) {

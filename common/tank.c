@@ -304,6 +304,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     for (int i = 0; i < GLOW_N; i++) { t->glow[i].x = t->glow[i].y = 0; t->glow[i].carrier = -1; t->glow[i].held_s = 0; t->glow[i].vx = t->glow[i].vy = t->glow[i].spin = t->glow[i].ang = 0; }
     for (int i = 0; i < N_FISH_MAX; i++) s_glow_cool[i] = 0;
     t->totem_carrier = -1; t->totem_held_s = 0; t->totem_phase = TOTEM_OFF;
+    t->diver_stick = -1;
     t->totem_planted = false; t->totem_party_x = t->totem_party_ang = 0; s_totem_cool = 0;
     t->disco_drop = t->disco_spin = t->disco_show_s = 0;
     for (int i = 0; i < N_FISH_MAX; i++) { s_fish_ev[i].ev = -1; s_fish_ev[i].clock = 0; }   /* a fresh tank has no history */
@@ -878,6 +879,16 @@ static void glow_tick(tank_t *t, float dt) {
                 s_glow_want[i] = GLOW_WANT_S;
     for (int g = 0; g < GLOW_N; g++) {
         glow_t *s = &t->glow[g];
+        if (s->carrier == GLOW_CARRIER_DIVER) {             /* in the diver's glove */
+            float dvx, dvy; int dvd;
+            tank_diver_state(t, &dvx, &dvy, &dvd, NULL);
+            s->x = dvx + dvd * 13.0f;                       /* held out in front of him */
+            s->y = dvy - DIVER_H + 16.0f;
+            s->ang = 0.5f;
+            s->vx = s->vy = 0;
+            s->held_s += dt;
+            continue;                                       /* diver_tick decides when it goes */
+        }
         if (s->carrier >= 0) {                              /* being carried */
             if (s->carrier >= t->n_fish) { s->carrier = -1; s->held_s = 0; continue; }
             const fish_t *f = &t->fish[s->carrier];
@@ -951,6 +962,16 @@ static void glow_tick(tank_t *t, float dt) {
            it forever. Nothing rests on a cone - while it is over one it is
            always falling, so it gets shed and carries on down. */
         if (s->y < top - 0.25f || on_cone) {                /* falling - to the sand, or onto the castle */
+            /* A stick the diver has LOBBED is still going up: his air is
+               under it, so it is not pulled to terminal speed yet - it slows,
+               hangs at the top of its arc, and only then starts the long fall
+               everyone watches. Without this the sink easing ate the throw in
+               a third of a second and it never left the sand. */
+            if (s->lob_s > 0) {
+                s->lob_s -= dt;
+                s->vy += GLOW_LOB_GRAV * dt;
+                if (s->vy > 0 && s->lob_s > 0.2f) s->lob_s = 0.2f;   /* over the top: hand it back to gravity */
+            } else
             s->vy += (GLOW_SINK_PX_S - s->vy) * (dt * 3.0f < 1.0f ? dt * 3.0f : 1.0f);
             s->y += s->vy * dt;
             s->x += s->vx * dt;
@@ -1003,12 +1024,13 @@ static void glow_tick(tank_t *t, float dt) {
 }
 
 /* the totem event (tank.h): lift, march, party at the speaker, march home */
+static bool totem_lead(const tank_t *t, float *x, float *y, float *stress);
 bool tank_totem_carry(const tank_t *t, float *x, float *y) {
     if (t->totem_phase == TOTEM_OFF || t->totem_planted) return false;
-    if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) return false;
-    const fish_t *f = &t->fish[t->totem_carrier];
-    if (x) *x = f->x;
-    if (y) *y = f->y - TOTEM_H * 0.55f;                 /* held aloft, above the fish */
+    float lx, ly;
+    if (!totem_lead(t, &lx, &ly, NULL)) return false;
+    if (x) *x = lx;
+    if (y) *y = ly - TOTEM_H * 0.55f;                   /* held aloft, over whoever has it */
     return true;
 }
 bool tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *carried) {
@@ -1083,6 +1105,26 @@ static void disco_tick(tank_t *t, float dt) {
     }
 }
 
+/* Where the totem's carrier IS, whoever they are. The diver can lead the
+ * parade now (TOTEM_CARRIER_DIVER), so nothing downstream may assume the
+ * carrier is a row in t->fish. *stress comes back 0 for him: he does not
+ * spook, and a parade he is leading ends on a fright in the tank, not his. */
+static bool totem_lead(const tank_t *t, float *x, float *y, float *stress) {
+    if (t->totem_carrier == TOTEM_CARRIER_DIVER) {
+        if (!tank_bit_live(t, SD_ITEM_DIVER)) return false;
+        float dx, dy; int dd; tank_diver_state(t, &dx, &dy, &dd, NULL);
+        if (x) *x = dx + dd * 4.0f;                 /* shouldered, beside the helmet not through it */
+        if (y) *y = dy - DIVER_H * 0.72f;           /* and high enough that its foot is in his glove */
+        if (stress) *stress = 0.0f;
+        return true;
+    }
+    if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) return false;
+    const fish_t *f = &t->fish[t->totem_carrier];
+    if (x) *x = f->x;
+    if (y) *y = f->y;
+    if (stress) *stress = f->stress;
+    return true;
+}
 static void totem_end(tank_t *t) {
     if (t->totem_phase != TOTEM_OFF) t->light_manual_off = t->totem_light_was;   /* the light goes back how it was */
     t->totem_phase = TOTEM_OFF; t->totem_planted = false;
@@ -1092,28 +1134,31 @@ static void totem_end(tank_t *t) {
 /* one fish takes up the totem: the parade begins and the lights drop for it.
  * totem_tick reaches it through the social gate, tank_totem_force straight. */
 static void totem_lift(tank_t *t, int i) {
-    fish_t *f = &t->fish[i];
-    /* both fins on the pole: a stick it was already holding is let go here,
-       and glow_tick will not hand it another until the parade is over */
+    /* both hands on the pole: a stick already held is let go here, and
+       glow_tick will not hand out another until the parade is over */
     for (int g = 0; g < GLOW_N; g++)
         if (t->glow[g].carrier == i) { t->glow[g].carrier = -1; t->glow[g].held_s = 0; }
+    if (i == TOTEM_CARRIER_DIVER && t->diver_stick >= 0) {
+        t->glow[t->diver_stick].carrier = -1; t->diver_stick = -1;
+    }
     t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
     t->totem_phase = TOTEM_WALK; t->totem_planted = false;
     /* the lights go out for it: a parade is a night-time thing */
     t->totem_light_was = t->light_manual_off;
     t->light_manual_off = true;
-    f->ms_bits |= MS_TOTEM_HOLD;
-    tank_emit(TEV_TOTEM_LIFT, i);
+    if (i >= 0 && i < t->n_fish) t->fish[i].ms_bits |= MS_TOTEM_HOLD;   /* the diver earns no badges */
+    tank_emit(TEV_TOTEM_LIFT, i >= 0 ? i : -1);
 }
 static void totem_tick(tank_t *t, float dt) {
     if (!tank_bit_live(t, SD_ITEM_TOTEM)) { if (t->totem_phase != TOTEM_OFF) totem_end(t); return; }
     if (s_totem_cool > 0) s_totem_cool -= dt;
     if (t->totem_phase != TOTEM_OFF) {
-        if (t->totem_carrier < 0 || t->totem_carrier >= t->n_fish) { totem_end(t); return; }
-        const fish_t *f = &t->fish[t->totem_carrier];
+        float lx, ly, lstress;
+        if (!totem_lead(t, &lx, &ly, &lstress)) { totem_end(t); return; }
+        if (t->totem_carrier == TOTEM_CARRIER_DIVER) ly = TOTEM_PLANT_Y;   /* he walks the floor: depth is never the question */
         /* Lights-out does NOT end it any more - the dark is when the party is
            worth having. Only a real fright breaks it up. */
-        if (t->startled || f->stress > 7.5f) { totem_end(t); return; }
+        if (t->startled || lstress > 7.5f) { totem_end(t); return; }
         t->totem_held_s += dt;
         bool speaker = tank_bit_live(t, SD_ITEM_BASS);
         float bx = tank_decor_x(t, SD_IDX_BASS), home = tank_decor_x(t, SD_IDX_TOTEM);
@@ -1121,14 +1166,14 @@ static void totem_tick(tank_t *t, float dt) {
         case TOTEM_WALK:
             if (!speaker) {                              /* no speaker: a parade, then home */
                 if (t->totem_held_s > TOTEM_PARADE_S) { t->totem_phase = TOTEM_HOME; t->totem_held_s = 0; }
-            } else if (fabsf(f->x - bx) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) {
+            } else if (fabsf(lx - bx) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) {
                 t->totem_phase = TOTEM_HOLD; t->totem_held_s = 0;   /* they made it: the party starts */
             }
             break;
         case TOTEM_HOLD:
             if (t->totem_held_s > TOTEM_HOLD_S) {        /* down it goes, with gusto */
                 t->totem_planted = true;
-                t->totem_party_x = clampf(f->x, DECOR_MARGIN + TOTEM_HALF_W, TANK_W - DECOR_MARGIN - TOTEM_HALF_W);
+                t->totem_party_x = clampf(lx, DECOR_MARGIN + TOTEM_HALF_W, TANK_W - DECOR_MARGIN - TOTEM_HALF_W);
                 t->totem_party_ang = tank_randf(t, 0.12f, 0.26f) * (tank_randf(t, -1, 1) < 0 ? -1.0f : 1.0f);
                 t->totem_phase = TOTEM_PLANTED; t->totem_held_s = 0;
                 for (int i = 0; i < t->n_fish; i++) {         /* everyone who stayed for it was AT the party */
@@ -1149,7 +1194,7 @@ static void totem_tick(tank_t *t, float dt) {
             /* it is PUT BACK, not dropped: the carrier has to reach the
                keeper's spot AND sink to planting depth. The cap is long and
                only catches a fish the model has taken elsewhere for good. */
-            if ((fabsf(f->x - home) < TOTEM_HOME_PX && fabsf(f->y - TOTEM_PLANT_Y) < TOTEM_HOME_Y_PX) ||
+            if ((fabsf(lx - home) < TOTEM_HOME_PX && fabsf(ly - TOTEM_PLANT_Y) < TOTEM_HOME_Y_PX) ||
                 t->totem_held_s > TOTEM_HOME_MAX_S) totem_end(t);
             break;
         }
@@ -1339,19 +1384,100 @@ bool tank_chest_tap(tank_t *t, float x, float y) {
  * He plods, he stops to look, he breathes. His turning points are the
  * keeper's spot give or take DIVER_RANGE, so MOVING him moves his beat. */
 #define DIVER_RANGE 120.0f
+/* the stick in his glove goes UP: a lob on his own air into the top third,
+ * where it hangs and then falls the whole way down past everyone */
+static void diver_lob(tank_t *t) {
+    int g = t->diver_stick;
+    if (g < 0 || g >= GLOW_N) { t->diver_stick = -1; return; }
+    glow_t *s = &t->glow[g];
+    float dvx, dvy; int dvd;
+    tank_diver_state(t, &dvx, &dvy, &dvd, NULL);
+    s->carrier = -1; s->held_s = 0;
+    s->y = dvy - DIVER_H + 18.0f;
+    s->x = dvx + dvd * 13.0f;
+    s->vy = -DIVER_LOB_VY;
+    s->vx = dvd * tank_randf(t, 6.0f, 20.0f);        /* a little forward with it */
+    s->spin = tank_randf(t, -3.0f, 3.0f);
+    s->lob_s = DIVER_LOB_RISE_S;
+    t->diver_stick = -1; t->diver_stick_t = 0;
+    tank_emit(TEV_GLOW_PLAY, -1);
+}
 static void diver_tick(tank_t *t, float dt) {
-    if (!tank_bit_live(t, SD_ITEM_DIVER)) return;
+    if (!tank_bit_live(t, SD_ITEM_DIVER)) {
+        if (t->diver_stick >= 0) { t->glow[t->diver_stick].carrier = -1; t->diver_stick = -1; }
+        return;
+    }
     float home = tank_decor_x(t, SD_IDX_DIVER);
     if (t->diver_dir == 0) { t->diver_dir = 1; t->diver_x = home; }      /* first tick: at his spot */
     t->diver_t += dt;
     t->diver_bob += dt;
-    if (t->diver_resting) {
-        if (t->diver_t > DIVER_PAUSE_S) { t->diver_resting = false; t->diver_t = 0; }
+    bool has_totem = tank_diver_has_totem(t);
+    /* ---- the glow sticks: stoop, look at it, lob it ---- */
+    if (t->diver_stick >= 0) {
+        t->diver_stick_t += dt;
+        if (t->diver_stick_t > DIVER_HOLD_S) diver_lob(t);
+    } else if (!has_totem && tank_bit_live(t, SD_ITEM_GLOW) && tank_randf(t, 0, 1) < DIVER_GRAB_P * dt) {
+        for (int g = 0; g < GLOW_N; g++) {
+            glow_t *s = &t->glow[g];
+            if (s->carrier != -1 || s->vy != 0 || s->lob_s > 0) continue;   /* lying still, nobody's */
+            if (fabsf(s->x - t->diver_x) > DIVER_GRAB_REACH) continue;
+            s->carrier = (int8_t)GLOW_CARRIER_DIVER; s->held_s = 0;
+            t->diver_stick = (int8_t)g; t->diver_stick_t = 0;
+            t->diver_resting = true; t->diver_t = 0;                        /* he stops to do it */
+            break;
+        }
+    }
+    /* ---- now and then, the totem is HIS ---- */
+    if (!has_totem && t->totem_phase == TOTEM_OFF && tank_bit_live(t, SD_ITEM_TOTEM) &&
+        s_totem_cool <= 0 && !t->startled && tank_randf(t, 0, 1) < DIVER_TOTEM_P * dt) {
+        float tx = tank_decor_x(t, SD_IDX_TOTEM);
+        if (fabsf(t->diver_x - tx) < TOTEM_REACH * 2.2f) {   /* he has to be beside it, like anyone else */
+            totem_lift(t, TOTEM_CARRIER_DIVER);
+            has_totem = true;
+        }
+    }
+    /* ---- the party: he goes to the speaker and dances ---- */
+    bool party = tank_bass_party(t) && tank_bit_live(t, SD_ITEM_BASS);
+    t->diver_dancing = false;
+    if (party && !has_totem) {
+        float bx = tank_decor_x(t, SD_IDX_BASS);
+        if (fabsf(t->diver_x - bx) < 46.0f) {
+            t->diver_dancing = true;                       /* near enough: he stays and moves to it */
+            t->diver_dir = (int8_t)(sinf(t->diver_bob * 1.1f) < 0 ? -1 : 1);
+        } else {
+            t->diver_dir = (int8_t)(t->diver_x < bx ? 1 : -1);
+            t->diver_x += t->diver_dir * DIVER_SPEED * 1.7f * dt;   /* he gets a move on for this */
+        }
+        if ((t->diver_puff_t += dt) > DIVER_PUFF_S * 0.6f) {
+            t->diver_puff_t = 0;
+            chest_puff(t, t->diver_x + t->diver_dir * 5, TANK_H - 16 - DIVER_H + 4);
+        }
+        return;                                            /* dancing beats plodding */
+    }
+    if (has_totem) {                                   /* his own parade: he leads it somewhere */
+        float target;
+        if (t->totem_phase == TOTEM_HOME) target = tank_decor_x(t, SD_IDX_TOTEM);
+        else if (t->totem_planted) target = t->totem_party_x;
+        else if (tank_bit_live(t, SD_ITEM_BASS)) target = tank_decor_x(t, SD_IDX_BASS);
+        else target = TANK_W * 0.5f;
+        float d = target - t->diver_x;
+        if (fabsf(d) > 3.0f) {
+            t->diver_dir = (int8_t)(d < 0 ? -1 : 1);
+            t->diver_x += t->diver_dir * DIVER_MARCH_SPEED * dt;
+        } else if (t->totem_planted) {
+            t->diver_dancing = true;                   /* it is in the sand: he dances beside it */
+            t->diver_dir = (int8_t)(sinf(t->diver_bob * 1.1f) < 0 ? -1 : 1);
+        }
+        t->diver_resting = false;
+    } else if (t->diver_resting) {
+        if (t->diver_t > DIVER_PAUSE_S && t->diver_stick < 0) { t->diver_resting = false; t->diver_t = 0; }
     } else {
         t->diver_x += t->diver_dir * DIVER_SPEED * dt;
         if (t->diver_t > DIVER_WALK_S) { t->diver_resting = true; t->diver_t = 0; }
     }
+    /* with the totem up he is not patrolling: totem_tick steers him */
     float lo = home - DIVER_RANGE, hi = home + DIVER_RANGE;
+    if (has_totem) { lo = DECOR_MARGIN + DIVER_HALF_W; hi = TANK_W - DECOR_MARGIN - DIVER_HALF_W; }
     if (lo < DECOR_MARGIN + DIVER_HALF_W) lo = DECOR_MARGIN + DIVER_HALF_W;
     if (hi > TANK_W - DECOR_MARGIN - DIVER_HALF_W) hi = TANK_W - DECOR_MARGIN - DIVER_HALF_W;
     if (t->diver_x < lo) { t->diver_x = lo; t->diver_dir = 1; }
@@ -1366,6 +1492,11 @@ void tank_diver_state(const tank_t *t, float *x, float *y, int *dir, bool *resti
     if (y) *y = TANK_H - 16 + sinf(t->diver_bob * 1.3f) * DIVER_BOB;
     if (dir) *dir = t->diver_dir >= 0 ? 1 : -1;
     if (resting) *resting = t->diver_resting;
+}
+bool tank_diver_dancing(const tank_t *t) { return t->diver_dancing; }
+int  tank_diver_stick(const tank_t *t) { return t->diver_stick; }
+bool tank_diver_has_totem(const tank_t *t) {
+    return t->totem_phase != TOTEM_OFF && t->totem_carrier == TOTEM_CARRIER_DIVER;
 }
 bool tank_diver_tap(tank_t *t, float x, float y) {
     if (!tank_bit_live(t, SD_ITEM_DIVER)) return false;
@@ -1645,10 +1776,11 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
        are redirected: a hungry, frightened or resting fish is the model's
        call and is left exactly alone. Where "with the others" IS depends on
        which part of the event is running. */
-    if (t->totem_phase != TOTEM_OFF && t->totem_carrier >= 0 && t->totem_carrier < t->n_fish &&
+    float lead_x, lead_y;
+    if (t->totem_phase != TOTEM_OFF && totem_lead(t, &lead_x, &lead_y, NULL) &&
         (goal == GOAL_FOLLOW_FRIEND || goal == GOAL_EXPLORE || goal == GOAL_DART_PLAY || goal == GOAL_VISIT_BUBBLES)) {
-        const fish_t *lead = &t->fish[t->totem_carrier];
-        bool leader = idx == t->totem_carrier;
+        bool leader = idx == t->totem_carrier;       /* never true while the DIVER has it:
+                                                        then every fish is a follower */
         float bx = tank_decor_x(t, SD_IDX_BASS), home = tank_decor_x(t, SD_IDX_TOTEM);
         float ang = f->wander + idx * 1.7f;
         if (t->totem_phase == TOTEM_HOLD && leader) {          /* circling the speaker, totem up */
@@ -1678,8 +1810,8 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
                 tg.y = TANK_H - 16 - 44;
             }
         } else {                                               /* everyone else falls in around the leader */
-            tg.x = lead->x + cosf(ang) * 46;
-            tg.y = lead->y + sinf(ang) * 30;
+            tg.x = lead_x + cosf(ang) * 46;
+            tg.y = lead_y + sinf(ang) * 30;
         }
         tg.x = clampf(tg.x, 23, TANK_W - 23);
         tg.y = clampf(tg.y, 32, TANK_H - 23);

@@ -244,7 +244,8 @@ typedef struct {
     float  vx, vy;        /* 0 while resting or carried; vx is what the carrier's own
                            * motion threw it sideways with, and it is what scatters the pile */
     float  held_s;        /* seconds the carrier has had it */
-    int8_t carrier;       /* the fish holding it, or -1 */
+    float  lob_s;         /* seconds of rise left in a lob (the diver's air under it) */
+    int8_t carrier;       /* the fish holding it, GLOW_CARRIER_DIVER, or -1 */
 } glow_t;
 
 
@@ -368,6 +369,9 @@ typedef struct tank {
     float    diver_x, diver_t, diver_puff_t, diver_bob;
     int8_t   diver_dir;          /* -1 left, +1 right */
     bool     diver_resting;
+    int8_t   diver_stick;        /* the glow stick in his glove, or -1 */
+    float    diver_stick_t;      /* how long he has been looking at it */
+    bool     diver_dancing;      /* at the speaker, with the party on */
     bool     totem_planted;      /* standing in the sand at the party, not in a mouth */
     float    totem_party_x;      /* where it was slammed down, and the lean it kept */
     float    totem_party_ang;
@@ -672,6 +676,12 @@ bool  tank_chest_tap(tank_t *t, float x, float y);
  * way he faces, and whether he has stopped to look at something */
 void  tank_diver_state(const tank_t *t, float *x, float *y, int *dir, bool *resting);
 bool  tank_diver_tap(tank_t *t, float x, float y);
+/* he is at the speaker with the party on, and moving like it */
+bool  tank_diver_dancing(const tank_t *t);
+/* the stick in his glove (render draws it in his hand), or -1 */
+int   tank_diver_stick(const tank_t *t);
+/* true while the DIVER is the one carrying the totem */
+bool  tank_diver_has_totem(const tank_t *t);
 /* dev page / director: the most sociable fish lifts the totem NOW - no social
  * bar, no cooldown, no waiting for dark. Does nothing without the totem in the
  * tank, or while a parade is already running. */
@@ -875,6 +885,24 @@ enum { CHEST_SHUT = 0, CHEST_OPENING, CHEST_OPEN, CHEST_CLOSING };
 #define DIVER_WALK_S    14.0f               /* ... and how long he walks between stops */
 #define DIVER_PUFF_S    3.4f
 #define DIVER_BOB       3.0f                /* px of float on his own air */
+/* He does not just plod (2026-09-22). Three habits, all of them things the
+ * fish already do, so he reads as part of the tank rather than scenery:
+ *  - he PICKS UP a glow stick he is standing over and LOBS it into the top
+ *    third of the water on his own air, where it hangs a moment and then
+ *    falls all the way back down past everyone. Not often; enough.
+ *  - he DANCES at the speaker while the rig parties.
+ *  - and now and then he LIFTS THE TOTEM himself and leads the parade, which
+ *    is the same event a fish leads, with him at the front of it. */
+#define DIVER_GRAB_REACH  26.0f   /* a stick lying this close is within stooping distance */
+#define DIVER_GRAB_P      0.006f  /* odds A SECOND that he bothers, standing over one */
+#define DIVER_HOLD_S      2.6f    /* he looks at it, winds up, and lets it go */
+#define DIVER_LOB_VY      175.0f  /* up it goes - enough to reach the top third */
+#define DIVER_LOB_RISE_S  3.2f    /* how long his air keeps it climbing */
+#define DIVER_MARCH_SPEED 24.0f   /* with the totem up he steps out, like everyone else */
+#define DIVER_TOTEM_P     0.0014f /* odds A SECOND that he takes the totem up, standing by it */
+#define GLOW_CARRIER_DIVER (-2)   /* a stick in the diver's glove, not a fish's fin */
+#define TOTEM_CARRIER_DIVER (-2)  /* ... and the totem on his shoulder */
+#define GLOW_LOB_GRAV     60.0f   /* the gentle pull on a lobbed stick while it rises */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16
