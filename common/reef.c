@@ -731,11 +731,21 @@ static void reef_draw_carrier(const tank_t *t, uint16_t *fb, int stride, float d
                 }
         }
 }
+/* the reef whatever the setting says: the builder's canvas, where hidden
+ * coral is still the thing being worked on */
+void reef_draw_all(const tank_t *t, uint16_t *fb, int stride, float dim) {
+    tank_t copy = *t;              /* one field, and reef_draw stays the one drawing path */
+    copy.reef_hide = 0;
+    reef_draw(&copy, fb, stride, dim);
+}
 void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
     /* hidden by the keeper (settings): still built, still saved, just not
-       drawn - unless the builder is open, where it is the thing being
-       worked on. */
-    if (t->reef_hide && !reef_ui_active()) return;
+       drawn. No exceptions here - the builder's canvas asks for the reef
+       explicitly (reef_draw_all), because an exception that depended on the
+       builder having been CLOSED was an exception that never turned off:
+       neither app calls reef_ui_close, so the flag stuck on after one visit
+       and HIDE did nothing for the rest of the boot. */
+    if (t->reef_hide) return;
     if (reef_empty(t)) return;
     reef_draw_carrier(t, fb, stride, dim);           /* the dead mass it all grows on */
     reef_piece_t p;
@@ -795,6 +805,9 @@ void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
 #define RUI_BACK_W     92
 #define RUI_BACK_H     34
 #define RUI_ZBAR_Y     (RUI_HINT_Y + RUI_HINT_H + 6)
+#define RUI_STOP_W     84            /* STOP: puts the coral in hand back */
+#define RUI_STOP_H     34
+#define RUI_STOP_Y     RUI_ZBAR_Y
 
 static bool  s_menu;
 static int   s_shape = -1, s_colour = 1;
@@ -894,8 +907,11 @@ void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
                          : "NO ROOM IN THIS COLUMN";
         uint32_t hc = (s_shape >= 0 && !s_settled) ? NO : WHITE;
         render_text(fb, stride, (TANK_W - render_text_w(hint, 2)) / 2, RUI_HINT_Y, 2, hc, hint);
+        /* STOP, top right, under the hint: "DROP" read as "drop it here"
+           when it meant "put it back", and it sat in the bottom corner -
+           which is exactly where the building happens */
         if (s_shape >= 0)
-            render_button(fb, stride, TANK_W - 90, TANK_H - RUI_BTN_H - 8, 82, RUI_BTN_H, PANEL, TEAL, "DROP", 2);
+            render_button(fb, stride, TANK_W - RUI_STOP_W - 8, RUI_STOP_Y, RUI_STOP_W, RUI_STOP_H, PANEL, TEAL, "STOP", 2);
         if (s_rub && s_zoom > 1.01f) {                      /* the magnifier's own bar, under the hint:
                                                                down at the foot it covered the coral */
             render_button(fb, stride, 8, RUI_ZBAR_Y, RUI_BACK_W, RUI_BACK_H, PANEL, TEAL, "BACK", 2);
@@ -1014,7 +1030,9 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
                followed the finger all the way and then snapped back to the
                first touch. It lands where the finger LIFTS. */
             float rx = x + dx, ry = y + dy;
-            if (rx >= TANK_W - 98 && ry >= TANK_H - RUI_BTN_H - 16) { s_shape = -1; return REEF_UI_KEPT; }   /* DROP */
+            if (rx >= TANK_W - RUI_STOP_W - 14 && ry >= RUI_STOP_Y - 8 && ry < RUI_STOP_Y + RUI_STOP_H + 8) {
+                s_shape = -1; return REEF_UI_KEPT;                       /* STOP: the coral goes back */
+            }
             if (dy < -70 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }  /* back for another */
             rui_unzoom(&rx, &ry);
             rui_to_cell(t, rx, ry);
@@ -1051,7 +1069,12 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
         }
         return REEF_UI_KEPT;
     }
-    if (dy > 40 && fabsf(dx) < fabsf(dy)) { s_menu = false; return REEF_UI_KEPT; }
+    /* A drag DOWN is how you scroll back up the catalogue, and it was also
+       the gesture that left it - so scrolling up threw you out onto the
+       canvas, every time, however small the drag. It only leaves now when
+       the list is already at the top and the swipe is a big deliberate one;
+       DONE is right there and does it properly. */
+    if (dy > 90 && fabsf(dx) < fabsf(dy) && s_scroll0 <= 0.5f) { s_menu = false; return REEF_UI_KEPT; }
     /* anything past the slop was a scroll (the drag already moved it), and a
        scroll must never also count as a tap on whatever it finished over */
     if (moved) { rui_scroll_to(s_scroll0 - dy); return REEF_UI_KEPT; }

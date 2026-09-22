@@ -172,6 +172,11 @@ const char *const *progression_fry_tip(int kind);
  * and leaves room to REMOVE and re-buy while looking at it. */
 #define SD_DEV_GRANT   1000
 #define SD_PRICE_DISCO 120            /* the ball (2026-09-20): the centrepiece, priced like one */
+/* the old shelf (2026-09-22): the classics every tank has had since 1950,
+ * priced as the everyday things they are - the chest under the castle, the
+ * diver a little over it */
+#define SD_PRICE_CHEST 70
+#define SD_PRICE_DIVER 90
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
     const char *key;               /* one lowercase word: the director's `buy` / `place` */

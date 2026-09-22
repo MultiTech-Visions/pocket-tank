@@ -50,7 +50,7 @@ NORM_DB = -1.0
 CUES = [
     ("tap", 0), ("feed", 0), ("light_on", 0), ("light_off", 0), ("wipe", 0),
     ("snip", 0), ("card_open", 0), ("card_close", 0), ("wheel_tick", 0),
-    ("confirm", 0), ("bubbles_loop", 1),
+    ("confirm", 0), ("bubbles_loop", 1), ("club_loop", 1),
     ("eat", 0), ("spook", 0), ("investigate", 0), ("bubbles", 0), ("beg", 0),
     ("welcome", 0), ("arrival", 0), ("milestone", 0), ("stage_up", 0),
     ("sleep", 0), ("wake", 0), ("low_battery", 0), ("error", 0),

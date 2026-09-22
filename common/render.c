@@ -433,12 +433,14 @@ static void draw_glow_set(ctx_t *c, const tank_t *t, bool carried_pass) {
     for (int i = 0; i < GLOW_N; i++) {
         const glow_t *g = &t->glow[i];
         if (g->x <= 0 && g->y <= 0) continue;                 /* never placed */
-        if ((g->carrier >= 0) != carried_pass) continue;
+        /* the carried pass covers a stick in a fin AND one in the diver's
+           glove: either way it goes on top of whoever is holding it */
+        if ((g->carrier != -1) != carried_pass) continue;
         float cx = g->x, cy = g->y;
         float hx = cosf(g->ang) * 6.5f, hy = sinf(g->ang) * 6.5f;
         /* carried or falling it is lit whatever the hour - a stick in the water
            is the thing you are meant to be watching */
-        bool live = g->carrier >= 0 || g->vy > 0;
+        bool live = g->carrier != -1 || g->vy > 0 || g->lob_s > 0;
         /* brighter all round (2026-09-21): one lying on the sand in daylight
            used to sit at 0.55 and was easy to miss, and the halo is +2 px on
            both rings so it reads as a light rather than a dash of colour */
@@ -540,14 +542,127 @@ static void draw_disco(ctx_t *c, const tank_t *t) {
         }
 }
 
+/* the treasure chest: a banded box on the sand whose lid swings back, with
+ * the gold inside lighting the water as it opens (tank.h). Drawn the way
+ * everything else here is - spans and fills from a little geometry, no
+ * sprite - so it sits in the same water as the castle and the fronds. */
+static void draw_chest(ctx_t *c, const tank_t *t) {
+    float cx = tank_decor_x(t, SD_IDX_CHEST);
+    float open = tank_chest_open(t);
+    const float BY = FLOOR_Y;                       /* it stands on the sand */
+    const int HW = CHEST_W / 2;
+    src_t wood = src_color(0x7a4a26, c->dim), wood_d = src_color(0x54301a, c->dim),
+          wood_l = src_color(0xa0683a, c->dim), iron = src_color(0x4a4e58, c->dim);
+    /* the box */
+    for (int y = 0; y < CHEST_H; y++) {
+        float u = (float)y / CHEST_H;
+        const src_t *sp = u < 0.12f ? &wood_l : u > 0.86f ? &wood_d : &wood;
+        span(c, (int)(cx - HW), (int)(cx + HW), (int)(BY - CHEST_H + y), sp, 255);
+    }
+    for (int k = -1; k <= 1; k++) {                 /* three iron bands */
+        int bx = (int)(cx + k * (HW * 0.62f));
+        for (int y = 0; y < CHEST_H; y++) span(c, bx, bx + 1, (int)(BY - CHEST_H + y), &iron, 255);
+    }
+    for (int y = 0; y < CHEST_H; y++) {             /* and the corners */
+        span(c, (int)(cx - HW), (int)(cx - HW), (int)(BY - CHEST_H + y), &iron, 255);
+        span(c, (int)(cx + HW), (int)(cx + HW), (int)(BY - CHEST_H + y), &iron, 255);
+    }
+    /* the gold, seen once the lid lifts: a heap, a glow, and a few glints */
+    if (open > 0.02f) {
+        ctx_t lit = *c; lit.dim = 1.0f;             /* gold is its own light source */
+        float g = open;
+        fill_ellipse(&lit, cx, BY - CHEST_H, HW * 1.9f, 26 * g, 0xffce4a, (int)(30 * g));
+        fill_ellipse(&lit, cx, BY - CHEST_H, HW * 1.1f, 14 * g, 0xffce4a, (int)(60 * g));
+        /* a HEAP, not a bar: five mounds of coins with a lit crown each */
+        for (int i = 0; i < 5; i++) {
+            float gx = cx - HW + 5 + i * (CHEST_W - 10) / 4.0f;
+            float r = 5.0f - (i & 1) * 1.5f;
+            fill_ellipse(&lit, gx, BY - CHEST_H + 1, r, r * 0.62f, 0xd69626, 255);
+            fill_ellipse(&lit, gx, BY - CHEST_H - 0.5f, r * 0.8f, r * 0.5f, 0xffce4a, 255);
+            float tw = 0.5f + 0.5f * fast_sin(t->clock * 2.2f + i * 1.7f);   /* one glint at a time */
+            fill_ellipse(&lit, gx - r * 0.3f, BY - CHEST_H - 1.5f, 1.6f, 1.1f, 0xfff0a8, (int)(90 + 165 * tw));
+        }
+    }
+    /* The lid: a slab hinged along the BACK top edge, swinging up and back.
+       Filled by walking its own two axes and plotting - a slab at 40 degrees
+       drawn as a stack of rotated lines leaves gaps between them, which is
+       what made the first cut look like a plank propped against the box. */
+    float a = open * CHEST_LID_MAX;
+    float hx = cx + HW, hy = BY - CHEST_H;          /* the hinge, at the back top corner */
+    float ca = cosf(a), sa = sinf(a);
+    for (int iu = 0; iu <= CHEST_W * 2; iu++) {     /* half-steps: no gaps at any angle */
+        float u = iu * 0.5f;
+        for (int iv = 0; iv <= CHEST_LID_H * 2; iv++) {
+            float v = iv * 0.5f;
+            /* along the lid is -u to the left, across it is -v upward, both
+               turned by a about the hinge */
+            float px2 = hx - u * ca + v * sa;
+            float py2 = hy - u * sa - v * ca;
+            uint32_t col = iv < 3 ? 0xa0683a : iv > CHEST_LID_H * 2 - 4 ? 0x54301a : 0x7a4a26;
+            if (iu > CHEST_W * 0.55f && iu < CHEST_W * 0.75f && iv > 2 && iv < CHEST_LID_H * 2 - 3)
+                col = 0x4a4e58;                      /* the band, carried onto the lid */
+            px_blend(c, (int)px2, (int)py2, col, 255);
+            px_blend(c, (int)px2 + 1, (int)py2, col, 255);   /* no seams between half-steps */
+        }
+    }
+    /* the lock plate, on the front of the box */
+    src_t iron_l = src_color(0x787e8a, c->dim);
+    for (int y = 0; y < 7; y++) span(c, (int)(cx - 3), (int)(cx + 3), (int)(BY - CHEST_H * 0.55f + y), &iron_l, 255);
+}
+
+/* the diver: brass helmet, canvas suit, lead boots, plodding the sand and
+ * bobbing on his own air (tank.h). `dir` faces him. */
+static void draw_diver(ctx_t *c, const tank_t *t) {
+    float dx, dy; int dir; bool resting;
+    tank_diver_state(t, &dx, &dy, &dir, &resting);
+    src_t canvas = src_color(0x60707a, c->dim), canvas_d = src_color(0x404c56, c->dim),
+          canvas_l = src_color(0x84929c, c->dim), boot = src_color(0x3a3430, c->dim),
+          brass = src_color(0xc69634, c->dim), brass_d = src_color(0x8c641c, c->dim);
+    float top = dy - DIVER_H;                        /* the crown of the helmet */
+    /* the suit: a soft body, wider at the hips */
+    for (int y = 0; y < 22; y++) {
+        float u = (float)y / 22.0f;
+        float half = 7.0f + 3.0f * u;
+        const src_t *sp = (y % 5 == 4) ? &canvas_d : u < 0.1f ? &canvas_l : &canvas;
+        span(c, (int)(dx - half), (int)(dx + half), (int)(top + 18 + y), sp, 255);
+    }
+    /* the arms: the leading one swings as he walks. Dancing, both go up and
+       the swing doubles - he is having a better time than the plod lets on. */
+    bool dancing = tank_diver_dancing(t);
+    float swing = dancing ? fast_sin(t->clock * 4.4f) * 8.0f
+                          : resting ? 0.0f : fast_sin(t->clock * 2.0f) * 4.0f;
+    float lift = dancing ? -6.0f : 0.0f;
+    for (int y = 0; y < 12; y++) {
+        span(c, (int)(dx - 12 - (dir > 0 ? 0 : 1)), (int)(dx - 9), (int)(top + 21 + y + lift + (dir > 0 ? swing : -swing)), &canvas, 255);
+        span(c, (int)(dx + 9), (int)(dx + 12 + (dir > 0 ? 1 : 0)), (int)(top + 21 + y + lift + (dir > 0 ? -swing : swing)), &canvas, 255);
+    }
+    /* the lead boots, planted on the sand */
+    for (int y = 0; y < 6; y++) {
+        span(c, (int)(dx - 10), (int)(dx - 3), (int)(dy - 6 + y), &boot, 255);
+        span(c, (int)(dx + 3), (int)(dx + 10), (int)(dy - 6 + y), &boot, 255);
+    }
+    /* the helmet, and the little window he looks out of */
+    fill_ellipse(c, dx, top + 9, 10, 10, 0xc69634, 255);
+    fill_ellipse(c, dx - 3 * dir, top + 6, 4, 3, 0xf6d06c, 170);       /* its sheen */
+    for (int y = 0; y < 3; y++) span(c, (int)(dx - 8), (int)(dx + 8), (int)(top + 17 + y), &brass_d, 255);
+    { ctx_t lit = *c; if (t->night) lit.dim = 1.0f;                     /* the glass, lit from inside */
+      fill_ellipse(&lit, dx + 4 * dir, top + 9, 5, 4, 0x96e2ee, 255);
+      fill_ellipse(&lit, dx + 5 * dir, top + 8, 2, 1.5f, 0xe2faff, 220); }
+    for (int i = -1; i <= 1; i += 2)                                    /* the bolts round the faceplate */
+        fill_ellipse(c, dx + 7 * dir, top + 9 + i * 5, 1.5f, 1.5f, 0xf6d06c, 220);
+    (void)brass;
+}
+
 /* every festival piece on layer z (DECOR_Z_*), in item order */
 static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
-    for (int i = SD_IDX_LASER; i <= SD_IDX_DISCO; i++) {
+    for (int i = SD_IDX_LASER; i <= SD_IDX_DIVER; i++) {
         if (!tank_bit_live(t, SD_ITEMS[i].bit) || tank_decor_z(t, i) != z) continue;
         if (i == SD_IDX_LASER) draw_laser(c, t);
         else if (i == SD_IDX_BASS) draw_bass(c, t);
         else if (i == SD_IDX_GLOW) draw_glow(c, t);
         else if (i == SD_IDX_TOTEM) draw_totem(c, t, false);
+        else if (i == SD_IDX_CHEST) draw_chest(c, t);
+        else if (i == SD_IDX_DIVER) draw_diver(c, t);
         else draw_disco(c, t);
     }
 }
@@ -1201,7 +1316,9 @@ static void draw_scene_bare(const tank_t *t, uint16_t *fb, int stride, float dim
     float grow = 1.0f + 0.06f * popcount32(t->tank_ms_bits);
     fill_ellipse(&c, t->reef_x, TANK_H - 16, 34 * grow, 10 + 2 * (grow - 1) * 10, 0x123028, 255);
     if (!bare) { int cx, z; bool placing; if (castle_state(t, &cx, &z, &placing)) draw_castle(&c, cx, 0, false); }   /* uncached: always drawn here */
-    reef_draw(t, fb, stride, dim);          /* the keeper's own reef, in front of the old rock (reef.c) */
+    /* the keeper's own reef, in front of the old rock (reef.c). The
+       builder's canvas shows it even when the setting hides it. */
+    if (bare) reef_draw_all(t, fb, stride, dim); else reef_draw(t, fb, stride, dim);
 }
 
 
@@ -2419,7 +2536,7 @@ static int  g_shp_page;              /* the shelf on show */
 static const icon_t *shop_icon(int item) {
     static const icon_t *const ic[SD_ITEM_COUNT] = { &icon_shop_plant, &icon_shop_snail, &icon_shop_castle,
                                                      &icon_shop_laser, &icon_shop_bass, &icon_shop_glow, &icon_shop_totem,
-                                                     &icon_shop_disco };
+                                                     &icon_shop_disco, &icon_shop_chest, &icon_shop_diver };
     return ic[item];
 }
 static int shop_page_rows(int page) { int n = SD_ITEM_COUNT - page * SHP_PAGE_ROWS; return n > SHP_PAGE_ROWS ? SHP_PAGE_ROWS : n; }
@@ -2597,7 +2714,8 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
 #define SET_ROWS_Y    (SET_ROW2_Y + SET_ROW_DY)     /* SPEED */
 #define SET_ROW3_Y    (SET_ROWS_Y + SET_ROW_DY)     /* LIGHTS OUT */
 #define SET_ROWR_Y    (SET_ROW3_Y + SET_ROW_DY)     /* REEF (only once it is built) */
-#define SET_NOTE_Y    (SET_ROWR_Y + 36)             /* "FISH ARE QUIET AT NIGHT" */
+#define SET_ROWM_Y    (SET_ROWR_Y + SET_ROW_DY)     /* MUSIC (only with the rig AND the totem) */
+#define SET_NOTE_Y    (SET_ROWR_Y + 36)             /* "FISH ARE QUIET AT NIGHT" - the music row's spot */
 #define SET_LABEL_X   32
 #define SET_BAT_X     10             /* the charge, top left of the title row */
 #define SET_BAT_Y     12
@@ -2625,13 +2743,15 @@ static int g_set_ver_taps;           /* consecutive taps on the version line (th
 #define SET_NUM_H     (7 * SET_NUM_SCALE)
 #define SET_NUM_X     SET_SEG_X       /* the number's left edge (right-aligned in a 3-digit box) */
 #define SET_NUM_BOX_W (3 * 6 * SET_NUM_SCALE - SET_NUM_SCALE)
-#define SET_NUM_Y     292
-#define SET_NUM_GAP   20              /* chevron tip to the number */
+#define SET_NUM_Y     296
+#define SET_NUM_GAP   14              /* chevron tip to the number */
 #define SET_AFTER_Y   (SET_NUM_Y + (SET_NUM_H - 14) / 2)
 #define SET_STEP_PX   15              /* drag travel per step */
 #define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROWR_Y) - 12)   /* the LIGHTS OUT band ends where REEF's begins */
-#define SET_REEF_BAND_END  (SET_SEG_Y(SET_ROWR_Y) + SET_SEG_H + 8)
+#define SET_REEF_BAND_END  (SET_SEG_Y(SET_ROWM_Y) - 12)
+#define SET_MUSIC_BAND_END (SET_SEG_Y(SET_ROWM_Y) + SET_SEG_H + 6)
 static const char *const SET_REEF[2] = { "SHOW", "HIDE" };
+static const char *const SET_MUSIC[2] = { "OFF", "ON" };
 static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
 static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
@@ -2693,7 +2813,12 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     /* the reef is a row like the others, and only once there is one */
     if (t->reef_open || !reef_empty(t))
         set_row(&c, SET_ROWR_Y, "REEF", SET_REEF, 2, t->reef_hide ? 1 : 0);
-    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
+    /* MUSIC: the club heard from outside, while the rig throws its party.
+       Only with both pieces in the tank - with nothing to party at there is
+       nothing to hear, and the row would be a promise the tank cannot keep.
+       It takes the note's line; the note goes when it is there. */
+    if (tank_club_possible(t)) set_row(&c, SET_ROWM_Y, "MUSIC", SET_MUSIC, 2, t->club_off ? 0 : 1);
+    else draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
     if (t->light_auto) {
         /* AUTO: AFTER [ n ] SEC, the number with its chevrons */
         char num[8]; snprintf(num, sizeof num, "%d", t->light_idle_s);
@@ -2756,7 +2881,8 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROWS_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_SPEED; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_LIGHT_BAND_END)          { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg == 1; return SET_TAP_LIGHT; }
     if (y >= SET_LIGHT_BAND_END && y < SET_REEF_BAND_END)                   { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_REEF; }
-    if (y >= SET_REEF_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
+    if (y >= SET_REEF_BAND_END && y < SET_MUSIC_BAND_END)                   { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_MUSIC; }
+    if (y >= SET_MUSIC_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
         *value = 0;
         if (y < SET_NUM_Y - 8) return SET_HIT_IDLE_UP;                     /* the band above the number */
         if (y < SET_NUM_Y + SET_NUM_H + 14) return SET_HIT_IDLE_NUM;      /* the number */
@@ -2807,6 +2933,12 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                         t->reef_hide = v ? 1 : 0;
                         progression_settings_changed();
                         r = SET_TAP_REEF; *value = t->reef_hide;
+                    }
+                } else if (h == SET_TAP_MUSIC) {                    /* the club, heard from outside */
+                    if (tank_club_possible(t)) {
+                        t->club_off = v ? 0 : 1;                       /* segment 1 = ON */
+                        progression_settings_changed();
+                        r = SET_TAP_MUSIC; *value = !t->club_off;
                     }
                 } else if (h == SET_HIT_BULB) { g_set_bulb = true;
                 } else if (h == SET_HIT_MODAL) { g_set_bulb = false;

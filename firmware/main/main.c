@@ -471,6 +471,9 @@ static void tank_task(void *arg) {
         notice_tick(&tank, dt, setup_active() || touch_port_confirm_up() || touch_port_milestones() || touch_port_settings() || touch_port_shop() || touch_port_fishpage() >= 0);
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
         audio_port_set_night(tank.night);
+        { static bool club_on;                     /* the club from outside, while the rig parties */
+          bool club = tank_club_audible(&tank);
+          if (club != club_on) { if (club) audio_port_play(SND_CLUB_LOOP, AUDIO_PITCH_ONE); else audio_port_stop(SND_CLUB_LOOP); club_on = club; } }
         { static bool loop_on;                     /* the bubble loop rides the setup's placement page */
           bool loop = setup_active() && !setup_is_birth() && setup_page() == SETUP_PG_BUBBLES;
           if (loop != loop_on) { if (loop) audio_port_play(SND_BUBBLES_LOOP, AUDIO_PITCH_ONE); else audio_port_stop(SND_BUBBLES_LOOP); loop_on = loop; } }
