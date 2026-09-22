@@ -31,6 +31,15 @@ images cannot reach the protected partitions before either file is ever built.
 
 A board that has never been flashed also needs the model partition, which is
 8 MB and not carried here.
+
+TWO BOARDS, ONE FILE. The app is built for both the 1.8" AMOLED tank and the
+1.54" square LCD one, and both payloads ride in here. It ASKS which one is
+plugged in, because it cannot tell: both are an ESP32-S3 with 16 MB of flash
+and they answer the bootloader with the same chip id, the same flash id and
+nothing that distinguishes the panel. Reading back what is already on the
+board would only say what it was flashed with last time, which is exactly
+the thing that is wrong when somebody is standing here. So: a numbered
+question, or --board <id> for anyone who would rather not be asked.
 """
 import json, os, sys
 
@@ -73,8 +82,42 @@ def pause():
         input("\n  Press Enter to close this window. ")
 
 
+def boards():
+    """every board this bundle can flash, from boards.json"""
+    return json.load(open(bundled("boards.json")))
+
+
+def spec_of(board):
+    """that board's flash.json, with its file names made bundle-relative"""
+    spec = json.load(open(bundled(os.path.join(board["dir"], "flash.json"))))
+    for part in spec["parts"]:
+        part["file"] = os.path.join(board["dir"], part["file"])
+    return spec
+
+
+def choose(bs):
+    """which tank is this? Asked once, plainly, with no default that could
+    quietly flash the wrong app onto somebody's fish."""
+    print("   Which tank is plugged in?")
+    print()
+    for i, b in enumerate(bs, 1):
+        print(f"     {i}. {b['label']}")
+    print()
+    while True:
+        try:
+            answer = input(f"   Type 1-{len(bs)} and press Enter: ").strip()
+        except EOFError:
+            raise SystemExit("\n   No answer, and there is no safe guess - nothing was written.")
+        if answer.isdigit() and 1 <= int(answer) <= len(bs):
+            return bs[int(answer) - 1]
+        print("   Just the number, please.")
+
+
 def selfcheck(spec):
     """prove this bundle is complete, with no board anywhere near it.
+
+    Runs for EVERY board in the bundle, so a payload that was not collected
+    fails here rather than on somebody's desk.
 
     The payload is easy: bundled() already raises for a missing file. The one
     that bit us shipped instead - esptool keeps its stub flashers as package
@@ -100,13 +143,29 @@ def selfcheck(spec):
 
 def main():
     p = platform()
-    spec = json.load(open(bundled("flash.json")))
-    if len(sys.argv) > 1 and sys.argv[1] == "--selfcheck":   # CI, never a person
-        return selfcheck(spec)
+    bs = boards()
+    argv_rest = sys.argv[1:]
+    if argv_rest and argv_rest[0] == "--selfcheck":          # CI, never a person
+        for b in bs:
+            if selfcheck(spec_of(b)):
+                return 1
+        return 0
+    picked = None
+    if len(argv_rest) >= 2 and argv_rest[0] == "--board":    # for anyone who knows which they have
+        picked = next((b for b in bs if b["id"] == argv_rest[1]), None)
+        if not picked:
+            raise SystemExit("   No such board: " + argv_rest[1] +
+                             "\n   This file carries: " + ", ".join(b["id"] for b in bs))
+        argv_rest = argv_rest[2:]
     rule = "=" * 62
     print(rule)
     print("   POCKET TANK - upgrade the app")
     print(rule)
+    if picked is None:
+        picked = bs[0] if len(bs) == 1 else choose(bs)
+        print()
+    spec = spec_of(picked)
+    print(f"   {picked['label']}")
     print(f"   firmware {spec['version']}, built {spec['built']}")
     print()
     print("   Your fish, their names, your sand dollars and everything")
@@ -118,8 +177,8 @@ def main():
     print()
 
     argv = ["--chip", spec["chip"], "--baud", "460800"]
-    if len(sys.argv) > 1:                      # an explicit port, e.g. PocketTankUpgrade.exe COM7
-        argv += ["--port", sys.argv[1]]
+    if argv_rest:                              # an explicit port, e.g. PocketTankUpgrade.exe COM7
+        argv += ["--port", argv_rest[0]]
     argv += ["write_flash"]
     for part in spec["parts"]:
         argv += [part["offset"], bundled(part["file"])]

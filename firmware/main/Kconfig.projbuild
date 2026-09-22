@@ -1,4 +1,17 @@
 menu "pocket-tank"
+    choice POCKET_TANK_BOARD
+        prompt "Target board"
+        default POCKET_TANK_BOARD_AMOLED18
+        help
+            Which Waveshare board this build is for. The tank is composed at
+            448x368 either way; the 1.54in build squashes that frame down to
+            240x240 on its way to the panel, so the text is small but every
+            page works. See firmware/main/display_port_st7789.c.
+        config POCKET_TANK_BOARD_AMOLED18
+            bool "ESP32-S3-Touch-AMOLED-1.8 (448x368, SH8601 / CO5300 over QSPI)"
+        config POCKET_TANK_BOARD_LCD154
+            bool "ESP32-S3-Touch-LCD-1.54 (240x240 ST7789 over SPI; frame squashed)"
+    endchoice
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n

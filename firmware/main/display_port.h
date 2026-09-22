@@ -21,4 +21,10 @@ void display_port_set_inverted(bool inverted);
  * across display_port_wake, which re-inits the panel. */
 void    display_port_set_brightness(uint8_t level);
 uint8_t display_port_brightness(void);
+/* A touch point as the controller reports it (panel coordinates) put into
+ * TANK coordinates. Each board's geometry lives with its display port: the
+ * AMOLED is a 90-degree rotation, the 1.54" LCD is the inverse of the
+ * squash, bands and all. `inverted` = the screen is being shown 180 round.
+ * The touch port applies its finger bias afterwards, in tank space. */
+void display_port_map_touch(float px, float py, bool inverted, float *tx, float *ty);
 #endif

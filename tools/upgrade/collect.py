@@ -6,7 +6,13 @@ never leave a stale offset baked into a bundle), copies the three images the
 upgrade writes into one folder, and writes flash.json beside them for
 pocket_tank_upgrade.py to read at run time.
 
-    tools/upgrade/collect.py --build-dir firmware/build --out payload
+    tools/upgrade/collect.py --build-dir firmware/build-amoled18 --out payload \
+            --board amoled18 --label "1.8 inch AMOLED (the round-cornered one)"
+
+Run once per board. Each board's images go in their own folder under --out
+and are listed in boards.json, which the upgrader reads to ask which tank it
+is talking to. (It cannot tell by looking: both boards are an ESP32-S3 with
+16 MB of flash and answer the bootloader identically.)
 
 The guard: every byte this will write is checked against the data partitions
 in firmware/partitions.csv. If an image has grown far enough to reach `nvs`
@@ -47,6 +53,8 @@ def main():
     ap.add_argument("--build-dir", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--version")
+    ap.add_argument("--board", default="amoled18", help="folder and id for this board's images")
+    ap.add_argument("--label", help="how the upgrader names this board to a person")
     a = ap.parse_args()
 
     fa_path = os.path.join(a.build_dir, "flasher_args.json")
@@ -54,7 +62,8 @@ def main():
         sys.exit(f"{fa_path}: not a firmware build dir (run idf.py build first)")
     fa = json.load(open(fa_path))
 
-    os.makedirs(a.out, exist_ok=True)
+    out_dir = os.path.join(a.out, a.board)
+    os.makedirs(out_dir, exist_ok=True)
     parts, guard = [], protected_spans()
     for key, pub in (("bootloader", "bootloader.bin"),
                      ("partition-table", "partition-table.bin"),
@@ -71,7 +80,7 @@ def main():
                 sys.exit(f"REFUSING TO BUILD: {pub} at {ent['offset']} runs to {end:#x} and would "
                          f"overwrite the '{name}' partition ({p_off:#x}..{p_off + p_size:#x}). "
                          f"An upgrade must never touch it.")
-        shutil.copyfile(src, os.path.join(a.out, pub))
+        shutil.copyfile(src, os.path.join(out_dir, pub))
         parts.append({"offset": ent["offset"], "file": pub, "bytes": size})
 
     spec = {"version": a.version or git_version(),
@@ -79,9 +88,16 @@ def main():
             "chip": "esp32s3",
             "parts": parts,
             "protected": [{"name": n, "offset": hex(o), "size": hex(s)} for n, o, s in guard]}
-    json.dump(spec, open(os.path.join(a.out, "flash.json"), "w"), indent=2)
+    json.dump(spec, open(os.path.join(out_dir, "flash.json"), "w"), indent=2)
+    # the index the upgrader reads: merged, so each board's run adds itself
+    index_path = os.path.join(a.out, "boards.json")
+    index = json.load(open(index_path)) if os.path.isfile(index_path) else []
+    index = [b for b in index if b["id"] != a.board]
+    index.append({"id": a.board, "label": a.label or a.board, "dir": a.board})
+    index.sort(key=lambda b: b["id"] != "amoled18")        # the default board first
+    json.dump(index, open(index_path, "w"), indent=2)
     total = sum(p["bytes"] for p in parts)
-    print(f"upgrader payload -> {a.out}  ({spec['version']}, {total / 1024:.0f} KB over {len(parts)} images)")
+    print(f"upgrader payload -> {out_dir}  ({spec['version']}, {total / 1024:.0f} KB over {len(parts)} images)")
     for p in parts:
         print(f"  {p['offset']:>10}  {p['file']:<22} {p['bytes'] / 1024:7.1f} KB")
     print("  protected, never written: " + ", ".join(f"{n} @ {o:#x}" for n, o, _ in guard))

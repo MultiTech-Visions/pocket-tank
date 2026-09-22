@@ -1,0 +1,19 @@
+# pocket-tank on the Waveshare ESP32-S3-Touch-LCD-1.54.
+#
+# Layered ON TOP of sdkconfig.defaults (build with
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.lcd154"),
+# so everything the two boards share - octal PSRAM at 80 MHz (Waveshare's own
+# BSP for this board sets SPIRAM_MODE_OCT too), 16 MB QIO flash, the
+# partition table, the task sizes - is stated once.
+#
+# The panel is 240x240 and the tank is composed at 448x368, squashed on the
+# way out (firmware/main/display_port_st7789.c). Nothing above the display
+# port knows the difference.
+CONFIG_POCKET_TANK_BOARD_LCD154=y
+CONFIG_POCKET_TANK_BOARD_AMOLED18=n
+# the AMOLED's QSPI panel driver is not built for this board; the ST7789 comes
+# from esp_lcd itself, so there is nothing to switch on here
+CONFIG_POCKET_TANK_DISPLAY_SH8601=n
+# touch is a CST816 on this board; the same port drives it
+CONFIG_POCKET_TANK_TOUCH_FT3168=y
+CONFIG_POCKET_TANK_AUDIO_ES8311=y
