@@ -2588,20 +2588,27 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
  * the keeper's opt-in) with the idle time under it as one number: swipe it
  * up or down, or tap the chevrons; the default is LIGHT_IDLE_S. */
 #define SET_TITLE_Y   14
-/* four rows now (2026-09-21: SPEED joined them), so they moved up and
-   closed ranks; the seconds number came up with them */
-#define SET_ROW1_Y    46             /* BRIGHTNESS */
-#define SET_ROW2_Y    92             /* VOLUME */
-#define SET_ROWS_Y    138            /* SPEED */
-#define SET_NOTE_Y    174            /* "FISH ARE QUIET AT NIGHT" */
-#define SET_ROW3_Y    204            /* LIGHTS OUT */
+/* FIVE rows now (2026-09-22: REEF joined them), evenly spaced and all the
+   same shape. REEF was a chip in the corner for one build and looked like
+   somebody else's page; a setting is a row like every other setting. */
+#define SET_ROW_DY    42
+#define SET_ROW1_Y    44             /* BRIGHTNESS */
+#define SET_ROW2_Y    (SET_ROW1_Y + SET_ROW_DY)     /* VOLUME */
+#define SET_ROWS_Y    (SET_ROW2_Y + SET_ROW_DY)     /* SPEED */
+#define SET_ROW3_Y    (SET_ROWS_Y + SET_ROW_DY)     /* LIGHTS OUT */
+#define SET_ROWR_Y    (SET_ROW3_Y + SET_ROW_DY)     /* REEF (only once it is built) */
+#define SET_NOTE_Y    (SET_ROWR_Y + 36)             /* "FISH ARE QUIET AT NIGHT" */
 #define SET_LABEL_X   32
 #define SET_BAT_X     10             /* the charge, top left of the title row */
 #define SET_BAT_Y     12
-#define SET_REEF_X    (TANK_W - 108) /* the REEF chip, top right */
-#define SET_REEF_Y    8
-#define SET_REEF_W    100
-#define SET_REEF_H    26
+/* The bulb sits where a THIRD segment of the LIGHTS OUT row would be, the
+   same size and on the same line, because that is what it is: another
+   button in that row. Tap it for what a MANUAL light means - two lines of
+   instructions used to sit under the row and shout. */
+#define SET_BULB_BX   (SET_SEG_X + 2 * SET_SEG_DX)
+#define SET_BULB_BY   SET_SEG_Y(SET_ROW3_Y)
+#define SET_BULB_X    (SET_BULB_BX + SET_SEG_W / 2)
+#define SET_BULB_Y    (SET_BULB_BY + SET_SEG_H / 2)
 static int g_set_ver_taps;           /* consecutive taps on the version line (the dev page) */
 #define SET_SEG_X     190            /* first segment */
 #define SET_SEG_W     76
@@ -2618,11 +2625,13 @@ static int g_set_ver_taps;           /* consecutive taps on the version line (th
 #define SET_NUM_H     (7 * SET_NUM_SCALE)
 #define SET_NUM_X     SET_SEG_X       /* the number's left edge (right-aligned in a 3-digit box) */
 #define SET_NUM_BOX_W (3 * 6 * SET_NUM_SCALE - SET_NUM_SCALE)
-#define SET_NUM_Y     280
-#define SET_NUM_GAP   24              /* chevron tip to the number */
+#define SET_NUM_Y     292
+#define SET_NUM_GAP   20              /* chevron tip to the number */
 #define SET_AFTER_Y   (SET_NUM_Y + (SET_NUM_H - 14) / 2)
 #define SET_STEP_PX   15              /* drag travel per step */
-#define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H + 8)   /* the segments' band stops just under them */
+#define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROWR_Y) - 12)   /* the LIGHTS OUT band ends where REEF's begins */
+#define SET_REEF_BAND_END  (SET_SEG_Y(SET_ROWR_Y) + SET_SEG_H + 8)
+static const char *const SET_REEF[2] = { "SHOW", "HIDE" };
 static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
 static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
@@ -2637,6 +2646,17 @@ static void set_row(ctx_t *c, int row_y, const char *label, const char *const na
             button(c, x, y, SET_SEG_W, SET_SEG_H, MSP_TEAL, MSP_TEAL, names[i], 2);
             draw_text(c, x + (SET_SEG_W - text_w(names[i], 2)) / 2, y + (SET_SEG_H - 14) / 2, 2, MSP_INK, names[i]);
         } else button(c, x, y, SET_SEG_W, SET_SEG_H, 0x1c2f36, MSP_DIM, names[i], 2);
+    }
+}
+static bool g_set_bulb;              /* the "what does MANUAL mean" note is up */
+/* a little bulb: a glass round, a neck, a base, and three rays */
+static void set_bulb(ctx_t *c, int cx, int cy, uint32_t rgb, bool lit) {
+    fill_ellipse(c, (float)cx, (float)cy, 7.5f, 8.0f, lit ? 0xffe08d : rgb, lit ? 255 : 120);
+    fill_ellipse(c, (float)cx, (float)cy, 5.5f, 6.0f, MSP_INK, 255);
+    rect_fill(c, cx - 3, cy + 7, 6, 2, rgb);
+    rect_fill(c, cx - 2, cy + 10, 4, 2, rgb);
+    for (int i = -1; i <= 1; i++) {                 /* rays, so it reads as a light not a balloon */
+        rect_fill(c, cx + i * 11, cy - 13 + (i ? 2 : 0), 2, 4, rgb);
     }
 }
 static void set_chevron(ctx_t *c, int cx, int y, bool up, uint32_t rgb) {   /* the setup's, a size down */
@@ -2663,18 +2683,17 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
                                  pc <= 15 ? 0xf25b65 : pc <= 35 ? 0xf2b134 : 0x6fe3a1);
         draw_text(&c, BX + BW + 8, BY + 1, 2, MSP_DIM, bt);
     }
-    /* the reef chip, top right: only once the builder has been found */
-    if (t->reef_open || !reef_empty(t)) {
-        bool hid = t->reef_hide != 0;
-        button(&c, SET_REEF_X, SET_REEF_Y, SET_REEF_W, SET_REEF_H,
-               hid ? 0x2a1c1c : 0x1c2f36, hid ? 0xf2b134 : MSP_TEAL, hid ? "REEF OFF" : "REEF ON", 2);
-    }
     int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
     set_row(&c, SET_ROWS_Y, "SPEED", SET_SPEED, FISH_SPEED_N, t->fish_speed < FISH_SPEED_N ? t->fish_speed : 1);
-    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
     set_row(&c, SET_ROW3_Y, "LIGHTS OUT", SET_LIGHT, 2, t->light_auto ? 1 : 0);
+    button(&c, SET_BULB_BX, SET_BULB_BY, SET_SEG_W, SET_SEG_H, 0x1c2f36, MSP_DIM, "", 2);
+    set_bulb(&c, SET_BULB_X, SET_BULB_Y, MSP_TEAL, !t->light_manual_off);
+    /* the reef is a row like the others, and only once there is one */
+    if (t->reef_open || !reef_empty(t))
+        set_row(&c, SET_ROWR_Y, "REEF", SET_REEF, 2, t->reef_hide ? 1 : 0);
+    draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
     if (t->light_auto) {
         /* AUTO: AFTER [ n ] SEC, the number with its chevrons */
         char num[8]; snprintf(num, sizeof num, "%d", t->light_idle_s);
@@ -2685,11 +2704,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
         set_chevron(&c, cx, SET_NUM_Y - SET_NUM_GAP, true, MSP_TEAL);
         set_chevron(&c, cx, SET_NUM_Y + SET_NUM_H + SET_NUM_GAP + 3, false, MSP_TEAL);
         draw_text(&c, SET_NUM_X + SET_NUM_BOX_W + 10, SET_AFTER_Y, 2, MSP_TEAL, "SEC");
-    } else {
-        /* MANUAL: how to work the light instead */
-        draw_text(&c, SET_LABEL_X, SET_NUM_Y - 8, 2, MSP_TEAL, "DOUBLE-TAP THE GLASS TO");
-        draw_text(&c, SET_LABEL_X, SET_NUM_Y + 14, 2, MSP_TEAL, "TURN THE LIGHT ON OR OFF");
-    }
+    }   /* MANUAL says nothing here any more: the bulb by the row explains it */
     /* the firmware version, hugging the bottom left of the frame (6 px up,
        on the labels' x; the bezel's curve is clear there), small (8 px) and
        dim: it is for the keeper who asks "how do I update?", not for
@@ -2705,6 +2720,16 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     }
     draw_text_8px(&c, SET_LABEL_X, TANK_H - 8 - 6, MSP_DIM, ver);
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
+    if (g_set_bulb) {                       /* the bulb's note, over the page */
+        const int W = 330, H = 132, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
+        rect_fill(&c, X, Y, W, H, 0x0b1f26);
+        rect_edge(&c, X, Y, W, H, MSP_TEAL);
+        set_bulb(&c, X + 30, Y + 34, MSP_TEAL, true);
+        draw_text(&c, X + 58, Y + 22, 2, 0xffffff, "MANUAL LIGHT");
+        draw_text(&c, X + 58, Y + 44, 2, MSP_TEAL, "DOUBLE-TAP THE GLASS");
+        draw_text(&c, X + 58, Y + 64, 2, MSP_TEAL, "TO TURN IT ON OR OFF");
+        button(&c, X + (W - 110) / 2, Y + H - 44, 110, 34, 0x1c2f36, MSP_TEAL, "GOT IT", 2);
+    }
 }
 static int set_segment(float x, int n) {
     if (x < SET_SEG_X - 10) return -1;
@@ -2714,10 +2739,14 @@ static int set_segment(float x, int n) {
 /* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent,
  * VOLUME 0..2, LIGHT 1 = AUTO / 0 = MANUAL; the number's own hits carry no
  * value (IDLE_UP / IDLE_DOWN the chevrons, IDLE_NUM the number itself). */
-enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN, SET_HIT_VERSION };
+enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN, SET_HIT_VERSION, SET_HIT_BULB, SET_HIT_MODAL };
 int render_settings_tap(float x, float y, int *value) {
+    *value = 0;
+    if (g_set_bulb) return SET_HIT_MODAL;        /* the note owns the glass: anywhere dismisses it */
     if (x >= MSP_CLOSE_X - 8 && y >= MSP_CLOSE_Y - 4) return SET_TAP_CLOSE;
-    if (x >= SET_REEF_X - 6 && y >= SET_REEF_Y - 6 && y < SET_REEF_Y + SET_REEF_H + 6) { *value = 0; return SET_TAP_REEF; }
+    /* the bulb, before the LIGHTS OUT band it shares a line with */
+    if (x >= SET_BULB_BX - 6 && x < SET_BULB_BX + SET_SEG_W + 6 &&
+        y >= SET_BULB_BY - 12 && y < SET_BULB_BY + SET_SEG_H + 8) return SET_HIT_BULB;
     /* the row bands: from a little above each segment down to the next row
        (fingers report low); the LIGHTS OUT band ends just under its
        segments so the number's up chevron below is its own */
@@ -2726,7 +2755,8 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROW2_Y) - 12 && y < SET_SEG_Y(SET_ROWS_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
     if (y >= SET_SEG_Y(SET_ROWS_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_SPEED; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_LIGHT_BAND_END)          { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg == 1; return SET_TAP_LIGHT; }
-    if (y >= SET_LIGHT_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
+    if (y >= SET_LIGHT_BAND_END && y < SET_REEF_BAND_END)                   { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_REEF; }
+    if (y >= SET_REEF_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
         *value = 0;
         if (y < SET_NUM_Y - 8) return SET_HIT_IDLE_UP;                     /* the band above the number */
         if (y < SET_NUM_Y + SET_NUM_H + 14) return SET_HIT_IDLE_NUM;      /* the number */
@@ -2772,12 +2802,14 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                     t->fish_speed = (uint8_t)(v < 0 ? 0 : v >= FISH_SPEED_N ? FISH_SPEED_N - 1 : v);
                     progression_settings_changed();
                     r = SET_TAP_SPEED; *value = t->fish_speed;
-                } else if (h == SET_TAP_REEF) {                     /* out of sight, still built */
+                } else if (h == SET_TAP_REEF) {                     /* SHOW / HIDE: out of sight, still built */
                     if (t->reef_open || !reef_empty(t)) {
-                        t->reef_hide = t->reef_hide ? 0 : 1;
+                        t->reef_hide = v ? 1 : 0;
                         progression_settings_changed();
                         r = SET_TAP_REEF; *value = t->reef_hide;
                     }
+                } else if (h == SET_HIT_BULB) { g_set_bulb = true;
+                } else if (h == SET_HIT_MODAL) { g_set_bulb = false;
                 } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME) { r = h; *value = v; }
                 if (h != SET_HIT_VERSION) g_set_ver_taps = 0;          /* any other tap starts the run over */
             }

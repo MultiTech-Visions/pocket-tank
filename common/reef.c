@@ -525,7 +525,11 @@ bool reef_piece(const tank_t *t, int i, reef_piece_t *out) {
 }
 bool reef_empty(const tank_t *t) { return reef_count(t) == 0; }
 void reef_clear(tank_t *t) { memset(t->reef, 0, sizeof t->reef); s_epoch++; }
-unsigned reef_epoch(const tank_t *t) { (void)t; return s_epoch; }
+/* The scene cache bakes the reef in and only rebuilds when this changes, so
+ * HIDING the reef has to move it too - otherwise the coral stays painted on
+ * the cached backdrop and the setting appears to do nothing, which is
+ * exactly what it did. */
+unsigned reef_epoch(const tank_t *t) { return s_epoch * 2u + (t->reef_hide ? 1u : 0u); }
 
 bool reef_occupied(const tank_t *t, int cx, int cy) {
     if (cx < 0 || cy < 0 || cx >= REEF_COLS || cy >= REEF_ROWS) return false;
@@ -758,11 +762,14 @@ void reef_draw(const tank_t *t, uint16_t *fb, int stride, float dim) {
  *    the finger. Anything past RUI_SLOP px is a scroll and never a tap.
  *  - DONE was small; there was no way to start over. */
 #define RUI_SLOP       8             /* past this, a finger is scrolling, not tapping */
+/* The rail is three SQUARES the same size, because an index finger covers
+ * about a fifth of this glass and a 28 px bar is not a target. */
 #define RUI_RAIL_W     88            /* the left rail: colour, OUT, RESET */
-#define RUI_SW_Y       56            /* the big colour swatch */
-#define RUI_SW_H       58
-#define RUI_OUT_Y      (RUI_SW_Y + RUI_SW_H + 10)
-#define RUI_RESET_Y    (RUI_OUT_Y + 44)
+#define RUI_SQ         72            /* one rail square, wide and tall */
+#define RUI_SQ_X       8
+#define RUI_SW_Y       52            /* the colour */
+#define RUI_OUT_Y      (RUI_SW_Y + RUI_SQ + 8)
+#define RUI_RESET_Y    (RUI_OUT_Y + RUI_SQ + 8)
 #define RUI_BTN_H      38
 #define RUI_DONE_W     118
 #define RUI_DONE_H     40
@@ -902,10 +909,10 @@ void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
     render_text(fb, stride, 12, 16, 3, WHITE, "CORAL");
     render_button(fb, stride, RUI_DONE_X, RUI_DONE_Y, RUI_DONE_W, RUI_DONE_H, PANEL, TEAL, "DONE", 3);
     /* the rail: the colour in hand (tap for the panel), OUT, RESET */
-    render_text(fb, stride, 8, RUI_SW_Y - 14, 1, FAINT, "COLOUR");
-    rui_swatch(fb, stride, 8, RUI_SW_Y, RUI_RAIL_W - 16, RUI_SW_H, s_colour, false);
-    render_button(fb, stride, 8, RUI_OUT_Y, RUI_RAIL_W - 16, RUI_BTN_H, s_rub ? 0x3a1418 : PANEL, NO, "OUT", 2);
-    render_button(fb, stride, 8, RUI_RESET_Y, RUI_RAIL_W - 16, RUI_BTN_H, PANEL, FAINT, "RESET", 2);
+    render_text(fb, stride, RUI_SQ_X, RUI_SW_Y - 14, 1, FAINT, "COLOUR");
+    rui_swatch(fb, stride, RUI_SQ_X, RUI_SW_Y, RUI_SQ, RUI_SQ, s_colour, false);
+    render_button(fb, stride, RUI_SQ_X, RUI_OUT_Y, RUI_SQ, RUI_SQ, s_rub ? 0x3a1418 : PANEL, NO, "OUT", 2);
+    render_button(fb, stride, RUI_SQ_X, RUI_RESET_Y, RUI_SQ, RUI_SQ, PANEL, FAINT, "RESET", 2);
     for (int i = 0; i < REEF_SHAPE_N; i++) {
         int col = i % RUI_CAT_COLS, row = i / RUI_CAT_COLS;
         int x = RUI_CAT_X + col * (RUI_TILE + RUI_TILE_PAD);
@@ -921,7 +928,8 @@ void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock) {
                     1, FAINT, sh->name);
     }
     render_rect(fb, stride, 0, RUI_FOOT_Y, TANK_W, TANK_H - RUI_FOOT_Y, INK);
-    render_text(fb, stride, 8, RUI_FOOT_Y + 5, 2, FAINT, "DRAG TO SCROLL  -  TAP TO PICK");
+    { const char *foot = "DRAG TO SCROLL  -  TAP TO PICK";   /* centred: the corners are curved glass */
+      render_text(fb, stride, (TANK_W - render_text_w(foot, 2)) / 2, RUI_FOOT_Y + 5, 2, FAINT, foot); }
     if (s_panel) {                                          /* the colours, big enough to hit */
         render_rect_blend(fb, stride, 0, 0, TANK_W, TANK_H, INK, 246);
         render_text(fb, stride, RUI_PAN_X, 24, 3, WHITE, "COLOUR");
@@ -987,8 +995,9 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
                     }
                 }
                 if (moved) return REEF_UI_KEPT;                      /* that was a pan */
-                rui_unzoom(&x, &y);
-                int i = reef_at(t, (int)(x / REEF_CELL), (int)(y / REEF_CELL));
+                float rx = x + dx, ry = y + dy;
+                rui_unzoom(&rx, &ry);
+                int i = reef_at(t, (int)(rx / REEF_CELL), (int)(ry / REEF_CELL));
                 if (i >= 0) { reef_remove(t, i); return REEF_UI_KEPT; }
                 return REEF_UI_NONE;
             }
@@ -996,18 +1005,26 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
             if (moved) return REEF_UI_KEPT;
             /* the first tap does not take anything out: it goes in for a
                closer look, so a finger can pick one coral out of a crowd */
-            s_zoom = 2.0f; s_zx = x; s_zy = y; s_zx0 = x; s_zy0 = y; rui_pan(0, 0);
+            s_zoom = 2.0f; s_zx = x + dx; s_zy = y + dy; s_zx0 = s_zx; s_zy0 = s_zy; rui_pan(0, 0);
             return REEF_UI_KEPT;
         }
         if (s_shape >= 0) {
-            if (x >= TANK_W - 98 && y >= TANK_H - RUI_BTN_H - 16) { s_shape = -1; return REEF_UI_KEPT; }   /* DROP */
+            /* The app hands a gesture over as WHERE IT STARTED plus how far
+               it went, so the piece was being planted under the press - it
+               followed the finger all the way and then snapped back to the
+               first touch. It lands where the finger LIFTS. */
+            float rx = x + dx, ry = y + dy;
+            if (rx >= TANK_W - 98 && ry >= TANK_H - RUI_BTN_H - 16) { s_shape = -1; return REEF_UI_KEPT; }   /* DROP */
             if (dy < -70 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }  /* back for another */
-            /* LETTING GO plants it, wherever the drag ended. Dragging across
-               the clear water at the top and releasing used to lose the
-               piece, which is the one way of aiming that lets you see it. */
-            rui_unzoom(&x, &y);
-            rui_to_cell(t, x, y);
-            if (s_settled && reef_place(t, s_shape, (uint8_t)s_colour, s_cx, s_cy)) return REEF_UI_KEPT;
+            rui_unzoom(&rx, &ry);
+            rui_to_cell(t, rx, ry);
+            /* and the same coral stays in hand, sitting where the last one
+               went, so dragging across the clear water at the top and
+               letting go can be repeated without going back to the menu */
+            if (s_settled && reef_place(t, s_shape, (uint8_t)s_colour, s_cx, s_cy)) {
+                s_settled = reef_settle(t, s_shape, s_cx, s_cy) >= 0;   /* the next one rests on it */
+                return REEF_UI_KEPT;
+            }
             return REEF_UI_NONE;                                    /* refused: the ghost said so */
         }
         if (dy < -40 && fabsf(dx) < fabsf(dy)) { s_menu = true; return REEF_UI_KEPT; }
@@ -1039,14 +1056,14 @@ int reef_ui_tap(tank_t *t, float x, float y, float dx, float dy) {
        scroll must never also count as a tap on whatever it finished over */
     if (moved) { rui_scroll_to(s_scroll0 - dy); return REEF_UI_KEPT; }
     if (y < RUI_DONE_Y + RUI_DONE_H + 6 && x >= RUI_DONE_X - 6) { s_menu = false; return REEF_UI_CLOSE; }
-    if (x < RUI_RAIL_W) {
-        if (y >= RUI_SW_Y - 6 && y < RUI_SW_Y + RUI_SW_H + 6) { s_panel = true; return REEF_UI_KEPT; }
-        if (y >= RUI_OUT_Y - 4 && y < RUI_OUT_Y + RUI_BTN_H + 4) {
+    if (x < RUI_RAIL_W) {                       /* the rail: each square owns the gap under it */
+        if (y >= RUI_SW_Y - 8 && y < RUI_OUT_Y - 4) { s_panel = true; return REEF_UI_KEPT; }
+        if (y >= RUI_OUT_Y - 4 && y < RUI_RESET_Y - 4) {
             s_rub = !s_rub; s_zoom = 1.0f;
             if (s_rub) s_shape = -1;
             s_menu = false; return REEF_UI_KEPT;
         }
-        if (y >= RUI_RESET_Y - 4 && y < RUI_RESET_Y + RUI_BTN_H + 4) { s_confirm = true; return REEF_UI_KEPT; }
+        if (y >= RUI_RESET_Y - 4 && y < RUI_RESET_Y + RUI_SQ + 8) { s_confirm = true; return REEF_UI_KEPT; }
         return REEF_UI_KEPT;
     }
     for (int i = 0; i < REEF_SHAPE_N; i++) {
