@@ -32,14 +32,20 @@ images cannot reach the protected partitions before either file is ever built.
 A board that has never been flashed also needs the model partition, which is
 8 MB and not carried here.
 
-TWO BOARDS, ONE FILE. The app is built for both the 1.8" AMOLED tank and the
-1.54" square LCD one, and both payloads ride in here. It ASKS which one is
-plugged in, because it cannot tell: both are an ESP32-S3 with 16 MB of flash
-and they answer the bootloader with the same chip id, the same flash id and
-nothing that distinguishes the panel. Reading back what is already on the
-board would only say what it was flashed with last time, which is exactly
-the thing that is wrong when somebody is standing here. So: a numbered
-question, or --board <id> for anyone who would rather not be asked.
+ONE FILE PER BOARD. There are two boards - the 1.8" AMOLED tank and the
+1.54" square LCD one - and each gets its own workflow, its own release and
+its own download, so work on one can never change the file somebody is
+downloading for the other. This script is shared: it flashes whichever
+board's payload was bundled with it, named in boards.json, and says which
+that is before it writes anything.
+
+It cannot work the board out by itself, which is why the bundle has to say:
+both are an ESP32-S3 with 16 MB of flash answering the bootloader with the
+same chip id and the same flash id, and reading back what is already there
+would only report what it was flashed with last time - exactly the thing
+that is wrong when somebody is standing there with a dark screen. If a
+bundle ever does carry more than one, it asks rather than guesses; --board
+<id> answers that in advance.
 """
 import json, os, sys
 
@@ -162,8 +168,11 @@ def main():
     print("   POCKET TANK - upgrade the app")
     print(rule)
     if picked is None:
-        picked = bs[0] if len(bs) == 1 else choose(bs)
-        print()
+        if len(bs) == 1:
+            picked = bs[0]           # a one-board bundle: nothing to ask
+        else:
+            picked = choose(bs)
+            print()
     spec = spec_of(picked)
     print(f"   {picked['label']}")
     print(f"   firmware {spec['version']}, built {spec['built']}")

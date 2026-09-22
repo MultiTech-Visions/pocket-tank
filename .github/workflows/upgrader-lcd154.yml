@@ -1,0 +1,209 @@
+# The flasher for the OTHER board: the Waveshare ESP32-S3-Touch-LCD-1.54
+# (240x240 ST7789 over SPI, CST816 touch), 2026-09-22.
+#
+# Deliberately a SEPARATE file from upgrader.yml, with a separate release tag
+# and separate asset names. The two gift devices download from `upgrader`,
+# and nothing that happens in here can change that file, that release or
+# those notes. Work on the 1.54in board therefore cannot break the download
+# somebody is using at a festival.
+#
+# Same three jobs, same collect.py guard (no image may reach nvs or model),
+# same PyInstaller bundle. The only differences are the sdkconfig layered on
+# top of the shared one, the board id, and where the assets go:
+#
+#   Windows                            PocketTankUpgrade-LCD154.exe
+#   Mac, Apple silicon (M1 and later)  PocketTankUpgrade-LCD154-macOS-AppleSilicon.zip
+#   Mac, Intel                         PocketTankUpgrade-LCD154-macOS-Intel.zip
+#
+# Because only one board's payload is bundled, the flasher does not ask which
+# tank it is - there is nothing to ask.
+#
+# This one also runs on workflow_dispatch from any branch, which is how it
+# gets tried before it is merged: the run page carries the bundles as
+# artifacts, and the release step only publishes from main.
+name: upgrader-lcd154
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "common/**"
+      - "tools/upgrade/**"
+      - ".github/workflows/upgrader-lcd154.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upgrader-lcd154
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # git describe wants the tags
+      - name: Build the firmware for the 1.54in LCD (ESP-IDF v5.4.1, esp32s3)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.1
+          target: esp32s3
+          path: firmware
+          command: idf.py -B build-lcd154 -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.lcd154" build
+      - name: Collect the images, and prove they cannot reach the save
+        run: |
+          python3 tools/upgrade/collect.py --build-dir firmware/build-lcd154 --out payload \
+                  --board lcd154 --label "1.54 inch square LCD"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upgrader-lcd154-payload
+          path: payload
+          retention-days: 7
+
+  bundle:
+    needs: firmware
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            label: Windows
+            sep: ";"
+            asset: PocketTankUpgrade-LCD154.exe
+          - runner: macos-14             # Apple silicon
+            label: macOS-AppleSilicon
+            sep: ":"
+            asset: PocketTankUpgrade-LCD154-macOS-AppleSilicon.zip
+          - runner: macos-13             # Intel
+            label: macOS-Intel
+            sep: ":"
+            asset: PocketTankUpgrade-LCD154-macOS-Intel.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: upgrader-lcd154-payload
+          path: payload
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the flasher and the bundler
+        run: pip install "esptool==4.8.1" "pyinstaller==6.11.1"
+      - name: Bundle it
+        shell: bash
+        run: |
+          S='${{ matrix.sep }}'
+          # --collect-data esptool: the stub flashers are package DATA
+          # (esptool/targets/stub_flasher/*/<chip>.json) and PyInstaller
+          # leaves data behind unless it is asked. Without them the exe gets
+          # all the way to a connected tank and dies on "Stub flasher JSON
+          # file for esp32s3 not found".
+          pyinstaller --onefile --console --clean \
+            --collect-data esptool \
+            --name PocketTankUpgradeLCD154 \
+            --add-data "payload/boards.json${S}." \
+            --add-data "payload/lcd154${S}lcd154" \
+            tools/upgrade/pocket_tank_upgrade.py
+          ls -la dist
+      - name: Check the bundle is complete
+        shell: bash
+        run: |
+          BIN=dist/PocketTankUpgradeLCD154
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          "./$BIN" --selfcheck
+          set +e
+          out=$("./$BIN" NOT_A_PORT 2>&1)
+          set -e
+          echo "$out"
+          echo "$out" | grep -q "POCKET TANK" || { echo "it did not start"; exit 1; }
+          echo "$out" | grep -q "1.54" || { echo "it did not name the board"; exit 1; }
+          echo "$out" | grep -qi "incomplete" && { echo "the bundle is missing something"; exit 1; }
+          echo "the bundle is complete and the exe starts"
+      - name: Make the double-clickable file
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ '${{ matrix.label }}' = 'Windows' ]; then
+            cp dist/PocketTankUpgradeLCD154.exe "out/${{ matrix.asset }}"
+          else
+            # Finder runs a .command by opening Terminal on it; an ad-hoc
+            # signature is what lets an arm64 binary execute at all, and ditto
+            # is what keeps the executable bit inside the zip
+            cp dist/PocketTankUpgradeLCD154 PocketTankUpgradeLCD154.command
+            chmod +x PocketTankUpgradeLCD154.command
+            codesign --force --sign - --timestamp=none PocketTankUpgradeLCD154.command
+            ditto -c -k --sequesterRsrc PocketTankUpgradeLCD154.command "out/${{ matrix.asset }}"
+          fi
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upgrader-lcd154-${{ matrix.label }}
+          path: out/${{ matrix.asset }}
+
+  release:
+    needs: bundle
+    # a branch run leaves the bundles on the run page as artifacts and
+    # publishes nothing: trying this board out must never touch a release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: upgrader-lcd154-*
+          path: assets
+          merge-multiple: true
+      - name: Attach them to the 1.54in release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf assets/payload assets/*.json assets/*.bin 2>/dev/null || true
+          ls -la assets
+          TAG=upgrader-lcd154
+          NOTES=$(cat <<'EOF'
+          **For the Waveshare ESP32-S3-Touch-LCD-1.54 only** - the small square
+          screen. If yours is the 1.8 inch rounded one, you want the
+          [`upgrader`](../../releases/tag/upgrader) release instead; these two
+          are not interchangeable and flashing the wrong one leaves a dark screen.
+
+          | You have | Download |
+          | --- | --- |
+          | Windows | `PocketTankUpgrade-LCD154.exe` |
+          | Mac with Apple silicon (M1, M2, M3, M4) | `PocketTankUpgrade-LCD154-macOS-AppleSilicon.zip` |
+          | Mac with an Intel chip | `PocketTankUpgrade-LCD154-macOS-Intel.zip` |
+
+          The tank is drawn at 448x368 as always and squashed to 240x197 on the
+          way to this panel, centred with a black band above and below, so every
+          page works and the text is small.
+
+          It replaces the app only. Your fish, their names, your sand dollars and
+          everything the shop sold are kept, and the model partition is left alone.
+
+          **The first run is blocked, on both, because this is not signed:**
+
+          - Windows shows a blue SmartScreen box: click **More info**, then **Run anyway**.
+          - macOS says it cannot be opened. Go to **System Settings -> Privacy &
+            Security**, scroll down, and click **Open Anyway**, then double-click again.
+
+          If several ports confuse it, pass the right one:
+          `PocketTankUpgrade-LCD154.exe COM7`
+
+          A board that has never run Pocket Tank also needs the 8 MB model
+          partition written once, which this does not carry.
+          EOF
+          )
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "Pocket Tank - upgrader for the 1.54in LCD board" --notes "$NOTES"
+          else
+            gh release edit "$TAG" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" assets/* --clobber
+          for f in assets/*; do
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$f")"
+          done
