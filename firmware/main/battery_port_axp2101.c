@@ -131,6 +131,7 @@ bool battery_port_poweroff(void) {
 #ifdef PIN_BAT_EN
     if (!s_dev) {                      /* the 1.54in LCD: let go of the latch. On battery the rails drop here;
                                           on USB nothing happens and the caller deep-sleeps (PWR boots it). */
+        gpio_hold_dis(PIN_BAT_EN);
         gpio_set_level(PIN_BAT_EN, 0);
         return true;
     }

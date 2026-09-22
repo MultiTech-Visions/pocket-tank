@@ -704,7 +704,9 @@ void app_main(void) {
     gpio_config_t latch = { .pin_bit_mask = 1ULL << PIN_BAT_EN, .mode = GPIO_MODE_OUTPUT };
     gpio_config(&latch);
     gpio_set_level(PIN_BAT_EN, 1);
-    ESP_LOGI(TAG, "power latch held (GPIO%d high)", PIN_BAT_EN);
+    gpio_hold_en(PIN_BAT_EN);            /* and HOLD it: the drowse is light sleep, and the first tap of PWR on
+                                            battery let the pad go and the board with it (2026-09-22) */
+    ESP_LOGI(TAG, "power latch held (GPIO%d high, pad held through sleep)", PIN_BAT_EN);
 #endif
     gpio_config_t btn = { .pin_bit_mask = (1ULL << BTN_SLEEP) | (1ULL << BTN_CHORD), .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
