@@ -15,6 +15,9 @@ void display_port_set_inverted(bool inverted) { (void)inverted; }
 static uint8_t s_brightness = 0xFF;
 void display_port_set_brightness(uint8_t level) { s_brightness = level; }
 uint8_t display_port_brightness(void) { return s_brightness; }
+void display_port_map_touch(float px, float py, bool inverted, float *tx, float *ty) {
+    (void)inverted; *tx = px; *ty = py;          /* no panel: the point is already the tank's */
+}
 
 void display_port_flush(const uint16_t *fb) {
     (void)fb;

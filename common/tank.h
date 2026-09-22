@@ -406,6 +406,8 @@ typedef struct tank {
     /* the reef builder is not on by default: it is found (reef.h's combo) or
      * switched on from the dev page, and then it stays found. */
     uint8_t  reef_open;
+    /* built it, kept it, and asked for it not to be drawn (settings) */
+    uint8_t  reef_hide;
     bool     trickle_off;          /* director/test knob: the tank's own trickle
                                     * holds off entirely (staged hunger for a
                                     * shot). Not saved. */
@@ -772,7 +774,15 @@ enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
 #define TOTEM_WALK_MAX_S   60.0f            /* a walking leg cannot outstay this */
 #define TOTEM_HOLD_S       45.0f
 #define TOTEM_PLANTED_S    45.0f
-#define TOTEM_ARRIVE_PX    50.0f            /* close enough to the speaker, or to home */
+#define TOTEM_ARRIVE_PX    50.0f            /* close enough to the speaker (a party has room) */
+/* Home is not "close enough": the totem has to be PUT BACK. The carrier is
+ * steered to the keeper's spot at the depth where the pole's foot meets the
+ * sand, and the event only ends once it is actually there - otherwise the
+ * thing blinked from a fish's mouth to the floor across half the tank. */
+#define TOTEM_PLANT_Y      (TANK_H - 16 - TOTEM_H * 0.45f)
+#define TOTEM_HOME_PX       8.0f            /* how near home the carrier must truly get ... */
+#define TOTEM_HOME_Y_PX     8.0f            /* ... and how low, before it is planted */
+#define TOTEM_HOME_MAX_S   150.0f           /* the march home is patient; only a stuck fish hits this */
 #define TOTEM_COOL_S       90.0f            /* the quiet after the whole thing */
 /* ---- the disco ball (2026-09-20) -----------------------------------------
  * It hangs at the top of the tank wherever the keeper put it. When a party

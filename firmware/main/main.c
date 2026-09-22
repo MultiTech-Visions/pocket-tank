@@ -490,7 +490,10 @@ static void tank_task(void *arg) {
                 render_fb_primed(s_prefetch_fb, s_prefetch_ep);
             }
             int64_t t0 = esp_timer_get_time();
-            render_tank(&tank, fb[cur], TANK_W);
+            /* the builder gets a bare canvas - water, sand and the reef -
+               so there is nothing swimming over the thing being built */
+            if (touch_port_reef()) render_reef_canvas(&tank, fb[cur], TANK_W);
+            else render_tank(&tank, fb[cur], TANK_W);
             touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
                                                 driven: extra samples inside the frame
                                                 keep quick finger taps from slipping
@@ -500,10 +503,16 @@ static void tank_task(void *arg) {
                not the snail's card, and never under a page */
             { bool page = touch_port_milestones() || touch_port_settings() || touch_port_shop() ||
                           touch_port_dev() || touch_port_reef() || touch_port_fishpage() >= 0 || setup_active() || touch_port_confirm_up();
-              int who = (!page && sel >= 0 && sel != RENDER_CARD_SNAIL) ? sel : -1;
-              render_camera_tick(&tank, who, CAM_ZOOM, dt);
-              if (!page) render_camera_apply(fb[cur], TANK_W, s_cam_scratch, PLAN_FB_BYTES / sizeof(uint16_t));
-              else render_camera_reset(); }
+              float zx, zy, zz;
+              if (touch_port_reef() && reef_ui_zoom(&zx, &zy, &zz)) {   /* the builder's magnifier */
+                  render_camera_point(zx, zy, zz);
+                  render_camera_apply(fb[cur], TANK_W, s_cam_scratch, PLAN_FB_BYTES / sizeof(uint16_t));
+              } else {
+                  int who = (!page && sel >= 0 && sel != RENDER_CARD_SNAIL) ? sel : -1;
+                  render_camera_tick(&tank, who, CAM_ZOOM, dt);
+                  if (!page) render_camera_apply(fb[cur], TANK_W, s_cam_scratch, PLAN_FB_BYTES / sizeof(uint16_t));
+                  else render_camera_reset();
+              } }
             int64_t tc = esp_timer_get_time();
             if (touch_port_fishpage() >= 0) {    /* a fish's own page: its levels, what it is doing, what last happened */
                 ui_fish_page(&tank, touch_port_fishpage(), fb[cur], TANK_W, tank.clock);
@@ -512,7 +521,8 @@ static void tank_task(void *arg) {
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
-                render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());
+                render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume(),
+                                s_bat_ok ? (int)((s_dev_bat >= 0 ? s_dev_bat : s_bat_frac) * 100 + 0.5f) : -1);
                 sel = -1;
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
                 render_shop(&tank, fb[cur], TANK_W);
@@ -526,6 +536,8 @@ static void tank_task(void *arg) {
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (sel >= 0) {                      /* tapped fish: stats card + the exact pill */
                 render_stats_card(&tank, sel, fb[cur], TANK_W);
+                if (sel != RENDER_CARD_SNAIL)    /* and the ticker: what it is doing, along the foot */
+                    ui_fish_ticker(&tank, sel, fb[cur], TANK_W, tank.clock);
                 if (s_bat_ok) render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_chg);
             } else if (s_bat_ok && !touch_port_milestones() && !touch_port_settings() && !touch_port_shop() && !touch_port_dev() && touch_port_fishpage() < 0)
                 /* the charge bolt (2026-09-20): always on over the live tank, green

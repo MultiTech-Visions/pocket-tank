@@ -832,6 +832,11 @@ void tank_glow_place(tank_t *t) {
         t->glow[i].held_s = 0; t->glow[i].carrier = -1;
     }
 }
+/* the totem is a two-fin job: whoever is carrying it does not go picking
+ * sticks up as well. A stick thrown TO it still lands - catch is welcome. */
+static bool totem_hands_full(const tank_t *t, int i) {
+    return t->totem_phase != TOTEM_OFF && !t->totem_planted && t->totem_carrier == i;
+}
 /* is this fish already holding one? (a fish carries at most a single stick) */
 static bool glow_busy(const tank_t *t, int fish) {
     for (int g = 0; g < GLOW_N; g++) if (t->glow[g].carrier == fish) return true;
@@ -855,7 +860,7 @@ static void glow_tick(tank_t *t, float dt) {
         for (int i = 0; i < t->n_fish; i++) {
             const fish_t *f = &t->fish[i];
             if (s_glow_cool[i] > 0 || s_glow_want[i] > 0 || glow_busy(t, i)) continue;
-            if (f->stress > 5.0f || f->hunger > 7.0f) continue;
+            if (f->stress > 5.0f || f->hunger > 7.0f || totem_hands_full(t, i)) continue;
             /* temperament leans it, it does not decide it: a tank of quiet,
                incurious fish still plays, just less. Without the floor one
                roster in four never touched a stick in twenty minutes. */
@@ -867,7 +872,8 @@ static void glow_tick(tank_t *t, float dt) {
     /* a party at the speaker: everybody wants one in their fin */
     if (tank_bass_party(t))
         for (int i = 0; i < t->n_fish; i++)
-            if (!glow_busy(t, i) && s_glow_cool[i] <= 0 && s_glow_want[i] <= 0) s_glow_want[i] = GLOW_WANT_S;
+            if (!glow_busy(t, i) && s_glow_cool[i] <= 0 && s_glow_want[i] <= 0 && !totem_hands_full(t, i))
+                s_glow_want[i] = GLOW_WANT_S;
     for (int g = 0; g < GLOW_N; g++) {
         glow_t *s = &t->glow[g];
         if (s->carrier >= 0) {                              /* being carried */
@@ -985,7 +991,7 @@ static void glow_tick(tank_t *t, float dt) {
                lined up with being beside a stick, which is how a pile could
                sit untouched all day with four fish in the tank. */
             if (s_glow_want[i] <= 0 && f->goal.id != GOAL_DART_PLAY) continue;
-            if (glow_busy(t, i)) continue;
+            if (glow_busy(t, i) || totem_hands_full(t, i)) continue;
             if (tank_dist(f->x, f->y, s->x, s->y) > GLOW_REACH) continue;
             s->carrier = (int8_t)i; s->held_s = 0;
             s_glow_want[i] = 0;                             /* it got one */
@@ -1079,6 +1085,10 @@ static void totem_end(tank_t *t) {
  * totem_tick reaches it through the social gate, tank_totem_force straight. */
 static void totem_lift(tank_t *t, int i) {
     fish_t *f = &t->fish[i];
+    /* both fins on the pole: a stick it was already holding is let go here,
+       and glow_tick will not hand it another until the parade is over */
+    for (int g = 0; g < GLOW_N; g++)
+        if (t->glow[g].carrier == i) { t->glow[g].carrier = -1; t->glow[g].held_s = 0; }
     t->totem_carrier = (int8_t)i; t->totem_held_s = 0;
     t->totem_phase = TOTEM_WALK; t->totem_planted = false;
     /* the lights go out for it: a parade is a night-time thing */
@@ -1128,7 +1138,11 @@ static void totem_tick(tank_t *t, float dt) {
             }
             break;
         default:                                          /* TOTEM_HOME */
-            if (fabsf(f->x - home) < TOTEM_ARRIVE_PX || t->totem_held_s > TOTEM_WALK_MAX_S) totem_end(t);
+            /* it is PUT BACK, not dropped: the carrier has to reach the
+               keeper's spot AND sink to planting depth. The cap is long and
+               only catches a fish the model has taken elsewhere for good. */
+            if ((fabsf(f->x - home) < TOTEM_HOME_PX && fabsf(f->y - TOTEM_PLANT_Y) < TOTEM_HOME_Y_PX) ||
+                t->totem_held_s > TOTEM_HOME_MAX_S) totem_end(t);
             break;
         }
         return;
@@ -1204,6 +1218,7 @@ int tank_glow_nudge(tank_t *t, float x, float y) {
         int best = -1; float bd = GLOW_NUDGE_REACH;
         for (int i = 0; i < t->n_fish; i++) {
             if (glow_busy(t, i) || s_glow_want[i] > 0 || t->fish[i].stress > 6.0f) continue;
+            if (totem_hands_full(t, i)) continue;              /* its fins are on the totem */
             float d = tank_dist(t->fish[i].x, t->fish[i].y, x, y);
             if (d < bd) { bd = d; best = i; }
         }
@@ -1533,7 +1548,7 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
             tg.y = TANK_H - 16 - 62 + sinf(tm * 0.8f) * 22;
         } else if (tank_bass_party(t) && !leader) {            /* the dance floor, around the stack */
             float gx2, gy2;
-            if (s_glow_want[idx] > 0 && tank_bit_live(t, SD_ITEM_GLOW) &&
+            if (s_glow_want[idx] > 0 && tank_bit_live(t, SD_ITEM_GLOW) && !totem_hands_full(t, idx) &&
                 nearest_free_glow(t, f->x, f->y, &gx2, &gy2) >= 0) {
                 tg.x = gx2; tg.y = gy2;                        /* fetch one, then come back and dance with it */
             } else {
@@ -1544,8 +1559,15 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
             tg.x = t->totem_party_x + cosf(tm * 1.2f) * 30;
             tg.y = TANK_H - 16 - 50 + sinf(tm * 1.5f) * 20;
         } else if (leader) {                                   /* walking: out to the speaker, or back home */
-            float goal_x = t->totem_phase == TOTEM_HOME ? home : (tank_bit_live(t, SD_ITEM_BASS) ? bx : tg.x);
-            tg.x = goal_x; tg.y = TANK_H - 16 - 44;
+            if (t->totem_phase == TOTEM_HOME) {                /* all the way down onto its spot */
+                tg.x = home; tg.y = TOTEM_PLANT_Y;
+            } else {
+                /* with a stack it is a march to the speaker; without one the
+                   parade wants to be SEEN, so it takes the middle of the tank
+                   instead of wandering wherever the fish was already going */
+                tg.x = tank_bit_live(t, SD_ITEM_BASS) ? bx : TANK_W * 0.5f;
+                tg.y = TANK_H - 16 - 44;
+            }
         } else {                                               /* everyone else falls in around the leader */
             tg.x = lead->x + cosf(ang) * 46;
             tg.y = lead->y + sinf(ang) * 30;
@@ -1575,7 +1597,7 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         } else if (s_catch_to == idx && s_catch_stick >= 0 && s_catch_stick < GLOW_N) {
             const glow_t *s2 = &t->glow[s_catch_stick];     /* one is on its way: meet it */
             px = s2->x; py = s2->y; go = true;
-        } else if (s_glow_want[idx] > 0) {                  /* keen: the nearest stick lying about */
+        } else if (s_glow_want[idx] > 0 && !totem_hands_full(t, idx)) {  /* keen: the nearest stick lying about */
             go = nearest_free_glow(t, f->x, f->y, &px, &py) >= 0;
         } else if (s_totem_invited == idx && s_totem_invite_s > 0) {   /* asked to fetch the totem */
             px = tank_decor_x(t, SD_IDX_TOTEM);

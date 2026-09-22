@@ -13,12 +13,14 @@
 #include "ui_ext.h"
 #include "reef.h"
 #include "board_pins.h"
+#include "sdkconfig.h"
 #include "tank.h"
 #include "render.h"
 #include "setup.h"
 #include "notice.h"
 #include "audio_port.h"
 #include "progression.h"
+#include "display_port.h"
 #include "esp_lcd_touch_ft5x06.h"
 #include "esp_lcd_touch_cst816s.h"
 #include "esp_lcd_panel_io.h"
@@ -68,12 +70,25 @@ extern bool board_is_v2(void);
 
 bool touch_port_init(void) {
     esp_lcd_panel_io_handle_t io;
-    bool v2 = board_is_v2();
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD154
+    /* the 1.54" board is CST816 only, and its touch reset is a plain GPIO
+       rather than a bit on an IO expander */
+    const bool v2 = true;
+    const int rst_pin = PIN_TP_RST, int_pin = -1;
+#else
+    const bool v2 = board_is_v2();
+    const int rst_pin = -1, int_pin = -1;
+#endif
     esp_lcd_panel_io_i2c_config_t io_cfg = v2 ? (esp_lcd_panel_io_i2c_config_t)ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG()
                                               : (esp_lcd_panel_io_i2c_config_t)ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
-    io_cfg.dev_addr = v2 ? I2C_ADDR_CST816 : I2C_ADDR_FT3168; io_cfg.scl_speed_hz = 400000;
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD154
+    io_cfg.dev_addr = I2C_ADDR_CST816;
+#else
+    io_cfg.dev_addr = v2 ? I2C_ADDR_CST816 : I2C_ADDR_FT3168;
+#endif
+    io_cfg.scl_speed_hz = 400000;
     if (esp_lcd_new_panel_io_i2c(board_i2c_bus(), &io_cfg, &io) != ESP_OK) { ESP_LOGW(TAG, "no touch io"); return false; }
-    esp_lcd_touch_config_t tp_cfg = { .x_max = PANEL_W, .y_max = PANEL_H, .rst_gpio_num = -1, .int_gpio_num = -1,
+    esp_lcd_touch_config_t tp_cfg = { .x_max = PANEL_W, .y_max = PANEL_H, .rst_gpio_num = rst_pin, .int_gpio_num = int_pin,
         .levels = { .reset = 0, .interrupt = 0 }, .flags = { .swap_xy = 0, .mirror_x = 0, .mirror_y = 0 } };
     esp_err_t err = v2 ? esp_lcd_touch_new_i2c_cst816s(io, &tp_cfg, &s_tp)
                        : esp_lcd_touch_new_i2c_ft5x06(io, &tp_cfg, &s_tp);
@@ -90,11 +105,14 @@ void touch_port_poll(tank_t *t) {
     uint16_t x[1], y[1], st[1]; uint8_t n = 0;
     esp_lcd_touch_read_data(s_tp);
     bool touched = esp_lcd_touch_get_coordinates(s_tp, x, y, st, &n, 1) && n > 0;
-    /* portrait panel (px,py) -> landscape tank (tx,ty): tx = TANK_W-1-py, ty = px;
-     * flipped screen: mirror both, so downstream gestures live in displayed space */
-    float tx = touched ? (s_inverted ? (float)y[0] : (float)(TANK_W - 1 - y[0])) : s_lx;
-    float ty = touched ? (s_inverted ? (float)(TANK_H - 1 - x[0]) : (float)x[0]) - s_bias_y : s_ly;
-    if (touched && ty < 0) ty = 0;
+    /* the panel's own geometry belongs to its display port: a rotation on the
+       AMOLED, the inverse of the squash on the 1.54" LCD (display_port.h) */
+    float tx = s_lx, ty = s_ly;
+    if (touched) {
+        display_port_map_touch((float)x[0], (float)y[0], s_inverted, &tx, &ty);
+        ty -= s_bias_y;
+        if (ty < 0) ty = 0;
+    }
     float wx = tx, wy = ty;
     render_camera_unmap(tx, ty, &wx, &wy);      /* where in the WATER the finger is */
     if (touched) { s_wlx = wx; s_wly = wy; }

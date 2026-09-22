@@ -669,7 +669,8 @@ console the director's `dollars 1000` does the same.
 
 The target is the Waveshare **ESP32-S3-Touch-AMOLED-1.8** (ESP32-S3R8,
 16 MB flash, 8 MB PSRAM, 368×448 AMOLED, capacitive touch, IMU, PMIC, RTC).
-Both board revisions are supported and auto-detected. Touch targets sit
+Both revisions of it are supported and auto-detected (V1 SH8601 + FT3168,
+V2 CO5300 + CST816). Touch targets sit
 10 px below where they are drawn, because fingers land a little low on a
 glass this small; the touch port corrects for it. The upgraders above are
 the no-toolchain path; this is the developer one.
@@ -680,6 +681,30 @@ cd firmware && idf.py build
 idf.py -p /dev/cu.usbmodem* flash
 esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x290000 ../model/out/model_q4.bin
 ```
+
+A **second board** is supported since 2026-09-22: the Waveshare
+**ESP32-S3-Touch-LCD-1.54** (the same ESP32-S3R8 with 16 MB flash and octal
+PSRAM, but a 240×240 ST7789 over plain SPI and a CST816 touch). Every page in
+this firmware is laid out in pixels for a 448×368 tank, so rather than
+re-laying all of it out, that build composes the frame exactly as always and
+**squashes it on the way to the panel** — 448×368 into 240×197, centred, with
+a black band above and below. Text at 2× lands at about 5×7 px: legible, and
+no better than legible. Touch comes back through the same transform, so
+nothing above the display port knows the difference.
+
+```bash
+cd firmware && idf.py -B build-lcd154 \
+    -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.lcd154" build
+```
+
+Pins are from Waveshare's own BSP for the board, not guessed
+([firmware/main/board_pins.h](firmware/main/board_pins.h)); the geometry is
+in [firmware/main/display_squash.h](firmware/main/display_squash.h), apart
+from the driver so it can be checked on a host with no ESP-IDF. The upgrader
+carries both builds and **asks which tank is plugged in** — it cannot tell,
+because both boards are an ESP32-S3 with 16 MB of flash and answer the
+bootloader identically. `--board amoled18` or `--board lcd154` skips the
+question.
 
 The model lives in its own 8 MB raw partition and only needs flashing once.
 [docs/bringup.md](docs/bringup.md) is the step-by-step checklist with pass

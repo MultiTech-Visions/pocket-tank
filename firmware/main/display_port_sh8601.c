@@ -139,6 +139,15 @@ void display_port_set_brightness(uint8_t level) {
 }
 uint8_t display_port_brightness(void) { return s_brightness; }
 
+/* portrait panel (px,py) -> landscape tank: tx = TANK_W-1-py, ty = px; with
+ * the screen flipped, both mirrored, so gestures live in displayed space.
+ * (This was inline in touch_port until the 1.54" board arrived with a
+ * different geometry - the panel's shape is the display port's business.) */
+void display_port_map_touch(float px, float py, bool inverted, float *tx, float *ty) {
+    *tx = inverted ? py : (float)(TANK_W - 1) - py;
+    *ty = inverted ? (float)(TANK_H - 1) - px : px;
+}
+
 /* landscape fb[y][x] (TANK_W x TANK_H) -> portrait panel: px = y, py = TANK_W-1-x.
  * Colors are byte-swapped for the panel (big-endian RGB565 over SPI).
  * The transpose walks the PSRAM framebuffer row-sequentially (16 contiguous

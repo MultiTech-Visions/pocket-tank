@@ -1,9 +1,58 @@
-/* board_pins.h — Waveshare ESP32-S3-Touch-AMOLED-1.8 (V1: SH8601 + FT3168;
- * V2: CO5300 + CST816). Sources: Waveshare esp-idf examples and the official
- * Arduino variant. VERIFY I2C SDA/SCL on the bench: Waveshare's own code says
- * SDA=15/SCL=14, the Arduino variant says the reverse. */
+/* board_pins.h — the two boards this firmware runs on.
+ *
+ * BOARD_AMOLED18 (the default, and the one the gift devices are):
+ *   Waveshare ESP32-S3-Touch-AMOLED-1.8 - V1 SH8601 + FT3168, V2 CO5300 +
+ *   CST816, told apart at boot by an I2C probe. 368x448 portrait panel, the
+ *   tank drawn landscape 448x368 and rotated 90 degrees on the way out.
+ *   Sources: Waveshare's esp-idf examples and the official Arduino variant.
+ *   VERIFY I2C SDA/SCL on the bench: Waveshare's own code says SDA=15/SCL=14,
+ *   the Arduino variant says the reverse.
+ *
+ * BOARD_LCD154 (2026-09-22):
+ *   Waveshare ESP32-S3-Touch-LCD-1.54 - ST7789 over plain SPI, CST816 touch,
+ *   240x240. A quarter of the glass, so the 448x368 frame is SQUASHED to fit
+ *   (display_port_st7789.c) rather than the whole UI being re-laid out. Pins
+ *   are from Waveshare's own BSP for the board
+ *   (examples/.../06_esp-brookesia/components/esp32_s3_touch_lcd_1_54) and
+ *   their ESP-IDF LVGL example, not guessed.
+ */
 #ifndef BOARD_PINS_H
 #define BOARD_PINS_H
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"          /* a firmware build; a host test defines the board itself */
+#endif
+
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD154
+/* ---- Waveshare ESP32-S3-Touch-LCD-1.54 ---- */
+#define PIN_LCD_SCLK      38
+#define PIN_LCD_MOSI      39
+#define PIN_LCD_RST       40
+#define PIN_LCD_DC        45
+#define PIN_LCD_CS        21
+#define PIN_LCD_BL        46       /* backlight, active HIGH; PWM'd for brightness */
+#define PIN_I2C_SDA       42
+#define PIN_I2C_SCL       41
+#define PIN_TP_INT        48
+#define PIN_TP_RST        47
+#define I2C_ADDR_CST816   0x15
+#define PANEL_W           240      /* the glass, landscape-square */
+#define PANEL_H           240
+/* the tank frame (TANK_W x TANK_H) squashed to fit the width, centred */
+#define PANEL_FIT_W       240
+#define PANEL_FIT_H       197      /* 368 * 240 / 448, rounded down */
+#define PANEL_FIT_Y       ((PANEL_H - PANEL_FIT_H) / 2)     /* 21 px of black top and bottom */
+/* audio (ES8311 + NS4150B) and the buttons, from the same BSP */
+#define PIN_I2S_MCLK      8
+#define PIN_I2S_BCLK      9
+#define PIN_I2S_WS        10
+#define PIN_I2S_DOUT      12       /* ESP -> codec DSDIN */
+#define PIN_AMP_EN        7        /* NS4150B CTRL */
+#define PIN_BTN_BOOT      0
+#define PIN_BTN_A         5
+#define PIN_BTN_B         4
+
+#else
+/* ---- Waveshare ESP32-S3-Touch-AMOLED-1.8 (the default) ---- */
 #define PIN_LCD_CS        12
 #define PIN_LCD_PCLK      11
 #define PIN_LCD_DATA0     4
@@ -19,4 +68,12 @@
 #define PANEL_W           368      /* native portrait */
 #define PANEL_H           448
 #define V2_PANEL_X_GAP    0x10
+/* the ES8311 + NS4150B, as audio_port_es8311.c had them inline */
+#define PIN_I2S_MCLK      16
+#define PIN_I2S_BCLK      9
+#define PIN_I2S_WS        45
+#define PIN_I2S_DOUT      8        /* ESP -> codec DSDIN */
+#define PIN_AMP_EN        46       /* NS4150B CTRL, 10k pulldown on the board */
+#endif
+
 #endif

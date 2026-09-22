@@ -57,6 +57,11 @@ void ui_fish_page_leave(void);
 /* a horizontal drag across the page takes the long DOING / LAST lines over
  * from the walk for a few seconds: `dx` is this frame's travel in px, `clock`
  * is tank_t.clock. A line short enough to fit ignores it. */
+/* the strip along the foot of the tank while a fish is selected: what that
+ * fish is doing and what last happened to it, scrolled if it is long.
+ * Draw it AFTER render_camera_apply, like the card. */
+#define UI_TICKER_H 26
+void ui_fish_ticker(const tank_t *t, int fish, uint16_t *fb, int stride, float clock);
 void ui_fish_page_swipe(float dx, float clock);
 #define FP_SCRUB_HOLD_S 4.0f   /* how long that swipe holds the walk off */
 

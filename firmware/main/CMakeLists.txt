@@ -1,5 +1,7 @@
 set(SRCS main.c director.c brightness.c batlog.c codec_port.c advisor_llm_esp.c battery_port_axp2101.c imu_port_qmi8658.c)
-if(CONFIG_POCKET_TANK_DISPLAY_SH8601)
+if(CONFIG_POCKET_TANK_BOARD_LCD154)
+    list(APPEND SRCS display_port_st7789.c)      # the 1.54in LCD: the frame is squashed to fit
+elseif(CONFIG_POCKET_TANK_DISPLAY_SH8601)
     list(APPEND SRCS display_port_sh8601.c)
 else()
     list(APPEND SRCS display_port_stub.c)
@@ -17,6 +19,6 @@ endif()
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "."
-    REQUIRES tankcore llm esp_partition spi_flash esp_timer esp_driver_spi esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_driver_usb_serial_jtag esp_lcd nvs_flash esp_app_format
+    REQUIRES tankcore llm esp_partition spi_flash esp_timer esp_driver_spi esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_driver_ledc esp_driver_usb_serial_jtag esp_lcd nvs_flash esp_app_format
     EMBED_FILES "tokenizer.bin" "../../assets/sounds/sounds.bin"
 )

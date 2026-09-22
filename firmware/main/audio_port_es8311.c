@@ -1,6 +1,7 @@
 /* audio_port_es8311.c - I2S -> ES8311 -> NS4150B -> the 12 mm speaker.
  * See audio_port.h. Pins from resources/ESP32-S3-Touch-AMOLED-1.8.pdf. */
 #include "audio_port.h"
+#include "board_pins.h"
 #include "audio.h"
 #include "codec_port.h"
 #include "battery_port.h"
@@ -16,11 +17,9 @@
 
 static const char *TAG = "audio";
 
-#define PIN_I2S_MCLK  16
-#define PIN_I2S_BCLK  9
-#define PIN_I2S_WS    45
-#define PIN_I2S_DOUT  8        /* ESP -> codec DSDIN */
-#define PIN_AMP_EN    46       /* NS4150B CTRL, 10k pulldown on the board */
+/* the codec's wiring differs between the boards, so it lives in
+ * board_pins.h with the rest (the 1.54in board's GPIO45 and 46 are the LCD's
+ * DC and backlight - driving I2S onto them would black the screen) */
 #define BLOCK         160      /* 10 ms at 16 kHz */
 #define IDLE_US       (2 * 1000000LL)
 #define CODEC_RAIL    "aldo1"  /* A3V3: the codec's AVDD + the mic */

@@ -75,6 +75,11 @@ bool reef_can_place(const tank_t *t, int shape, int cx, int cy);
 int  reef_settle(const tank_t *t, int shape, int cx, int cy);
 /* place it; false if reef_can_place says no, or the reef is full */
 bool reef_place(tank_t *t, int shape, uint8_t colour, int cx, int cy);
+/* 1 where the reef is right behind a point, falling to 0 in open water:
+ * what the fish's shadow fades on. Always 0 while the reef is hidden. */
+#define REEF_NEAR_IN   10.0f
+#define REEF_NEAR_OUT  46.0f
+float reef_near(const tank_t *t, float x, float y);
 /* the topmost piece covering this cell, or -1 - for picking one back up */
 int  reef_at(const tank_t *t, int cx, int cy);
 bool reef_remove(tank_t *t, int index);
@@ -94,6 +99,8 @@ void reef_draw_shape_muted(uint16_t *fb, int stride, int x, int y, int shape,
 /* ---- the builder ------------------------------------------------------- */
 enum { REEF_UI_NONE = 0, REEF_UI_KEPT, REEF_UI_CLOSE };
 void reef_ui_open(tank_t *t);
+/* is the builder up? (the reef draws even when hidden while it is) */
+bool reef_ui_active(void);
 void reef_ui_close(void);
 bool reef_ui_menu_up(void);
 void reef_ui_draw(const tank_t *t, uint16_t *fb, int stride, float clock);
@@ -101,6 +108,12 @@ void reef_ui_press(tank_t *t, float x, float y);
 void reef_ui_drag(tank_t *t, float x, float y);
 int  reef_ui_tap(tank_t *t, float x, float y, float dx, float dy);
 void reef_ui_hand(int *shape, int *colour, bool *rubbing);
+/* The magnifier (OUT mode): true while it is up, with the point it is
+ * centred on and the zoom. The app drives it - draw the canvas, then
+ * render_camera_point + render_camera_apply, THEN reef_ui_draw, so the
+ * builder's own chrome stays full size. Touches arrive in screen space and
+ * the builder unmaps them itself. */
+bool reef_ui_zoom(float *x, float *y, float *z);
 
 #endif
 

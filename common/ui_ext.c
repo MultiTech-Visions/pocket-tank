@@ -170,7 +170,7 @@ static void fp_chevron(uint16_t *fb, int stride, int cx, int cy, int dir, int h,
 }
 #define FP_SCROLL_PXS    22.0f          /* how fast it walks */
 #define FP_SCROLL_PAUSE  1.6f           /* and how long it rests at each end */
-static float g_fp_scrub[2];             /* where the finger left each line */
+static float g_fp_scrub[3];             /* where the finger left each line */
 static float g_fp_scrub_until;          /* ... on the tank clock */
 static float fp_marquee_off(float clock, float over, int slot) {
     float travel = over / FP_SCROLL_PXS;
@@ -199,6 +199,34 @@ static void fp_line(uint16_t *fb, int stride, int x, int y, int w, const char *t
     /* a hint that there is more, on the side there is more of */
     if (off < over - 0.5f) fp_chevron(fb, stride, x + w - 2, y + 2, +1, 11, FAINT);
     if (off > 0.5f)        fp_chevron(fb, stride, x - 6, y + 2, -1, 11, FAINT);
+}
+/* ---- the ticker (2026-09-22) ------------------------------------------
+ * While a fish's card is up, a strip along the foot of the tank says what
+ * that fish is doing and what last happened to it - the fish page's two
+ * lines, joined into one and scrolled the same way. It is drawn over the
+ * finished frame, after the follow cam, so it is full size and crisp.
+ * Slot 2 of the marquee is its own, so parking the page's lines with a
+ * swipe does not park this and the other way about. */
+static void fp_goal_words(const fish_t *f, char *out, size_t n);
+static const char *fp_event_words(int ev);
+static void fp_ago_words(float s, char *out, size_t n);
+void ui_fish_ticker(const tank_t *t, int fish, uint16_t *fb, int stride, float clock) {
+    if (fish < 0 || fish >= t->n_fish) return;
+    const fish_t *f = &t->fish[fish];
+    char goal[32], when[16], line[128];
+    fp_goal_words(f, goal, sizeof goal);
+    int ev; float ago;
+    if (tank_last_event(fish, &ev, &ago)) {
+        fp_ago_words(ago, when, sizeof when);
+        snprintf(line, sizeof line, "%s - %s, URGENCY %d - LAST %s, %s",
+                 f->name, goal, (int)(f->goal.urgency + 0.5f), fp_event_words(ev), when);
+    } else {
+        snprintf(line, sizeof line, "%s - %s, URGENCY %d", f->name, goal, (int)(f->goal.urgency + 0.5f));
+    }
+    const int Y = TANK_H - UI_TICKER_H, PAD = 8;
+    render_rect_blend(fb, stride, 0, Y, TANK_W, UI_TICKER_H, INK, 224);
+    render_rect(fb, stride, 0, Y, TANK_W, 1, 0x0e2229);
+    fp_line(fb, stride, PAD, Y + 6, TANK_W - PAD * 2, line, clock, 2);
 }
 void ui_fish_page_swipe(float dx, float clock) {
     for (int i = 0; i < 2; i++) {
