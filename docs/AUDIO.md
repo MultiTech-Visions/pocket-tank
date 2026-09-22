@@ -34,6 +34,13 @@ Any of these is fine as a source; the build tool converts them:
   (`assets/sounds/gains.csv`, seeded from the levels of the first export
   batch), so relative loudness is tuned in one text file without re-export.
   The device applies volume and night attenuation on top.
+- **The build refuses to be quiet about this.** `make_sounds.py build`
+  measures every clip's energy above 600 Hz and says so loudly when a cue
+  falls under 15%. The first club loop was a real muffled four-on-the-floor -
+  a 42 Hz bass, a kick at 118 Hz, the lot low-passed at 300 - which is 0.7%
+  above 600 Hz: on the device it was pure hiss, and the way that was found
+  was somebody holding a tank against their ear (2026-09-22). The same loop
+  written in the speaker's own band is 59%.
 - **Nothing below ~600 Hz counts.** The speaker cannot reproduce it, but it
   still eats headroom and amp power. The tool high-passes at 600 Hz; a cue
   whose energy is mostly down there comes out faint and thin on the device.

@@ -86,10 +86,13 @@ The tank is more alive than it looks. Almost everything in it answers.
   very sociable (`TOTEM_SOCIAL_MIN`); every party a fish attends lowers that
   bar for it, down to `TOTEM_SOCIAL_FLOOR`.
 - **The club from outside.** While that party runs, the device plays a
-  muffled four-on-the-floor — everything above a few hundred hertz gone, the
-  way it sounds through a wall — at the same 140 BPM the rig thumps at.
-  There is a **MUSIC** row in Settings for it, and that row only exists when
-  the tank holds both pieces.
+  four-on-the-floor at the same 140 BPM the rig thumps at: a dull pulse, a
+  plain two-note line, a whisper of a hat, nothing with an edge on it, and
+  the whole thing breathing as if a door keeps opening. The distance is
+  ACTED, not filtered — a really muffled mix is all below 600 Hz and a
+  12 mm speaker cannot say a word of it. There is a **MUSIC** row in
+  Settings, and it only exists when the tank holds both pieces. It is quiet
+  on purpose: you will probably not notice it until the room is.
 - **After hours.** Turn the light out with any of the glowy gear in the tank
   and nobody goes to bed for **five minutes** (`AFTERHOURS_S`). A resting
   fish is steered to the glow sticks instead of the reef, they want one three

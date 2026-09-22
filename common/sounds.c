@@ -34,7 +34,7 @@ const snd_cue_t SND_CUES[SND_COUNT] = {
     { "wheel_tick", 5, 1, 0, 136 },
     { "confirm", 6, 1, 0, 253 },
     { "bubbles_loop", 7, 1, 1, 81 },
-    { "club_loop", 8, 1, 1, 91 },
+    { "club_loop", 8, 1, 1, 162 },
     { "eat", 9, 1, 0, 51 },
     { "spook", 10, 1, 0, 268 },
     { "investigate", 11, 1, 0, 102 },

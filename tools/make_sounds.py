@@ -187,6 +187,30 @@ def do_import(src):
 
 
 # ----------------------------------------------------------------- build ----
+def speaker_share(data):
+    """What fraction of a clip's energy is ABOVE the speaker's floor.
+
+    The H2 is 12 x 10 mm: nothing under ~600 Hz comes out of it
+    (docs/AUDIO.md). A cue written below that is silent on the device no
+    matter how loud the file looks, which is not a thing anyone should have
+    to discover by holding a tank to their ear - so the build says so."""
+    x = [int.from_bytes(data[i:i + 2], "little", signed=True) / 32768.0
+         for i in range(0, len(data), 2)]
+    if not x:
+        return 1.0
+    a = 1 - math.exp(-2 * math.pi * HP_HZ / RATE)
+    y, e_all, e_hi = 0.0, 0.0, 0.0
+    for v in x:
+        y += a * (v - y)
+        e_all += v * v
+        e_hi += (v - y) * (v - y)
+    return e_hi / e_all if e_all > 0 else 1.0
+
+
+SPEAKER_MIN = 0.15          # every shipped cue is well over this; the first
+                            # club loop was 0.007 and could not be heard at all
+
+
 def do_build():
     gains = read_gains()
     clips = []          # (cue, var, samples)
@@ -200,6 +224,11 @@ def do_build():
         with wave.open(os.path.join(DST, fn)) as w:
             assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, RATE), fn
             data = w.readframes(w.getnframes())
+        share = speaker_share(data)
+        if share < SPEAKER_MIN:
+            print(f"  !! {fn}: only {share * 100:.1f}% of its energy is above {HP_HZ} Hz - "
+                  f"this speaker will not play it. Write it in the 800 Hz to 6 kHz band "
+                  f"(docs/AUDIO.md).")
         clips.append((cue, var, data))
     clips.sort(key=lambda c: (CUE_IDS.index(c[0]), c[1]))
     bank, table, cue_rows = bytearray(), [], []
