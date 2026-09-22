@@ -168,7 +168,31 @@ def _wait_for_port(before, timeout=8.0):
     return now[-1] if now else None
 
 
-def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
+def lcd154_watchdog_reset(port_arg):
+    """Reset the 1.54in LCD board out of the flasher stub with the RTC
+    watchdog - the reset that does not go through RTS/DTR (see main()). The
+    registers and values are esptool >= 4.9's ESP32S3ROM.watchdog_reset();
+    4.8.1 knows the names of all but one of them. Bench-checked 2026-09-22:
+    the app is up and logging half a second later, on the same port."""
+    import esptool
+    from esptool.cmds import detect_chip
+    port = port_arg or (_ports() or [None])[-1]
+    if not port:
+        return None
+    try:
+        esp = detect_chip(port, 115200, connect_mode="no_reset")   # the stub, still running
+        esp.write_reg(esp.RTC_CNTL_WDTWPROTECT_REG, esp.RTC_CNTL_WDT_WKEY)   # unlock
+        esp.write_reg(esp.RTCCNTL_BASE_REG + 0x009C, 2000)                   # RTC_CNTL_WDTCONFIG1: timeout
+        esp.write_reg(esp.RTC_CNTL_WDTCONFIG0_REG, (1 << 31) | (5 << 28) | (1 << 8) | 2)   # enable, stage 0 = system reset
+        esp.write_reg(esp.RTC_CNTL_WDTWPROTECT_REG, 0)                       # lock
+        esp._port.close()
+        return port                              # read it NOW: the boot's chatter is over in two seconds
+    except Exception as e:                       # the log read below will show what state it is in
+        print(f"   (watchdog reset did not go through: {e})")
+        return None
+
+
+def read_log(port_arg, seconds=10.0, quiet=False, reset=True, settle=1.5):
     """Print what the tank says on its way up.
 
     The console is the native USB-Serial-JTAG - the same cable that flashes
@@ -200,7 +224,7 @@ def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
         return 1
     print(f"   Reading {port} for {int(seconds)} seconds. Copy ALL of this.")
     print("-" * 62)
-    time.sleep(1.5)                  # let it finish re-enumerating after the reset
+    time.sleep(settle)               # let it finish re-enumerating after the reset (0: it never went away)
     got = 0
     tried = []
     deadline = time.time() + seconds
@@ -334,7 +358,11 @@ def main():
         # GPIO0 low, "waiting for download", screen dark, silent - "dead").
         # A watchdog reset is a real chip reset with the pins left alone, and
         # the port stays up across it, so the log below reads it as-is.
-        argv += ["--after", "watchdog_reset"]
+        # esptool 4.8.1 (the pinned one) has no --after for it - that came
+        # later - so esptool is told to leave its stub running and
+        # lcd154_watchdog_reset() below pulls the RTC watchdog through the
+        # stub, register for register what newer esptools do.
+        argv += ["--after", "no_reset_stub"]
     argv += ["write_flash"]
     for part in spec["parts"]:
         argv += [part["offset"], bundled(part["file"])]
@@ -394,8 +422,14 @@ def main():
     # ...except on the 1.54in LCD, whose RTS/DTR reset is the download-mode
     # trap above: there esptool's watchdog reset already did the job and the
     # port never went away, so just read it.
-    read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True,
-             reset=(picked["id"] != "lcd154"))
+    if picked["id"] == "lcd154":
+        # The port never goes away on this board, and after the first two
+        # seconds the app only speaks every ten: wait 1.5 s and the window
+        # reads three seconds of nothing and gives up (2026-09-22, twice).
+        port = lcd154_watchdog_reset(argv_rest[0] if argv_rest else None)
+        read_log(port, seconds=12.0, quiet=True, reset=False, settle=0)
+    else:
+        read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True, reset=True)
     pause()
     return 0
 

@@ -79,7 +79,13 @@
    button, two of them ours. */
 #define PIN_BAT_EN        2        /* HIGH = hold power on battery (T1 -> Q2) */
 #define PIN_BTN_PWR       5        /* KEY_PWR through D3; the button also wakes the latch */
-#define BOARD_HAS_PWR_LATCH 1
+/* ...and since the latch is OURS (PIN_BAT_EN), the PWR key is this board's
+   sleep key: main.c makes it BTN_SLEEP, so a short press at release is the
+   drowse (screen off, light sleep, any press wakes) exactly as BOOT is on a
+   board without a PMIC, and a 1.5 s hold is the power-off (PIN_BAT_EN low:
+   on battery the rails drop; on USB it deep-sleeps and PWR boots it). So the
+   BOOT-must-not-sleep rule is off here: BOOT is only the download key. */
+#define BOARD_HAS_PWR_LATCH 0
 #define BOARD_HAS_FUEL_GAUGE 0
 #define PIN_BAT_ADC       1
 #define BAT_ADC_DIV       3

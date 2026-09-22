@@ -5,6 +5,7 @@
 #include "battery_port.h"
 #include "board_pins.h"
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -127,6 +128,14 @@ static bool rd(uint8_t reg, uint8_t *val) {
 /* COMMON_CONFIG bit0 = soft power-off: every rail drops within ms, draw falls
  * to the PMIC's quiescent few uA. A PWR-button press powers the board back on. */
 bool battery_port_poweroff(void) {
+#ifdef PIN_BAT_EN
+    if (!s_dev) {                      /* the 1.54in LCD: let go of the latch. On battery the rails drop here;
+                                          on USB nothing happens and the caller deep-sleeps (PWR boots it). */
+        gpio_hold_dis(PIN_BAT_EN);
+        gpio_set_level(PIN_BAT_EN, 0);
+        return true;
+    }
+#endif
     if (!s_dev) return false;
     uint8_t v;
     if (!rd(REG_COMMON_CFG, &v)) return false;
