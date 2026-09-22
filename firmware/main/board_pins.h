@@ -61,14 +61,24 @@
    measurable, a third of it at a time, on ADC1 channel 0. Waveshare's own
    examples read it as 3.3/4096 * 3 * raw. No VBUS sense reaches the chip,
    so "charging" is not knowable here; the meter just shows a level. */
-/* This board has a real POWER button, and it is not wired to the ESP32 at
-   all - it is a hardware latch on the charge/discharge chip, which is why
-   Waveshare's docs give it no GPIO. So the board can be genuinely OFF, and
-   a short press on PWR is what brings it back; a long hold is the force-off.
+/* This board has a real POWER button, and it IS wired to the ESP32 - the
+   schematic (ESP32-S3-LCD-1.54-Schematic.pdf, "BAT" block) is a soft latch:
+   VBAT reaches VSYS through P-FET Q2, whose gate R23 (100k) pulls to VBAT
+   (off). Pressing PWR (Key3, net KEY_PWR) pulls that gate low through D5 and
+   the board wakes; the same press reaches GPIO5 through D3 so the firmware
+   can read it. Holding the board ON is then the firmware's job: GPIO2
+   (net BAT_EN, 1k into T1 8050's base, 10k to GND) drives T1, which keeps
+   Q2's gate low. Nothing else does. USB (VBUS -> Q3, gate 100k to GND) powers
+   VSYS on its own, so on USB the board runs whatever GPIO2 says - which is
+   why a build that never drives GPIO2 works on USB and dies the instant the
+   cable comes out (seen 2026-09-22). There is no hardware force-off: to turn
+   OFF on battery the firmware drops GPIO2. Waveshare's docs say none of this.
    It also means the firmware must NOT borrow BOOT as a sleep key here: BOOT
    is already the download-mode key, and a stray press turning the screen
    black on a board that has its own power button is three jobs for one
    button, two of them ours. */
+#define PIN_BAT_EN        2        /* HIGH = hold power on battery (T1 -> Q2) */
+#define PIN_BTN_PWR       5        /* KEY_PWR through D3; the button also wakes the latch */
 #define BOARD_HAS_PWR_LATCH 1
 #define BOARD_HAS_FUEL_GAUGE 0
 #define PIN_BAT_ADC       1

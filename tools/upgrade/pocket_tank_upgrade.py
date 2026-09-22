@@ -327,6 +327,14 @@ def main():
         print()
         _e.main(argv + ["erase_flash"])
         print()
+    if picked["id"] == "lcd154":
+        # The 1.54in LCD board has NO USB-serial bridge: the cable is on the
+        # S3's own USB-Serial-JTAG, and a reset pulsed through its RTS/DTR
+        # lands the ROM in DOWNLOAD mode (measured 2026-09-22: strap reads
+        # GPIO0 low, "waiting for download", screen dark, silent - "dead").
+        # A watchdog reset is a real chip reset with the pins left alone, and
+        # the port stays up across it, so the log below reads it as-is.
+        argv += ["--after", "watchdog_reset"]
     argv += ["write_flash"]
     for part in spec["parts"]:
         argv += [part["offset"], bundled(part["file"])]
@@ -383,7 +391,11 @@ def main():
     # boot - the bootloader, and every line before the panel comes up - is
     # already gone, and on this board the port re-enumerates in between. Twice
     # now an empty window here has cost a day and proved nothing.
-    read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True, reset=True)
+    # ...except on the 1.54in LCD, whose RTS/DTR reset is the download-mode
+    # trap above: there esptool's watchdog reset already did the job and the
+    # port never went away, so just read it.
+    read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True,
+             reset=(picked["id"] != "lcd154"))
     pause()
     return 0
 

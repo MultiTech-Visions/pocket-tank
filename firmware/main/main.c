@@ -671,6 +671,14 @@ const char *version_port_string(void) { return esp_app_get_description()->versio
 void app_main(void) {
     ESP_LOGI(TAG, "pocket-tank boot%s",
              esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 ? " (woken by button)" : "");
+#ifdef PIN_BAT_EN
+    /* Power latch first, before anything slow: on battery the PWR button is
+       only holding Q2 on for as long as the finger is down (board_pins.h). */
+    gpio_config_t latch = { .pin_bit_mask = 1ULL << PIN_BAT_EN, .mode = GPIO_MODE_OUTPUT };
+    gpio_config(&latch);
+    gpio_set_level(PIN_BAT_EN, 1);
+    ESP_LOGI(TAG, "power latch held (GPIO%d high)", PIN_BAT_EN);
+#endif
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&btn);
