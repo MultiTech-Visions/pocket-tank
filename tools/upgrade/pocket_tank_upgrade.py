@@ -47,7 +47,7 @@ that is wrong when somebody is standing there with a dark screen. If a
 bundle ever does carry more than one, it asks rather than guesses; --board
 <id> answers that in advance.
 """
-import json, os, sys
+import json, os, sys, time
 
 # the only differences between the two builds: what to call the machine, what
 # a port looks like there, and how to say "run me with this port instead"
@@ -147,6 +147,57 @@ def selfcheck(spec):
     return 0
 
 
+def read_log(port_arg):
+    """--log: reset the tank and print what it says on its way up.
+
+    A tank with a dark screen has already told you why - over the USB serial
+    port, in the first two seconds after a reset - and nobody who was given
+    one of these has a toolchain to go and read it with. esptool brings
+    pyserial along, so this file can.
+
+    Toggling DTR/RTS the way the ROM expects is what makes the chip reset,
+    so the log starts at the beginning instead of halfway through."""
+    import serial
+    from serial.tools import list_ports
+    port = port_arg
+    if not port:
+        cands = [d.device for d in list_ports.comports()]
+        if not cands:
+            print("   No serial ports at all. Is it plugged in, with a DATA cable?")
+            return 1
+        port = cands[-1]                 # the newest one is nearly always the tank
+        if len(cands) > 1:
+            print(f"   {len(cands)} ports here; reading {port}. Pass another if this is wrong:")
+            print(f"     {', '.join(cands)}")
+    print(f"   Reading {port}. Ten seconds. Copy ALL of this and send it over.")
+    print("-" * 62)
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.2)
+    except Exception as e:
+        print(f"   Could not open {port}: {e}")
+        return 1
+    try:
+        ser.setDTR(False); ser.setRTS(True)          # EN low: hold it in reset
+        time.sleep(0.12)
+        ser.setRTS(False)                            # and let go: it boots from here
+        ser.reset_input_buffer()
+        end = time.time() + 10.0
+        while time.time() < end:
+            chunk = ser.read(4096)
+            if chunk:
+                sys.stdout.write(chunk.decode("utf-8", "replace"))
+                sys.stdout.flush()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        ser.close()
+    print()
+    print("-" * 62)
+    print("   That is the boot log. If it ends in a panic or keeps repeating,")
+    print("   the last few lines before it repeats are the ones that matter.")
+    return 0
+
+
 def main():
     p = platform()
     bs = boards()
@@ -156,6 +207,10 @@ def main():
             if selfcheck(spec_of(b)):
                 return 1
         return 0
+    if argv_rest and argv_rest[0] == "--log":                # a dark screen explains itself here
+        rc = read_log(argv_rest[1] if len(argv_rest) > 1 else None)
+        pause()
+        return rc
     picked = None
     if len(argv_rest) >= 2 and argv_rest[0] == "--board":    # for anyone who knows which they have
         picked = next((b for b in bs if b["id"] == argv_rest[1]), None)
@@ -231,6 +286,10 @@ def main():
     print("   DONE - the tank is rebooting into the new app.")
     print(rule)
     print("   Your tank is exactly as you left it.")
+    print()
+    print("   If the screen stays dark, run this file again with --log and")
+    print("   send what it prints:")
+    print(f"     {os.path.basename(sys.argv[0])} --log")
     pause()
     return 0
 

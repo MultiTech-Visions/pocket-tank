@@ -191,6 +191,15 @@ jobs:
 
           A board that has never run Pocket Tank also needs the 8 MB model
           partition written once, which this does not carry.
+
+          **If the screen stays dark**, run the same file again with `--log`:
+
+          ```
+          PocketTankUpgrade-LCD154.exe --log
+          ```
+
+          It resets the tank and prints what it says on its way up, which is
+          where a dark screen explains itself. Send that text.
           EOF
           )
           if ! gh release view "$TAG" >/dev/null 2>&1; then
