@@ -44,12 +44,19 @@ static inline uint16_t squash_px(const uint16_t *fb, int sx, int sy) {
  * in a band clamps to the nearest edge of the frame rather than reporting
  * somewhere false. */
 static inline void squash_unmap(float px, float py, bool inverted, float *tx, float *ty) {
-    if (inverted) { px = (float)(PANEL_W - 1) - px; py = (float)(PANEL_H - 1) - py; }
     float fy = py - PANEL_FIT_Y;
     if (fy < 0) fy = 0;
     if (fy > PANEL_FIT_H - 1) fy = (float)(PANEL_FIT_H - 1);
     if (px < 0) px = 0;
     if (px > PANEL_FIT_W - 1) px = (float)(PANEL_FIT_W - 1);
+    /* the flip is about the FRAME, not the glass. The bands are 21 px above
+       and 22 below (240-197 is odd), so flipping about the panel first and
+       taking the band off after puts every touch one pixel out and jams the
+       top row against the clamp. Take the band off first. */
+    if (inverted) {
+        px = (float)(PANEL_FIT_W - 1) - px;
+        fy = (float)(PANEL_FIT_H - 1) - fy;
+    }
     *tx = px * (float)TANK_W / PANEL_FIT_W;
     *ty = fy * (float)TANK_H / PANEL_FIT_H;
 }

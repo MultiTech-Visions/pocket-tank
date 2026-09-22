@@ -112,7 +112,10 @@ The tank is more alive than it looks. Almost everything in it answers.
 - **Curiosity.** Put something new in and the fish come and look it over.
 - **The snail** grazes the glass clean, even while the tank sleeps.
 - **The screen flips** when you turn the device over — the IMU drives it, and
-  the touch map flips with it. No IMU, always upright.
+  the touch map flips with it. No IMU, always upright. On the 1.54in board
+  that flip is XORed with `BOARD_SCREEN_FLIPPED` (`firmware/main/board_pins.h`),
+  because that one hangs from its USB socket on the bottom edge: upside down
+  is its right way up.
 
 ## In the reef builder
 
@@ -129,6 +132,36 @@ The tank is more alive than it looks. Almost everything in it answers.
   Nothing floats.
 - **Settings → REEF → HIDE** takes the whole thing out of sight without
   deleting it. It is still saved, and the builder still shows it.
+
+## The 1.54in board is not the 1.8in board
+
+Two boards, one firmware. What actually differs, so the next surprise is a
+short list rather than an evening:
+
+| | AMOLED 1.8 (the gift devices) | LCD 1.54 |
+| --- | --- | --- |
+| panel | SH8601/CO5300 QSPI, 368x448, frame rotated 90 | ST7789 SPI, 240x240, frame **squashed** to 240x197 and letterboxed |
+| brightness | a panel command | LEDC PWM on GPIO46 |
+| power | AXP2101 PMIC: PWR key, real soft power-off, fuel gauge | **none.** ETA6096 charge management only |
+| battery | the PMIC's own state of charge | GPIO1, behind a 200k/100k divider: ADC1 ch0, x3, through a discharge curve. **Charging is not sensed** - no VBUS or /CHG line reaches the chip |
+| sleep | grace, then a PMIC soft cut | grace, then **the drowse carries on**; it must never deep sleep (see below) |
+| orientation | the IMU alone | the IMU XOR `BOARD_SCREEN_FLIPPED` - it hangs from its USB socket, bottom edge |
+| touch reset | a bit on the TCA9554 expander | a plain GPIO (47) |
+| touch | FT3168 or CST816, probed | CST816 always |
+| the rest | | same ES8311 + NS4150B, same QMI8658, same 16 MB flash and 8 MB octal PSRAM |
+
+Two traps, both of which cost a day:
+
+- **GPIO46 is the backlight AND a strapping pin.** `gpio_deep_sleep_hold_en()`
+  latched it high across the wake and any reset after it, and a strapping pin
+  high at reset suppresses the ROM messages. That is a board that boots dark
+  and says nothing on serial, intermittently, looking exactly like dead
+  hardware. It is driven low and released on this board instead.
+- **No PMIC makes BOOT the sleep key** (`!s_pmic` in `sleep_button_poll`), and
+  the end of the drowse used to be a plain `esp_deep_sleep_start()`. One stray
+  press and the panel, the backlight and USB serial all went away together,
+  with the ext0 wake fighting that held pad. A board with no PMIC no longer
+  deep sleeps on the idle path at all.
 
 ## Fork discipline, because it will bite you
 

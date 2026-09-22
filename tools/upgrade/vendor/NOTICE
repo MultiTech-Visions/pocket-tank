@@ -1,0 +1,16 @@
+waveshare_lcd154_factory.bin
+============================
+The factory demo firmware for the Waveshare ESP32-S3-Touch-LCD-1.54, taken
+unmodified from Waveshare's own product repository:
+
+    https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.54
+    Firmware/ESP32-S3-Touch-LCD-1.54/01_factory.bin
+
+Copyright (c) Waveshare. Licensed under the Apache License, Version 2.0:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+It is carried here for ONE purpose: to answer the question "is the screen
+broken, or is our firmware?" without needing a toolchain. It is a merged
+image written at 0x0 - it replaces everything on the board, including the
+saved tank - and the upgrader says so before it writes it.

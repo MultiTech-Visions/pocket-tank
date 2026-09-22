@@ -42,6 +42,7 @@
 #include "driver/i2c_master.h"
 #include "esp_async_memcpy.h"
 #include "freertos/semphr.h"
+#include "board_pins.h"
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
@@ -223,6 +224,35 @@ static void enter_sleep_for(int wake_after_s) {
     }
     /* stage 2: the grace passed. The save (written before the grace) plus the
        RTC clock cover the whole dark stretch at the next boot. */
+    /* NO PMIC, no timer: do NOT deep sleep. Deep sleep on this board is a
+       one-way door in practice - the screen goes dark, USB serial disappears
+       with it, and the ext0 wake on BOOT has to fight a held strapping pad
+       (see deep_sleep_now). A device you cannot get back, that says nothing
+       about why, is worse than a device that idles warm. So the drowse just
+       carries on: panel off, backlight off, CPU in light sleep waking ten
+       times a second, and ANY press comes straight back in place. */
+    if (wake_after_s <= 0 && !s_pmic) {
+        ESP_LOGI(TAG, "grace over, no PMIC: staying in the drowse (a press wakes it) rather than deep sleep");
+        for (;;) {
+            gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);
+            esp_sleep_enable_gpio_wakeup();
+            esp_sleep_enable_timer_wakeup(KEY_POLL_US);
+            esp_light_sleep_start();
+            esp_sleep_wakeup_cause_t why = esp_sleep_get_wakeup_cause();
+            gpio_wakeup_disable(BTN_SLEEP);
+            esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+            if (why != ESP_SLEEP_WAKEUP_GPIO && !battery_port_key_poll()) continue;
+            while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));
+            float napped = (esp_timer_get_time() - t0) / 1e6f;
+            tank_tick_sleep(&tank, napped);
+            display_port_wake();
+            imu_port_wake();
+            batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "wake");
+            s_snap_n = 0; s_btn_armed = false; s_btn_low_since = 0;
+            ESP_LOGI(TAG, "woke out of the drowse after %.0f s", napped);
+            return;
+        }
+    }
     if (wake_after_s <= 0 && s_pmic) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "off");   /* mirrored to NVS: the morning reads it back */
         ESP_LOGI(TAG, "grace over: PMIC power-off (the PWR key or USB boots the tank; the night is lived through at that boot)");
@@ -244,7 +274,22 @@ static void deep_sleep_now(int wake_after_s) {
     esp_sleep_enable_ext0_wakeup(BTN_SLEEP, 0);
     if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
     audio_port_deep_sleep_pins();
+#if BOARD_BL_IS_STRAP
+    /* the backlight pin is also a strapping pin on this board. A held
+       strapping pad survives the wake and the reset that may follow it, and
+       a strapping pin at the wrong level at reset is a board that boots dark
+       and prints nothing at all. Let it go: 46 low is both backlight-off and
+       the level the ROM wants. */
+    gpio_set_level(PIN_LCD_BL, 0);
+    gpio_hold_dis(PIN_LCD_BL);
+    /* the global deep-sleep hold is all-or-nothing, so this board gives up
+       the pad isolation rather than risk latching a strapping pin. Only the
+       director's timed `deepsleep N` reaches here on this board now - the
+       idle path above never deep sleeps without a PMIC - so the few mA it
+       costs are a bench cost, not a night on the shelf. */
+#else
     gpio_deep_sleep_hold_en();
+#endif
     ESP_LOGI(TAG, "digital pads held + isolated");
     esp_deep_sleep_start();
 }
@@ -406,7 +451,11 @@ static void tank_task(void *arg) {
         imu_port_poll(now);
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
-        bool inv = imu_port_inverted();
+        /* BOARD_SCREEN_FLIPPED: the 1.54in board hangs from its USB socket,
+           which is on the bottom edge, so its panel is mounted upside down
+           against the way the frame is drawn. XOR, not override - turning
+           the device over still flips it. */
+        bool inv = imu_port_inverted() ^ (BOARD_SCREEN_FLIPPED != 0);
         display_port_set_inverted(inv);   /* per-frame, so a flip lands between flushes */
         touch_port_set_inverted(inv);
         touch_port_poll(&tank);

@@ -104,7 +104,7 @@ def spec_of(board):
 def choose(bs):
     """which tank is this? Asked once, plainly, with no default that could
     quietly flash the wrong app onto somebody's fish."""
-    print("   Which tank is plugged in?")
+    print("   Which one?")
     print()
     for i, b in enumerate(bs, 1):
         print(f"     {i}. {b['label']}")
@@ -198,10 +198,11 @@ def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
         if not quiet:
             print("   No serial port came back. Is it plugged in, with a DATA cable?")
         return 1
-    if not quiet:
-        print(f"   Reading {port} for {int(seconds)} seconds. Copy ALL of this.")
+    print(f"   Reading {port} for {int(seconds)} seconds. Copy ALL of this.")
     print("-" * 62)
+    time.sleep(1.5)                  # let it finish re-enumerating after the reset
     got = 0
+    tried = []
     deadline = time.time() + seconds
     while time.time() < deadline:
         try:
@@ -212,18 +213,29 @@ def read_log(port_arg, seconds=10.0, quiet=False, reset=True):
             if fresh:
                 port = fresh
             continue
+        quiet_since = time.time()
         try:
             while time.time() < deadline:
                 chunk = ser.read(4096)
                 if chunk:
                     got += len(chunk)
+                    quiet_since = time.time()
                     sys.stdout.write(chunk.decode("utf-8", "replace"))
                     sys.stdout.flush()
+                elif got == 0 and time.time() - quiet_since > 3.0:
+                    break        # four seconds of nothing: maybe it is not this port
         except Exception:
             pass                                  # unplugged mid-read: go round again
         finally:
             try: ser.close()
             except Exception: pass
+        if got == 0:                  # try the others rather than sit on a silent one
+            tried.append(port)
+            nxt = [p for p in _ports() if p not in tried]
+            if not nxt:
+                break
+            port = nxt[-1]
+            print(f"   (nothing on {tried[-1]}; trying {port})")
     print()
     print("-" * 62)
     if got == 0:
@@ -268,11 +280,17 @@ def main():
             print()
     spec = spec_of(picked)
     print(f"   {picked['label']}")
+    if spec.get("wipes"):
+        print()
+        print("   THIS ONE REPLACES EVERYTHING on the board, including the saved")
+        print("   tank. It is here to answer one question - does the screen work -")
+        print("   and Pocket Tank can be written back over it afterwards.")
     print(f"   firmware {spec['version']}, built {spec['built']}")
     print()
-    print("   Your fish, their names, your sand dollars and everything")
-    print("   you have unlocked are KEPT. Only the app is replaced.")
-    print()
+    if not spec.get("wipes"):
+        print("   Your fish, their names, your sand dollars and everything")
+        print("   you have unlocked are KEPT. Only the app is replaced.")
+        print()
     print(f"   1. Plug the tank into this {p['machine']} with a USB-C cable.")
     print("   2. Leave it awake - press the side button if the screen is dark.")
     print("   3. Wait. Do not unplug it until this says DONE.")
