@@ -349,7 +349,13 @@ def main():
     print("   Here is what it says as it starts. If anything is wrong, it is")
     print("   in here - copy this window and send it.")
     print()
-    read_log(argv_rest[0] if argv_rest else None, seconds=8.0, quiet=True, reset=False)
+    # reset=True: do our OWN reset with the port handling that goes with it,
+    # rather than trying to catch esptool's. esptool's reset happens while it
+    # still owns the port; by the time this opens one the first second of the
+    # boot - the bootloader, and every line before the panel comes up - is
+    # already gone, and on this board the port re-enumerates in between. Twice
+    # now an empty window here has cost a day and proved nothing.
+    read_log(argv_rest[0] if argv_rest else None, seconds=12.0, quiet=True, reset=True)
     pause()
     return 0
 
