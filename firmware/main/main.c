@@ -53,7 +53,15 @@
  * AXP2101's PWRON, polled over I2C): the night mode is a PMIC power-off,
  * from which ONLY that key (or USB) can bring the board back, so it has to
  * be the one key the keeper ever presses - press to sleep, press to wake. */
+#ifdef PIN_BTN_PWR                     /* the 1.54in LCD: its PWR key, active low, RTC-wake capable (board_pins.h) */
+#define BTN_SLEEP ((gpio_num_t)PIN_BTN_PWR)
+#define BTN_SLEEP_NAME "PWR"
+#define BTN_CHORD GPIO_NUM_0            /* ...and the reset chord stays BOOT + tap, on its own input */
+#else
 #define BTN_SLEEP GPIO_NUM_0
+#define BTN_SLEEP_NAME "BOOT"
+#define BTN_CHORD BTN_SLEEP             /* one key does both */
+#endif
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
 /* Whichever display port is built owns the I2C bus and hands it out; only a
    STUB display (QEMU, compile-only) has no bus to give. This used to be
@@ -269,7 +277,7 @@ static void enter_sleep(void) { enter_sleep_for(0); }
    kept them driven, the first deep-sleep build left them neither, and the
    board around the chip drew ~15 mA all night (2026-09-15/16). */
 static void deep_sleep_now(int wake_after_s) {
-    ESP_LOGI(TAG, "deep sleep (BOOT wakes%s)", wake_after_s > 0 ? ", or the timer" : "");
+    ESP_LOGI(TAG, "deep sleep (" BTN_SLEEP_NAME " wakes%s)", wake_after_s > 0 ? ", or the timer" : "");
     rtc_gpio_pullup_en(BTN_SLEEP); rtc_gpio_pulldown_dis(BTN_SLEEP);
     esp_sleep_enable_ext0_wakeup(BTN_SLEEP, 0);
     if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
@@ -333,17 +341,36 @@ static void pwr_key_poll(int64_t now) {
  * key as it was until 2026-09-16; a chord press never is. */
 #define BTN_DEBOUNCE_US 50000
 static void sleep_button_poll(int64_t now) {
+#ifdef PIN_BTN_PWR
+    /* the chord on its own key (BOOT), held + a finger landing on the glass */
+    static int64_t chord_low_since;
+    if (gpio_get_level(BTN_CHORD)) chord_low_since = 0;
+    else if (!chord_low_since) chord_low_since = now;
+    else if (touch_port_pressed_since(chord_low_since) && !touch_port_confirm_up()) {
+        ESP_LOGI(TAG, "BOOT + tap: reset prompt");
+        touch_port_confirm_open();
+    }
+#endif
     if (gpio_get_level(BTN_SLEEP)) {
         if (!s_pmic && !BOARD_HAS_PWR_LATCH && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
             enter_sleep();   /* ...but never on a board with its own PWR button: see BOARD_HAS_PWR_LATCH */
         s_btn_armed = true; s_btn_low_since = 0; s_btn_used = false;
     } else if (s_btn_armed) {
         if (!s_btn_low_since) s_btn_low_since = now;
+#ifndef PIN_BTN_PWR
         else if (!s_btn_used && touch_port_pressed_since(s_btn_low_since) && !touch_port_confirm_up()) {
             s_btn_used = true;
             ESP_LOGI(TAG, "BOOT + tap: reset prompt");
             touch_port_confirm_open();
         }
+#endif
+#ifdef PIN_BAT_EN
+        else if (!s_btn_used && now - s_btn_low_since >= 1500000) {   /* the PWR key held 1.5 s: off, as on the PMIC boards */
+            s_btn_used = true;
+            ESP_LOGI(TAG, "PWR key held: power-off");
+            enter_poweroff();
+        }
+#endif
     }
 }
 
@@ -679,7 +706,7 @@ void app_main(void) {
     gpio_set_level(PIN_BAT_EN, 1);
     ESP_LOGI(TAG, "power latch held (GPIO%d high)", PIN_BAT_EN);
 #endif
-    gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
+    gpio_config_t btn = { .pin_bit_mask = (1ULL << BTN_SLEEP) | (1ULL << BTN_CHORD), .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&btn);
     gpio_deep_sleep_hold_dis();              /* a deep-sleep wake is a boot: the night's pad holds end here */
