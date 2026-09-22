@@ -54,7 +54,12 @@
  * be the one key the keeper ever presses - press to sleep, press to wake. */
 #define BTN_SLEEP GPIO_NUM_0
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+/* Whichever display port is built owns the I2C bus and hands it out; only a
+   STUB display (QEMU, compile-only) has no bus to give. This used to be
+   keyed on the AMOLED driver specifically, so the 1.54in board - a real
+   board with a real bus - got the NULL stub, and with it no touch, no
+   codec, no IMU and no clock. */
+#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_BOARD_LCD154)
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
