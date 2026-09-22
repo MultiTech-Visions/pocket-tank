@@ -334,8 +334,8 @@ static void pwr_key_poll(int64_t now) {
 #define BTN_DEBOUNCE_US 50000
 static void sleep_button_poll(int64_t now) {
     if (gpio_get_level(BTN_SLEEP)) {
-        if (!s_pmic && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
-            enter_sleep();
+        if (!s_pmic && !BOARD_HAS_PWR_LATCH && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
+            enter_sleep();   /* ...but never on a board with its own PWR button: see BOARD_HAS_PWR_LATCH */
         s_btn_armed = true; s_btn_low_since = 0; s_btn_used = false;
     } else if (s_btn_armed) {
         if (!s_btn_low_since) s_btn_low_since = now;

@@ -61,6 +61,15 @@
    measurable, a third of it at a time, on ADC1 channel 0. Waveshare's own
    examples read it as 3.3/4096 * 3 * raw. No VBUS sense reaches the chip,
    so "charging" is not knowable here; the meter just shows a level. */
+/* This board has a real POWER button, and it is not wired to the ESP32 at
+   all - it is a hardware latch on the charge/discharge chip, which is why
+   Waveshare's docs give it no GPIO. So the board can be genuinely OFF, and
+   a short press on PWR is what brings it back; a long hold is the force-off.
+   It also means the firmware must NOT borrow BOOT as a sleep key here: BOOT
+   is already the download-mode key, and a stray press turning the screen
+   black on a board that has its own power button is three jobs for one
+   button, two of them ours. */
+#define BOARD_HAS_PWR_LATCH 1
 #define BOARD_HAS_FUEL_GAUGE 0
 #define PIN_BAT_ADC       1
 #define BAT_ADC_DIV       3
@@ -98,6 +107,9 @@
 /* defaults for the board that does not set them */
 #ifndef BOARD_SCREEN_FLIPPED
 #define BOARD_SCREEN_FLIPPED 0
+#endif
+#ifndef BOARD_HAS_PWR_LATCH
+#define BOARD_HAS_PWR_LATCH 0
 #endif
 #ifndef BOARD_HAS_FUEL_GAUGE
 #define BOARD_HAS_FUEL_GAUGE 1
