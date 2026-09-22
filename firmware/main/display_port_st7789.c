@@ -78,8 +78,19 @@ static void backlight_init(void) {
 }
 
 bool display_port_init(void) {
+    /* THE BACKLIGHT GOES ON FIRST, before anything that can fail. A dark
+       screen and a lit blank screen are different faults and there is no
+       other way to tell them apart with the device in your hand: lit means
+       the board, the rail and this pin are fine and the problem is further
+       in; dark means it never got here at all. */
+    backlight_init();
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL, 255);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL);
+    ESP_LOGI(TAG, "backlight on (GPIO %d); bringing the panel up", PIN_LCD_BL);
+
     i2c_master_bus_config_t bus = { .i2c_port = I2C_NUM_0, .sda_io_num = PIN_I2C_SDA, .scl_io_num = PIN_I2C_SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT, .glitch_ignore_cnt = 7, .flags.enable_internal_pullup = true };
+        .clk_source = I2C_CLK_SRC_DEFAULT, .flags.enable_internal_pullup = true };
+    bus.glitch_ignore_cnt = 7;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus, &s_i2c));
 
     for (int i = 0; i < 2; i++) {
@@ -115,7 +126,6 @@ bool display_port_init(void) {
         int h = y + STRIPE_ROWS > PANEL_H ? PANEL_H - y : STRIPE_ROWS;
         esp_lcd_panel_draw_bitmap(s_panel, 0, y, PANEL_W, y + h, s_stripe[0]);
     }
-    backlight_init();
     display_port_set_brightness(s_brightness);
     ESP_LOGI(TAG, "panel up: %dx%d, tank frame %dx%d squashed to %dx%d at y%d",
              PANEL_W, PANEL_H, TANK_W, TANK_H, PANEL_FIT_W, PANEL_FIT_H, PANEL_FIT_Y);
