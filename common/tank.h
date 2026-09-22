@@ -50,7 +50,7 @@
 #define VEG_BEDS_MAX 4                         /* + the shop's sword plant, bed 3 (2026-09-15:
                                                 * live only once bought; tank_veg_beds) */
 typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
-#define SD_ITEM_N 8                            /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
+#define SD_ITEM_N 10                           /* shop items (the SD_ITEM_* enum below; tank_t's decor slots) */
 #define VEG_START  0.35f                       /* a fresh tank (and a bought plant): comfortable cover */
 #define VEG_NUB    0.03f                       /* trim floor: ~13 px green stubble */
 #define VEG_BARE   0.10f                       /* tallest bed under this = no cover
@@ -359,6 +359,15 @@ typedef struct tank {
     float    totem_held_s;       /* seconds in the current phase */
     uint8_t  totem_phase;        /* TOTEM_* above */
     float    disco_drop, disco_spin, disco_show_s;   /* the ball: lowered fraction, turns, show left (not saved) */
+    /* the chest and the diver (2026-09-22): both derived from the clock and
+     * never saved - a boot finds the chest shut and the diver at his spot */
+    float    chest_t;            /* seconds into the current chest phase */
+    uint8_t  chest_phase;        /* CHEST_* below */
+    float    chest_puff_t;
+    bool     chest_held;         /* the keeper tapped it open: it stays open */
+    float    diver_x, diver_t, diver_puff_t, diver_bob;
+    int8_t   diver_dir;          /* -1 left, +1 right */
+    bool     diver_resting;
     bool     totem_planted;      /* standing in the sand at the party, not in a mouth */
     float    totem_party_x;      /* where it was slammed down, and the lean it kept */
     float    totem_party_ang;
@@ -601,10 +610,19 @@ enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 
        SD_ITEM_LASER = 1u << (SD_LOCAL_BIT0 + 0), SD_ITEM_BASS  = 1u << (SD_LOCAL_BIT0 + 1),
        SD_ITEM_GLOW  = 1u << (SD_LOCAL_BIT0 + 2), SD_ITEM_TOTEM = 1u << (SD_LOCAL_BIT0 + 3),
        SD_ITEM_DISCO = 1u << (SD_LOCAL_BIT0 + 4),
+       /* the old shelf (2026-09-22): the two things every fish tank in every
+        * dentist's waiting room has had since 1950. A TREASURE CHEST that
+        * creaks open now and then, breathes a stream of bubbles and shuts
+        * again - tap it to open it early - and a brass-helmet DIVER who
+        * plods along the sand, stops to look at things and lets a string of
+        * bubbles go from his helmet. Set dressing like the festival shelf:
+        * the model sees neither of them. */
+       SD_ITEM_CHEST = 1u << (SD_LOCAL_BIT0 + 5), SD_ITEM_DIVER = 1u << (SD_LOCAL_BIT0 + 6),
        SD_ITEM_COUNT = SD_ITEM_N };
 /* item INDEXES (the row in SD_ITEMS[], the shop rows, decor_x[]) */
 enum { SD_IDX_PLANT = 0, SD_IDX_SNAIL = 1, SD_IDX_CASTLE = 2,
-       SD_IDX_LASER = 3, SD_IDX_BASS = 4, SD_IDX_GLOW = 5, SD_IDX_TOTEM = 6, SD_IDX_DISCO = 7 };
+       SD_IDX_LASER = 3, SD_IDX_BASS = 4, SD_IDX_GLOW = 5, SD_IDX_TOTEM = 6, SD_IDX_DISCO = 7,
+       SD_IDX_CHEST = 8, SD_IDX_DIVER = 9 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -636,6 +654,15 @@ bool  tank_totem_pose(const tank_t *t, float *x, float *y, float *ang, bool *car
 /* the party at the speaker is on (the disco ball and anything else that wants
  * to join in reads this) */
 bool  tank_bass_party(const tank_t *t);
+/* the chest: 0 shut .. 1 wide open (the lid's swing and the gold's glow),
+ * and the keeper's tap - true when the tap was ON it, so the caller knows
+ * the tap is spent */
+float tank_chest_open(const tank_t *t);
+bool  tank_chest_tap(tank_t *t, float x, float y);
+/* the diver: where he is standing (y is the sand line he bobs about), which
+ * way he faces, and whether he has stopped to look at something */
+void  tank_diver_state(const tank_t *t, float *x, float *y, int *dir, bool *resting);
+bool  tank_diver_tap(tank_t *t, float x, float y);
 /* dev page / director: the most sociable fish lifts the totem NOW - no social
  * bar, no cooldown, no waiting for dark. Does nothing without the totem in the
  * tank, or while a parade is already running. */
@@ -770,6 +797,7 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
  * The walking legs are arrival-driven with a cap, because how long the swim
  * takes depends on where the keeper put things. */
 enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
+enum { CHEST_SHUT = 0, CHEST_OPENING, CHEST_OPEN, CHEST_CLOSING };
 #define TOTEM_PARADE_S     40.0f            /* no speaker: how long the parade itself lasts */
 #define TOTEM_WALK_MAX_S   60.0f            /* a walking leg cannot outstay this */
 #define TOTEM_HOLD_S       45.0f
@@ -798,6 +826,38 @@ enum { TOTEM_OFF = 0, TOTEM_WALK, TOTEM_HOLD, TOTEM_PLANTED, TOTEM_HOME };
 #define DISCO_DROP_S    3.5f                /* seconds to lower or raise */
 #define DISCO_SHOW_S    30.0f               /* a tap-started show stops itself */
 #define DISCO_SPIN_RPS  0.32f               /* turns a second once it is down */
+/* ---- the treasure chest (2026-09-22) -------------------------------------
+ * Shut, it is a banded wooden box on the sand. Every CHEST_WAIT_S or so the
+ * lid creaks up over CHEST_OPEN_S, the gold inside lights the water, a
+ * stream of bubbles climbs out of it for CHEST_HOLD_S, and it closes again.
+ * A tap opens it now (and a second tap shuts it), the way the disco ball's
+ * tap works, so it is something the keeper can play with and not only wait
+ * for. The bubbles are the tank's own (tank_puff_bubbles), so they rise and
+ * pop with all the others. */
+#define CHEST_HALF_W    22
+#define CHEST_X_DEFAULT (TANK_W * 0.76f)
+#define CHEST_W         44                  /* the box, on the sand */
+#define CHEST_H         26
+#define CHEST_LID_H     12
+#define CHEST_WAIT_S    95.0f               /* shut, between shows */
+#define CHEST_OPEN_S    1.6f                /* the lid's creak, each way */
+#define CHEST_HOLD_S    9.0f                /* open, breathing bubbles */
+#define CHEST_PUFF_S    0.7f                /* one bubble this often while open */
+#define CHEST_LID_MAX   1.05f               /* radians the lid swings back */
+/* ---- the diver (2026-09-22) ----------------------------------------------
+ * A brass-helmet diver in the old canvas suit, plodding the sand from one
+ * end to the other and back. He STOPS now and then to look at whatever he
+ * is beside, bobs on his own air, and lets a string of bubbles go from the
+ * helmet every DIVER_PUFF_S. Tapping him turns him round. He is drawn among
+ * the fish, not behind them, because he is the size of one. */
+#define DIVER_HALF_W    14
+#define DIVER_X_DEFAULT (TANK_W * 0.30f)
+#define DIVER_H         46
+#define DIVER_SPEED     9.0f                /* px a second: a plod, not a swim */
+#define DIVER_PAUSE_S   6.0f                /* how long he stands and looks */
+#define DIVER_WALK_S    14.0f               /* ... and how long he walks between stops */
+#define DIVER_PUFF_S    3.4f
+#define DIVER_BOB       3.0f                /* px of float on his own air */
 #define BASS_BPM        140.0f             /* the thump (dubstep tempo); the drop every BASS_DROP_BEATS */
 #define BASS_BEAT_S     (60.0f / BASS_BPM)
 #define BASS_DROP_BEATS 16

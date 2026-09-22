@@ -744,10 +744,12 @@ static const struct { float half_w, x_default; bool hangs; uint8_t z_count; } DE
     [SD_IDX_GLOW]   = { GLOW_HALF_W,   GLOW_X_DEFAULT,   false, DECOR_Z_N },
     [SD_IDX_TOTEM]  = { TOTEM_HALF_W,  TOTEM_X_DEFAULT,  false, DECOR_Z_N },
     [SD_IDX_DISCO]  = { DISCO_HALF_W,  DISCO_X_DEFAULT,  true,  DECOR_Z_N },
+    [SD_IDX_CHEST]  = { CHEST_HALF_W,  CHEST_X_DEFAULT,  false, DECOR_Z_N },
+    [SD_IDX_DIVER]  = { DIVER_HALF_W,  DIVER_X_DEFAULT,  false, DECOR_Z_N },   /* where he turns round */
 };
 static const uint32_t SD_BIT[SD_ITEM_COUNT] = { SD_ITEM_PLANT, SD_ITEM_SNAIL, SD_ITEM_CASTLE,
                                                 SD_ITEM_LASER, SD_ITEM_BASS, SD_ITEM_GLOW, SD_ITEM_TOTEM,
-                                                SD_ITEM_DISCO };
+                                                SD_ITEM_DISCO, SD_ITEM_CHEST, SD_ITEM_DIVER };
 uint32_t tank_item_bit(int item) { return (item >= 0 && item < SD_ITEM_COUNT) ? SD_BIT[item] : 0; }
 bool  tank_decor_placeable(int item) { return item >= 0 && item < SD_ITEM_COUNT && DECOR[item].half_w > 0; }
 bool  tank_decor_hangs(int item) { return tank_decor_placeable(item) && DECOR[item].hangs; }
@@ -1272,6 +1274,104 @@ static void bass_tick(tank_t *t) {
     }
 }
 
+/* ---- the treasure chest (tank.h) ----------------------------------------
+ * A slow cycle: shut, the lid creaks up, it breathes bubbles, it shuts. The
+ * keeper's tap opens it now and holds it open until the next tap. */
+static void chest_puff(tank_t *t, float cx, float cy) {
+    for (int i = 0; i < MAX_BUBBLE; i++) {
+        if (t->bubble[i].column) continue;
+        t->bubble[i].x = cx + tank_randf(t, -9, 9);
+        t->bubble[i].y = cy;
+        return;
+    }
+}
+static void chest_tick(tank_t *t, float dt) {
+    if (!tank_bit_live(t, SD_ITEM_CHEST)) { t->chest_phase = CHEST_SHUT; t->chest_t = 0; t->chest_held = false; return; }
+    t->chest_t += dt;
+    switch (t->chest_phase) {
+    case CHEST_SHUT:
+        if (t->chest_t > CHEST_WAIT_S) { t->chest_phase = CHEST_OPENING; t->chest_t = 0; }
+        break;
+    case CHEST_OPENING:
+        if (t->chest_t > CHEST_OPEN_S) { t->chest_phase = CHEST_OPEN; t->chest_t = 0; }
+        break;
+    case CHEST_OPEN:
+        if ((t->chest_puff_t += dt) > CHEST_PUFF_S) {       /* the stream out of the lid */
+            t->chest_puff_t = 0;
+            chest_puff(t, tank_decor_x(t, SD_IDX_CHEST), TANK_H - 16 - CHEST_H);
+        }
+        if (!t->chest_held && t->chest_t > CHEST_HOLD_S) { t->chest_phase = CHEST_CLOSING; t->chest_t = 0; }
+        break;
+    default:                                                 /* CHEST_CLOSING */
+        if (t->chest_t > CHEST_OPEN_S) { t->chest_phase = CHEST_SHUT; t->chest_t = 0; }
+        break;
+    }
+}
+/* 0 shut .. 1 wide open, for the lid's angle and the glow */
+float tank_chest_open(const tank_t *t) {
+    switch (t->chest_phase) {
+    case CHEST_OPENING: return clampf(t->chest_t / CHEST_OPEN_S, 0, 1);
+    case CHEST_OPEN:    return 1.0f;
+    case CHEST_CLOSING: return 1.0f - clampf(t->chest_t / CHEST_OPEN_S, 0, 1);
+    default:            return 0.0f;
+    }
+}
+bool tank_chest_tap(tank_t *t, float x, float y) {
+    if (!tank_bit_live(t, SD_ITEM_CHEST)) return false;
+    float cx = tank_decor_x(t, SD_IDX_CHEST), cy = TANK_H - 16 - CHEST_H * 0.5f;
+    if (fabsf(x - cx) > CHEST_W * 0.75f || fabsf(y - cy) > CHEST_H * 1.3f) return false;
+    if (t->chest_phase == CHEST_SHUT || t->chest_phase == CHEST_CLOSING) {
+        t->chest_phase = CHEST_OPENING; t->chest_t = 0; t->chest_held = true;
+        chest_puff(t, cx, TANK_H - 16 - CHEST_H);
+    } else {                                                 /* a second tap shuts it */
+        t->chest_phase = CHEST_CLOSING; t->chest_t = 0; t->chest_held = false;
+    }
+    tank_emit(TEV_TAP, -1);
+    return true;
+}
+/* ---- the diver (tank.h) -------------------------------------------------
+ * He plods, he stops to look, he breathes. His turning points are the
+ * keeper's spot give or take DIVER_RANGE, so MOVING him moves his beat. */
+#define DIVER_RANGE 120.0f
+static void diver_tick(tank_t *t, float dt) {
+    if (!tank_bit_live(t, SD_ITEM_DIVER)) return;
+    float home = tank_decor_x(t, SD_IDX_DIVER);
+    if (t->diver_dir == 0) { t->diver_dir = 1; t->diver_x = home; }      /* first tick: at his spot */
+    t->diver_t += dt;
+    t->diver_bob += dt;
+    if (t->diver_resting) {
+        if (t->diver_t > DIVER_PAUSE_S) { t->diver_resting = false; t->diver_t = 0; }
+    } else {
+        t->diver_x += t->diver_dir * DIVER_SPEED * dt;
+        if (t->diver_t > DIVER_WALK_S) { t->diver_resting = true; t->diver_t = 0; }
+    }
+    float lo = home - DIVER_RANGE, hi = home + DIVER_RANGE;
+    if (lo < DECOR_MARGIN + DIVER_HALF_W) lo = DECOR_MARGIN + DIVER_HALF_W;
+    if (hi > TANK_W - DECOR_MARGIN - DIVER_HALF_W) hi = TANK_W - DECOR_MARGIN - DIVER_HALF_W;
+    if (t->diver_x < lo) { t->diver_x = lo; t->diver_dir = 1; }
+    if (t->diver_x > hi) { t->diver_x = hi; t->diver_dir = -1; }
+    if ((t->diver_puff_t += dt) > DIVER_PUFF_S) {            /* a string from the helmet */
+        t->diver_puff_t = 0;
+        chest_puff(t, t->diver_x + t->diver_dir * 5, TANK_H - 16 - DIVER_H + 4);
+    }
+}
+void tank_diver_state(const tank_t *t, float *x, float *y, int *dir, bool *resting) {
+    if (x) *x = t->diver_dir == 0 ? tank_decor_x(t, SD_IDX_DIVER) : t->diver_x;
+    if (y) *y = TANK_H - 16 + sinf(t->diver_bob * 1.3f) * DIVER_BOB;
+    if (dir) *dir = t->diver_dir >= 0 ? 1 : -1;
+    if (resting) *resting = t->diver_resting;
+}
+bool tank_diver_tap(tank_t *t, float x, float y) {
+    if (!tank_bit_live(t, SD_ITEM_DIVER)) return false;
+    float dx2, dy2; tank_diver_state(t, &dx2, &dy2, NULL, NULL);
+    if (fabsf(x - dx2) > DIVER_HALF_W + 10 || y < dy2 - DIVER_H - 8 || y > dy2 + 8) return false;
+    t->diver_dir = (int8_t)-(t->diver_dir >= 0 ? 1 : -1);    /* he turns round and carries on */
+    t->diver_resting = false; t->diver_t = 0;
+    chest_puff(t, dx2, dy2 - DIVER_H + 4);
+    tank_emit(TEV_TAP, -1);
+    return true;
+}
+
 void tank_touch_hold(tank_t *t, float x, float y) {
     tank_handled(t);
     t->hold_active = true; t->hold_x = x; t->hold_y = y;
@@ -1347,6 +1447,8 @@ void tank_touch_tap(tank_t *t, float x, float y) {
     /* the pile: a tap on it calls somebody over to play, and is spent doing
        that - it is an object, like the ball, not a knock on the glass, so it
        neither counts toward the startle nor flips the light */
+    if (tank_chest_tap(t, x, y)) return;                                 /* the chest: open it now */
+    if (tank_diver_tap(t, x, y)) return;                                 /* the diver: turn him round */
     if (tank_totem_nudge(t, x, y)) { tank_emit(TEV_TAP, -1); return; }   /* the totem: somebody fetches it */
     if (tank_glow_nudge(t, x, y)) { tank_emit(TEV_TAP, -1); return; }
     if (t->tap_burst_t > TAP_WINDOW) t->tap_count = 0;
@@ -2100,6 +2202,8 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     if (s_totem_invite_s > 0 && (s_totem_invite_s -= dt) <= 0) s_totem_invited = -1;
     if (s_decor_new_s > 0 && (s_decor_new_s -= dt) <= 0) s_decor_new = -1;
     totem_tick(t, dt);
+    chest_tick(t, dt);
+    diver_tick(t, dt);
     disco_tick(t, dt);
     gate_tick(t);
 

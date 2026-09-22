@@ -540,14 +540,123 @@ static void draw_disco(ctx_t *c, const tank_t *t) {
         }
 }
 
+/* the treasure chest: a banded box on the sand whose lid swings back, with
+ * the gold inside lighting the water as it opens (tank.h). Drawn the way
+ * everything else here is - spans and fills from a little geometry, no
+ * sprite - so it sits in the same water as the castle and the fronds. */
+static void draw_chest(ctx_t *c, const tank_t *t) {
+    float cx = tank_decor_x(t, SD_IDX_CHEST);
+    float open = tank_chest_open(t);
+    const float BY = FLOOR_Y;                       /* it stands on the sand */
+    const int HW = CHEST_W / 2;
+    src_t wood = src_color(0x7a4a26, c->dim), wood_d = src_color(0x54301a, c->dim),
+          wood_l = src_color(0xa0683a, c->dim), iron = src_color(0x4a4e58, c->dim);
+    /* the box */
+    for (int y = 0; y < CHEST_H; y++) {
+        float u = (float)y / CHEST_H;
+        const src_t *sp = u < 0.12f ? &wood_l : u > 0.86f ? &wood_d : &wood;
+        span(c, (int)(cx - HW), (int)(cx + HW), (int)(BY - CHEST_H + y), sp, 255);
+    }
+    for (int k = -1; k <= 1; k++) {                 /* three iron bands */
+        int bx = (int)(cx + k * (HW * 0.62f));
+        for (int y = 0; y < CHEST_H; y++) span(c, bx, bx + 1, (int)(BY - CHEST_H + y), &iron, 255);
+    }
+    for (int y = 0; y < CHEST_H; y++) {             /* and the corners */
+        span(c, (int)(cx - HW), (int)(cx - HW), (int)(BY - CHEST_H + y), &iron, 255);
+        span(c, (int)(cx + HW), (int)(cx + HW), (int)(BY - CHEST_H + y), &iron, 255);
+    }
+    /* the gold, seen once the lid lifts: a heap, a glow, and a few glints */
+    if (open > 0.02f) {
+        ctx_t lit = *c; lit.dim = 1.0f;             /* gold is its own light source */
+        float g = open;
+        fill_ellipse(&lit, cx, BY - CHEST_H, HW * 1.9f, 26 * g, 0xffce4a, (int)(30 * g));
+        fill_ellipse(&lit, cx, BY - CHEST_H, HW * 1.1f, 14 * g, 0xffce4a, (int)(60 * g));
+        /* a HEAP, not a bar: five mounds of coins with a lit crown each */
+        for (int i = 0; i < 5; i++) {
+            float gx = cx - HW + 5 + i * (CHEST_W - 10) / 4.0f;
+            float r = 5.0f - (i & 1) * 1.5f;
+            fill_ellipse(&lit, gx, BY - CHEST_H + 1, r, r * 0.62f, 0xd69626, 255);
+            fill_ellipse(&lit, gx, BY - CHEST_H - 0.5f, r * 0.8f, r * 0.5f, 0xffce4a, 255);
+            float tw = 0.5f + 0.5f * fast_sin(t->clock * 2.2f + i * 1.7f);   /* one glint at a time */
+            fill_ellipse(&lit, gx - r * 0.3f, BY - CHEST_H - 1.5f, 1.6f, 1.1f, 0xfff0a8, (int)(90 + 165 * tw));
+        }
+    }
+    /* The lid: a slab hinged along the BACK top edge, swinging up and back.
+       Filled by walking its own two axes and plotting - a slab at 40 degrees
+       drawn as a stack of rotated lines leaves gaps between them, which is
+       what made the first cut look like a plank propped against the box. */
+    float a = open * CHEST_LID_MAX;
+    float hx = cx + HW, hy = BY - CHEST_H;          /* the hinge, at the back top corner */
+    float ca = cosf(a), sa = sinf(a);
+    for (int iu = 0; iu <= CHEST_W * 2; iu++) {     /* half-steps: no gaps at any angle */
+        float u = iu * 0.5f;
+        for (int iv = 0; iv <= CHEST_LID_H * 2; iv++) {
+            float v = iv * 0.5f;
+            /* along the lid is -u to the left, across it is -v upward, both
+               turned by a about the hinge */
+            float px2 = hx - u * ca + v * sa;
+            float py2 = hy - u * sa - v * ca;
+            uint32_t col = iv < 3 ? 0xa0683a : iv > CHEST_LID_H * 2 - 4 ? 0x54301a : 0x7a4a26;
+            if (iu > CHEST_W * 0.55f && iu < CHEST_W * 0.75f && iv > 2 && iv < CHEST_LID_H * 2 - 3)
+                col = 0x4a4e58;                      /* the band, carried onto the lid */
+            px_blend(c, (int)px2, (int)py2, col, 255);
+            px_blend(c, (int)px2 + 1, (int)py2, col, 255);   /* no seams between half-steps */
+        }
+    }
+    /* the lock plate, on the front of the box */
+    src_t iron_l = src_color(0x787e8a, c->dim);
+    for (int y = 0; y < 7; y++) span(c, (int)(cx - 3), (int)(cx + 3), (int)(BY - CHEST_H * 0.55f + y), &iron_l, 255);
+}
+
+/* the diver: brass helmet, canvas suit, lead boots, plodding the sand and
+ * bobbing on his own air (tank.h). `dir` faces him. */
+static void draw_diver(ctx_t *c, const tank_t *t) {
+    float dx, dy; int dir; bool resting;
+    tank_diver_state(t, &dx, &dy, &dir, &resting);
+    src_t canvas = src_color(0x60707a, c->dim), canvas_d = src_color(0x404c56, c->dim),
+          canvas_l = src_color(0x84929c, c->dim), boot = src_color(0x3a3430, c->dim),
+          brass = src_color(0xc69634, c->dim), brass_d = src_color(0x8c641c, c->dim);
+    float top = dy - DIVER_H;                        /* the crown of the helmet */
+    /* the suit: a soft body, wider at the hips */
+    for (int y = 0; y < 22; y++) {
+        float u = (float)y / 22.0f;
+        float half = 7.0f + 3.0f * u;
+        const src_t *sp = (y % 5 == 4) ? &canvas_d : u < 0.1f ? &canvas_l : &canvas;
+        span(c, (int)(dx - half), (int)(dx + half), (int)(top + 18 + y), sp, 255);
+    }
+    /* the arms: the leading one swings as he walks */
+    float swing = resting ? 0.0f : fast_sin(t->clock * 2.0f) * 4.0f;
+    for (int y = 0; y < 12; y++) {
+        span(c, (int)(dx - 12 - (dir > 0 ? 0 : 1)), (int)(dx - 9), (int)(top + 21 + y + (dir > 0 ? swing : -swing)), &canvas, 255);
+        span(c, (int)(dx + 9), (int)(dx + 12 + (dir > 0 ? 1 : 0)), (int)(top + 21 + y + (dir > 0 ? -swing : swing)), &canvas, 255);
+    }
+    /* the lead boots, planted on the sand */
+    for (int y = 0; y < 6; y++) {
+        span(c, (int)(dx - 10), (int)(dx - 3), (int)(dy - 6 + y), &boot, 255);
+        span(c, (int)(dx + 3), (int)(dx + 10), (int)(dy - 6 + y), &boot, 255);
+    }
+    /* the helmet, and the little window he looks out of */
+    fill_ellipse(c, dx, top + 9, 10, 10, 0xc69634, 255);
+    fill_ellipse(c, dx - 3 * dir, top + 6, 4, 3, 0xf6d06c, 170);       /* its sheen */
+    for (int y = 0; y < 3; y++) span(c, (int)(dx - 8), (int)(dx + 8), (int)(top + 17 + y), &brass_d, 255);
+    { ctx_t lit = *c; if (t->night) lit.dim = 1.0f;                     /* the glass, lit from inside */
+      fill_ellipse(&lit, dx + 4 * dir, top + 9, 5, 4, 0x96e2ee, 255);
+      fill_ellipse(&lit, dx + 5 * dir, top + 8, 2, 1.5f, 0xe2faff, 220); }
+    for (int i = -1; i <= 1; i += 2)                                    /* the bolts round the faceplate */
+        fill_ellipse(c, dx + 7 * dir, top + 9 + i * 5, 1.5f, 1.5f, 0xf6d06c, 220);
+    (void)brass;
+}
+
 /* every festival piece on layer z (DECOR_Z_*), in item order */
 static void draw_rave_layer(ctx_t *c, const tank_t *t, int z) {
-    for (int i = SD_IDX_LASER; i <= SD_IDX_DISCO; i++) {
+    for (int i = SD_IDX_LASER; i <= SD_IDX_DIVER; i++) {
         if (!tank_bit_live(t, SD_ITEMS[i].bit) || tank_decor_z(t, i) != z) continue;
         if (i == SD_IDX_LASER) draw_laser(c, t);
         else if (i == SD_IDX_BASS) draw_bass(c, t);
         else if (i == SD_IDX_GLOW) draw_glow(c, t);
         else if (i == SD_IDX_TOTEM) draw_totem(c, t, false);
+        else if (i == SD_IDX_CHEST) draw_chest(c, t);
+        else if (i == SD_IDX_DIVER) draw_diver(c, t);
         else draw_disco(c, t);
     }
 }
@@ -2419,7 +2528,7 @@ static int  g_shp_page;              /* the shelf on show */
 static const icon_t *shop_icon(int item) {
     static const icon_t *const ic[SD_ITEM_COUNT] = { &icon_shop_plant, &icon_shop_snail, &icon_shop_castle,
                                                      &icon_shop_laser, &icon_shop_bass, &icon_shop_glow, &icon_shop_totem,
-                                                     &icon_shop_disco };
+                                                     &icon_shop_disco, &icon_shop_chest, &icon_shop_diver };
     return ic[item];
 }
 static int shop_page_rows(int page) { int n = SD_ITEM_COUNT - page * SHP_PAGE_ROWS; return n > SHP_PAGE_ROWS ? SHP_PAGE_ROWS : n; }

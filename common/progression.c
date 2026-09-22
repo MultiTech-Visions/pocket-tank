@@ -124,6 +124,15 @@ typedef struct {
                                             biased by one and a zero means "never set" = NORMAL. */
     uint8_t  reef_hide;                  /* the keeper asked for the reef to be out of sight
                                             (settings, 2026-09-22) - built, kept, not drawn */
+    /* The chest and the diver (2026-09-22) took SD_ITEM_COUNT past the eight
+     * slots decor_x was written with, and that array CANNOT grow: it sits in
+     * the middle of the tail and every byte after it would move, so an
+     * existing save would read its reef and its settings out of the wrong
+     * place. Their spots are appended here instead, which is the same
+     * append-only rule the rest of this tail follows. Zero = never placed =
+     * the default spot, which is what an older save gives. */
+    float    decor_x_extra[SD_ITEM_N - SD_DECOR_SAVE_N];
+    uint8_t  decor_z1_extra[SD_ITEM_N - SD_DECOR_SAVE_N];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -182,6 +191,8 @@ const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {   /* rows in SD_IDX_* order; the BIT
     { SD_ITEM_GLOW,   "glow",   "GLOW STICKS", "CRACKED AND SCATTERED.",    "THEY GLOW AFTER DARK",         SD_PRICE_GLOW },
     { SD_ITEM_TOTEM,  "totem",  "TOTEM",       "A RAIL TOTEM IN THE SAND.", "FIND YOUR FRIENDS BY IT",      SD_PRICE_TOTEM },
     { SD_ITEM_DISCO,  "disco",  "DISCO BALL",  "IT DROPS AND SPINS WHEN",   "THE PARTY STARTS. OR TAP IT",  SD_PRICE_DISCO },
+    { SD_ITEM_CHEST,  "chest",  "TREASURE",    "IT CREAKS OPEN NOW AND",    "THEN AND BREATHES BUBBLES",    SD_PRICE_CHEST },
+    { SD_ITEM_DIVER,  "diver",  "DIVER",       "BRASS HELMET, SLOW WALK.",  "TAP HIM TO TURN HIM ROUND",    SD_PRICE_DIVER },
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
@@ -235,7 +246,7 @@ bool progression_save_tail_is_last(void) {
        8-byte aligned (it carries an int64), so an exact == would fail purely
        on padding. What this really asserts is that no upstream sync has
        appended a named field after this fork's tail. */
-    size_t end = offsetof(save_t, reef_hide) + sizeof(((save_t *)0)->reef_hide);
+    size_t end = offsetof(save_t, decor_z1_extra) + sizeof(((save_t *)0)->decor_z1_extra);
     return end <= sizeof(save_t) && sizeof(save_t) - end < _Alignof(save_t);
 }
 bool progression_stow(tank_t *t, int item, bool stow) {
@@ -622,6 +633,13 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         int z = sv.decor_z1[i] - 1 < DECOR_Z_N ? sv.decor_z1[i] - 1 : DECOR_Z_MIDDLE;
         if (sv.decor_x[i] > 0) tank_decor_set(t, i, sv.decor_x[i], z); else t->decor_z[i] = (uint8_t)z;   /* x 0 = the default spot */
     }
+    for (int i = SD_DECOR_SAVE_N; i < SD_ITEM_COUNT; i++) {            /* ... and the appended slots */
+        int k = i - SD_DECOR_SAVE_N;
+        if (!sv.decor_z1_extra[k] || !tank_decor_placeable(i)) continue;
+        int z = sv.decor_z1_extra[k] - 1 < DECOR_Z_N ? sv.decor_z1_extra[k] - 1 : DECOR_Z_MIDDLE;
+        if (sv.decor_x_extra[k] > 0) tank_decor_set(t, i, sv.decor_x_extra[k], z);
+        else t->decor_z[i] = (uint8_t)z;
+    }
     t->sd_stowed = sv.sd_stowed & t->sd_unlocks;     /* an older save reads 0: everything owned is in the tank */
     for (int i = 0; i < t->n_fish; i++) t->fish[i].parties = sv.fish_parties[i];
     /* stored biased by one: 0 is "this save predates the setting" = NORMAL */
@@ -818,6 +836,11 @@ void progression_save(tank_t *t) {
     sv.castle_x = t->decor_x[SD_IDX_CASTLE] > 0 ? t->decor_x[SD_IDX_CASTLE] : 0; sv.castle_z1 = (uint8_t)(t->decor_z[SD_IDX_CASTLE] + 1);
     for (int i = 0; i < SD_ITEM_COUNT && i < SD_DECOR_SAVE_N; i++) {
         sv.decor_x[i] = t->decor_x[i] > 0 ? t->decor_x[i] : 0; sv.decor_z1[i] = (uint8_t)(t->decor_z[i] + 1);
+    }
+    for (int i = SD_DECOR_SAVE_N; i < SD_ITEM_COUNT; i++) {          /* the appended slots (the chest, the diver) */
+        int k = i - SD_DECOR_SAVE_N;
+        sv.decor_x_extra[k] = t->decor_x[i] > 0 ? t->decor_x[i] : 0;
+        sv.decor_z1_extra[k] = (uint8_t)(t->decor_z[i] + 1);
     }
     for (int i = 0; i < GLOW_N; i++) {               /* a carried stick saves where it is; it lands on the next boot */
         sv.glow_x[i] = t->glow[i].x; sv.glow_y[i] = t->glow[i].y; sv.glow_ang[i] = t->glow[i].ang;
