@@ -260,8 +260,10 @@ seventy-five seconds all in. With no speaker it is simply a parade to the
 middle of the tank and a walk home.
 
 **And you can hear it.** While that party runs the device plays the club from
-outside: a four-on-the-floor with everything above a few hundred hertz gone,
-the way it sounds through a wall, at the same 140 BPM the rig is thumping at.
+outside: a four-on-the-floor at the same 140 BPM the rig is thumping at, dull
+and soft-edged, breathing as if a door keeps opening. The distance is acted
+rather than filtered - a genuinely muffled mix lives below 600 Hz and the
+12 mm speaker cannot say a word of it.
 There is a MUSIC row in Settings for it, and that row only appears once the
 tank holds both the speaker and the totem - with nothing to party at, there
 is nothing to hear.
